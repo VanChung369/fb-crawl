@@ -53,3 +53,28 @@ def test_canonicalize_targets_filters_kind_deduplicates_and_limits() -> None:
         facebook_url_kind("https://www.facebook.com/profile.php?id=100013976614656")
         is TargetKind.PEOPLE
     )
+
+
+def test_rejects_places_urls_from_page_targets() -> None:
+    places_url = (
+        "https://www.facebook.com/places/"
+        "Hoat-dong-giai-tri-tai-Ha-Noi/106388046062960/"
+    )
+
+    assert normalize_facebook_url(places_url) is None
+
+    assert (
+        normalize_facebook_url("https://m.facebook.com/places/restaurants/12345/")
+        is None
+    )
+
+    assert canonicalize_targets(
+        [
+            places_url,
+            "https://www.facebook.com/example",
+        ],
+        target=TargetKind.PAGES,
+        limit=5,
+    ) == [
+        "https://www.facebook.com/example",
+    ]

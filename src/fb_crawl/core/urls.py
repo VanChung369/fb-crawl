@@ -36,6 +36,7 @@ FACEBOOK_INTERNAL_PATHS = {
     "photo",
     "photo.php",
     "photos",
+    "places",
     "plugins",
     "policies",
     "privacy",
