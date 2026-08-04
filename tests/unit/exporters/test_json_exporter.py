@@ -1,0 +1,44 @@
+import json
+from pathlib import Path
+
+from fb_crawl.core.models import (
+    PageRecord,
+    ScrapeResult,
+    ScrapeStats,
+)
+from fb_crawl.exporters.json import write_json
+
+
+def test_json_writes_full_result_envelope(
+    tmp_path: Path,
+) -> None:
+    result = ScrapeResult(
+        records=(
+            PageRecord(
+                canonical_url=("https://www.facebook.com/good"),
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(
+            requested=1,
+            discovered=0,
+            succeeded=1,
+            failed=0,
+        ),
+    )
+
+    destination = tmp_path / "pages.json"
+
+    assert (
+        write_json(
+            result,
+            destination,
+        )
+        is True
+    )
+
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+
+    assert payload["records"][0]["canonical_url"].endswith("/good")
+
+    assert payload["stats"]["succeeded"] == 1
