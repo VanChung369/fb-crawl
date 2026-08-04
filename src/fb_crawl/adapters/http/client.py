@@ -70,6 +70,7 @@ class CurlHttpClient:
                     url,
                     headers=request_headers,
                     timeout=self._settings.timeout_seconds,
+                    impersonate="chrome",
                 )
                 response.raise_for_status()
                 return str(response.text)

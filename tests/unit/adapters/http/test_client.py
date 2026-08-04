@@ -45,6 +45,7 @@ def test_client_returns_text_and_uses_timeout_and_headers() -> None:
     assert result == "<html>ok</html>"
     assert calls[0]["timeout"] == 7
     assert "User-Agent" in calls[0]["headers"]
+    assert calls[0]["impersonate"] == "chrome"
 
 
 def test_client_retries_only_configured_times_and_hides_query() -> None:
