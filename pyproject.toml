@@ -19,3 +19,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[project.scripts]
+fb-crawl = "fb_crawl.cli.app:main"
