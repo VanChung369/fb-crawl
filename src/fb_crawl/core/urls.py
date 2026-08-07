@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import (
+    parse_qs,
+    urlencode,
+    urljoin,
+    urlparse,
+)
 
 from fb_crawl.core.models import TargetKind
 
@@ -290,3 +295,87 @@ def normalize_members_url(
         return None
 
     return "https://www.facebook.com/groups/" f"{parts[1]}/members"
+
+
+def normalize_comments_url(
+    value: str | None,
+) -> str | None:
+    parsed = _facebook_parts(value)
+
+    if parsed is None:
+        return None
+
+    parts, query = parsed
+    lowered = [part.lower() for part in parts]
+
+    # Group post:
+    # /groups/<group-id>/posts/<post-id>
+    if (
+        len(parts) == 4
+        and lowered[0] == "groups"
+        and lowered[2] == "posts"
+        and all(_valid_authenticated_id(item) for item in (parts[1], parts[3]))
+    ):
+        return "https://www.facebook.com/groups/" f"{parts[1]}/posts/{parts[3]}"
+
+    # Page post or video:
+    # /<page>/posts/<id>
+    # /<page>/videos/<id>
+    if (
+        len(parts) == 3
+        and lowered[1] in {"posts", "videos"}
+        and lowered[0] not in FACEBOOK_INTERNAL_PATHS
+        and all(_valid_authenticated_id(item) for item in (parts[0], parts[2]))
+    ):
+        return "https://www.facebook.com/" f"{parts[0]}/{lowered[1]}/{parts[2]}"
+
+    # Reel:
+    # /reel/<id>
+    if len(parts) == 2 and lowered[0] == "reel" and _valid_authenticated_id(parts[1]):
+        return "https://www.facebook.com/reel/" f"{parts[1]}"
+
+    # permalink.php?story_fbid=<id>&id=<owner-id>
+    if len(parts) == 1 and lowered[0] == "permalink.php":
+        story_id = query.get(
+            "story_fbid",
+            [""],
+        )[0]
+
+        owner_id = query.get(
+            "id",
+            [""],
+        )[0]
+
+        if not _valid_authenticated_id(story_id):
+            return None
+
+        values = [("story_fbid", story_id)]
+
+        if _valid_authenticated_id(owner_id):
+            values.append(("id", owner_id))
+
+        return "https://www.facebook.com/permalink.php?" + urlencode(values)
+
+    # photo.php?fbid=<id>&id=<owner-id>
+    if len(parts) == 1 and lowered[0] == "photo.php":
+        photo_id = query.get(
+            "fbid",
+            [""],
+        )[0]
+
+        owner_id = query.get(
+            "id",
+            [""],
+        )[0]
+
+        if not _valid_authenticated_id(photo_id):
+            return None
+
+        values = [("fbid", photo_id)]
+
+        if _valid_authenticated_id(owner_id):
+            values.append(("id", owner_id))
+
+        return "https://www.facebook.com/photo.php?" + urlencode(values)
+
+    return None
