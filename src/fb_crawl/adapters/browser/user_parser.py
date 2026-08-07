@@ -10,10 +10,28 @@ from urllib.parse import (
 from bs4 import BeautifulSoup
 
 from fb_crawl.core.models import UserRecord
-from fb_crawl.core.urls import FACEBOOK_HOSTS
+from fb_crawl.core.urls import (
+    FACEBOOK_HOSTS,
+    FACEBOOK_INTERNAL_PATHS,
+)
 
 FACEBOOK_BASE = "https://www.facebook.com"
+
 USER_ID = re.compile(r"[A-Za-z0-9._-]+")
+
+PROFILE_LINK_CLASS = "_a6hd"
+
+ACTION_LABELS = frozenset(
+    item.casefold()
+    for item in (
+        "Reply",
+        "Share",
+        "Like",
+        "Trả lời",
+        "Thích",
+        "Chia sẻ",
+    )
+)
 
 
 def _name(anchor) -> str | None:
@@ -25,6 +43,12 @@ def _name(anchor) -> str | None:
     aria_label = str(anchor.get("aria-label") or "").strip()
 
     return aria_label or None
+
+
+def _is_action_label(
+    name: str | None,
+) -> bool:
+    return name is not None and name.casefold() in ACTION_LABELS
 
 
 def _identity(
@@ -58,6 +82,16 @@ def _identity(
             "id",
             [""],
         )[0]
+
+    elif len(parts) >= 2 and parts[0].lower() == "user":
+        user_id = parts[1]
+
+    elif (
+        len(parts) == 1
+        and PROFILE_LINK_CLASS in anchor.get("class", [])
+        and parts[0].lower() not in FACEBOOK_INTERNAL_PATHS
+    ):
+        user_id = parts[0]
 
     else:
         return None
@@ -96,7 +130,9 @@ class UserParser:
         ):
             identity = _identity(anchor)
 
-            if identity is None:
+            name = _name(anchor)
+
+            if identity is None or _is_action_label(name):
                 continue
 
             user_id, profile_url = identity
@@ -109,7 +145,7 @@ class UserParser:
             records.append(
                 UserRecord(
                     user_id=user_id,
-                    name=_name(anchor),
+                    name=name,
                     profile_url=profile_url,
                     source=source,
                     source_url=source_url,
