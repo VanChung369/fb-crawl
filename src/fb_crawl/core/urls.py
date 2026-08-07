@@ -14,6 +14,8 @@ FACEBOOK_HOSTS = {
     "web.facebook.com",
 }
 
+AUTHENTICATED_ID = re.compile(r"[A-Za-z0-9._-]+")
+
 
 FACEBOOK_INTERNAL_PATHS = {
     "about",
@@ -236,3 +238,55 @@ def canonicalize_targets(
             break
 
     return result
+
+
+def _facebook_parts(
+    value: str | None,
+) -> tuple[list[str], dict[str, list[str]]] | None:
+    if not value:
+        return None
+
+    parsed = urlparse(
+        _absolute_candidate(
+            value,
+            None,
+        )
+    )
+
+    host = parsed.netloc.lower().split(":")[0]
+
+    if host not in FACEBOOK_HOSTS:
+        return None
+
+    parts = [part for part in parsed.path.split("/") if part]
+
+    return parts, parse_qs(parsed.query)
+
+
+def _valid_authenticated_id(value: str) -> bool:
+    return AUTHENTICATED_ID.fullmatch(value) is not None
+
+
+def normalize_members_url(
+    value: str | None,
+) -> str | None:
+    parsed = _facebook_parts(value)
+
+    if parsed is None:
+        return None
+
+    parts, _ = parsed
+
+    if len(parts) not in {2, 3}:
+        return None
+
+    if parts[0].lower() != "groups":
+        return None
+
+    if not _valid_authenticated_id(parts[1]):
+        return None
+
+    if len(parts) == 3 and parts[2].lower() != "members":
+        return None
+
+    return "https://www.facebook.com/groups/" f"{parts[1]}/members"
