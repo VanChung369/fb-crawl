@@ -8,6 +8,7 @@ JsonScalar = str | int | float | bool | None
 
 RecordT = TypeVar("RecordT")
 
+
 class ScrapeMode(StrEnum):
     PUBLIC = "public"
     AUTHENTICATED = "authenticated"
@@ -19,20 +20,28 @@ class PublicAction(StrEnum):
     CRAWL = "crawl"
 
 
+class AuthenticatedAction(StrEnum):
+    MEMBERS = "members"
+    COMMENTS = "comments"
+    BATCH = "batch"
+
+
 class TargetKind(StrEnum):
     PAGES = "pages"
     PEOPLE = "people"
     ALL = "all"
+
 
 class ContactKind(StrEnum):
     PHONE = "phone"
     EMAIL = "email"
     WEBSITE = "website"
 
+
 @dataclass(frozen=True, slots=True)
-class ScrapeRequest: 
+class ScrapeRequest:
     mode: ScrapeMode
-    action: PublicAction | str
+    action: PublicAction | AuthenticatedAction | str
     targets: tuple[str, ...]
     keyword: str | None = None
     target_kind: TargetKind = TargetKind.PAGES
@@ -40,10 +49,14 @@ class ScrapeRequest:
     depth: int = 0
     max_nodes: int = 20
     delay_seconds: float = 0.0
+    steps: int = 5
 
     def __post_init__(self) -> None:
         if self.limit <= 0:
             raise ValueError("limit must be greater than 0")
+
+        if self.steps <= 0:
+            raise ValueError("steps must be greater than 0")
 
         if self.depth < 0:
             raise ValueError("depth must be greater than or equal to 0")
@@ -74,6 +87,16 @@ class PageRecord:
     depth: int = 0
     discovery_source: str = "seed"
 
+
+@dataclass(frozen=True, slots=True)
+class UserRecord:
+    user_id: str
+    name: str | None
+    profile_url: str
+    source: str
+    source_url: str
+
+
 @dataclass(frozen=True, slots=True)
 class ScrapeIssue:
     code: str
@@ -90,6 +113,7 @@ class ScrapeStats:
     discovered: int
     succeeded: int
     failed: int
+
 
 @dataclass(frozen=True, slots=True)
 class ScrapeResult(Generic[RecordT]):
