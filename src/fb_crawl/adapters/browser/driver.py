@@ -12,6 +12,7 @@ from fb_crawl.core.exceptions import (
 
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium import webdriver
 
 
 def _apply_proxy(
@@ -122,3 +123,15 @@ def wait_for_document_ready(
 
     except WebDriverException as error:
         raise BrowserNavigationError("Facebook page readiness timed out.") from error
+
+
+def create_firefox_driver(
+    settings: BrowserSettings,
+):
+    try:
+        return webdriver.Firefox(options=build_firefox_options(settings))
+
+    except WebDriverException as error:
+        raise ConfigurationError(
+            "Could not start Firefox. " "Install Firefox and the browser extra."
+        ) from error

@@ -2,10 +2,12 @@ import pytest
 
 from fb_crawl.adapters.browser.driver import (
     build_firefox_options,
+    create_firefox_driver,
     wait_for_document_ready,
 )
 from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import ConfigurationError
+from selenium.common.exceptions import WebDriverException
 
 
 def test_firefox_options_include_headless_window_and_http_proxy() -> None:
@@ -90,3 +92,45 @@ def test_document_ready_wait_uses_explicit_timeout(
     )
 
     assert observed == [12.5]
+
+
+def test_create_firefox_driver_uses_generated_options(
+    monkeypatch,
+) -> None:
+    created = object()
+    observed = []
+
+    def fake_firefox(*, options):
+        observed.append(options)
+        return created
+
+    monkeypatch.setattr(
+        "fb_crawl.adapters.browser.driver.webdriver.Firefox",
+        fake_firefox,
+    )
+
+    result = create_firefox_driver(BrowserSettings(headless=True))
+
+    assert result is created
+    assert len(observed) == 1
+    assert "-headless" in observed[0].arguments
+
+
+def test_create_firefox_driver_sanitizes_startup_failure(
+    monkeypatch,
+) -> None:
+    def fail_to_start(*, options):
+        raise WebDriverException("private driver path")
+
+    monkeypatch.setattr(
+        "fb_crawl.adapters.browser.driver.webdriver.Firefox",
+        fail_to_start,
+    )
+
+    with pytest.raises(
+        ConfigurationError,
+        match="Could not start Firefox",
+    ) as captured:
+        create_firefox_driver(BrowserSettings())
+
+    assert "private driver path" not in captured.value.safe_message
