@@ -9,7 +9,10 @@ from urllib.parse import (
     urlparse,
 )
 
-from fb_crawl.core.models import TargetKind
+from fb_crawl.core.models import (
+    AuthenticatedAction,
+    TargetKind,
+)
 
 FACEBOOK_HOSTS = {
     "facebook.com",
@@ -377,5 +380,27 @@ def normalize_comments_url(
             values.append(("id", owner_id))
 
         return "https://www.facebook.com/photo.php?" + urlencode(values)
+
+    return None
+
+
+def classify_authenticated_url(
+    value: str | None,
+) -> tuple[AuthenticatedAction, str] | None:
+    members = normalize_members_url(value)
+
+    if members is not None:
+        return (
+            AuthenticatedAction.MEMBERS,
+            members,
+        )
+
+    comments = normalize_comments_url(value)
+
+    if comments is not None:
+        return (
+            AuthenticatedAction.COMMENTS,
+            comments,
+        )
 
     return None

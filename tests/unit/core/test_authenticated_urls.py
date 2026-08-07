@@ -1,9 +1,12 @@
 import pytest
 
 from fb_crawl.core.urls import (
+    classify_authenticated_url,
     normalize_comments_url,
     normalize_members_url,
 )
+
+from fb_crawl.core.models import AuthenticatedAction
 
 
 @pytest.mark.parametrize(
@@ -93,3 +96,31 @@ def test_comments_url_rejects_unsupported_targets(
     raw: str,
 ) -> None:
     assert normalize_comments_url(raw) is None
+
+
+def test_batch_classifier_returns_action_and_normalized_url() -> None:
+    assert classify_authenticated_url("https://facebook.com/groups/1") == (
+        AuthenticatedAction.MEMBERS,
+        "https://www.facebook.com/groups/1/members",
+    )
+
+    assert classify_authenticated_url("https://facebook.com/acme/posts/2") == (
+        AuthenticatedAction.COMMENTS,
+        "https://www.facebook.com/acme/posts/2",
+    )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://www.facebook.com/places/Ha-Noi/123",
+        "https://www.facebook.com/login",
+        "https://www.facebook.com/checkpoint/",
+        "https://www.facebook.com/example",
+        "https://example.test/groups/1",
+    ],
+)
+def test_batch_classifier_rejects_unsupported_urls(
+    raw: str,
+) -> None:
+    assert classify_authenticated_url(raw) is None
