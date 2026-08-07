@@ -11,6 +11,8 @@ requires-python = ">=3.12"
 dependencies = ["curl-cffi", "selectolax"]
 
 [project.optional-dependencies]
+browser = ["selenium>=4.16,<5", "beautifulsoup4>=4.12,<5"]
+xlsx = ["openpyxl>=3.1,<4"]
 dev = ["pytest"]
 
 [tool.setuptools.packages.find]
