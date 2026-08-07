@@ -1,12 +1,17 @@
 from fb_crawl.core.exceptions import (
+    BrowserNavigationError,
+    BrowserParseError,
     ConfigurationError,
     ExportError,
     FbCrawlError,
     FetchError,
     ParseError,
+    SessionError,
     ValidationError,
 )
+
 from fb_crawl.core.models import (
+    AuthenticatedAction,
     ContactKind,
     ContactRecord,
     PageRecord,
@@ -17,9 +22,13 @@ from fb_crawl.core.models import (
     ScrapeResult,
     ScrapeStats,
     TargetKind,
+    UserRecord,
 )
 
 __all__ = [
+    "AuthenticatedAction",
+    "BrowserNavigationError",
+    "BrowserParseError",
     "ConfigurationError",
     "ContactKind",
     "ContactRecord",
@@ -34,6 +43,8 @@ __all__ = [
     "ScrapeRequest",
     "ScrapeResult",
     "ScrapeStats",
+    "SessionError",
     "TargetKind",
+    "UserRecord",
     "ValidationError",
 ]
