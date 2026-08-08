@@ -7,6 +7,7 @@ from fb_crawl.core.models import (
     ScrapeStats,
 )
 from fb_crawl.exporters.json import write_json
+from fb_crawl.exporters.schema import UNIFIED_FIELDS
 
 
 def test_json_writes_full_result_envelope(
@@ -16,6 +17,8 @@ def test_json_writes_full_result_envelope(
         records=(
             PageRecord(
                 canonical_url=("https://www.facebook.com/good"),
+                page_name="Good",
+                uid="100",
             ),
         ),
         issues=(),
@@ -39,6 +42,10 @@ def test_json_writes_full_result_envelope(
 
     payload = json.loads(destination.read_text(encoding="utf-8"))
 
-    assert payload["records"][0]["canonical_url"].endswith("/good")
+    assert tuple(payload["records"][0]) == UNIFIED_FIELDS
+    assert payload["records"][0]["user_id"] == "100"
+    assert payload["records"][0]["name"] == "Good"
+    assert payload["records"][0]["username"] == "good"
+    assert payload["records"][0]["profile_url"].endswith("/good")
 
     assert payload["stats"]["succeeded"] == 1

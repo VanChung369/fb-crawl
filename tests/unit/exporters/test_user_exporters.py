@@ -12,6 +12,7 @@ from fb_crawl.core.models import (
     UserRecord,
 )
 from fb_crawl.exporters.users import write_users
+from fb_crawl.exporters.schema import UNIFIED_FIELDS
 from fb_crawl.core.exceptions import (
     ConfigurationError,
     ExportError,
@@ -22,16 +23,16 @@ def result() -> ScrapeResult[UserRecord]:
     return ScrapeResult(
         records=(
             UserRecord(
-                user_id="100",
+                user_id="synthetic.user",
                 name="Synthetic User",
-                profile_url="https://www.facebook.com/profile.php?id=100",
+                profile_url="https://www.facebook.com/synthetic.user",
                 source="members",
                 source_url="https://www.facebook.com/groups/1/members",
             ),
             UserRecord(
-                user_id="100",
+                user_id="synthetic.user",
                 name="Duplicate",
-                profile_url="https://www.facebook.com/profile.php?id=100",
+                profile_url="https://www.facebook.com/synthetic.user",
                 source="comments",
                 source_url="https://www.facebook.com/acme/posts/1",
             ),
@@ -62,9 +63,15 @@ def test_user_csv_deduplicates_and_appends_issue_rows(
     assert write_users(result(), path, "csv") is True
 
     with path.open(encoding="utf-8-sig") as file:
-        rows = list(csv.DictReader(file))
+        reader = csv.DictReader(file)
+        rows = list(reader)
 
-    assert [row["user_id"] for row in rows] == ["100", ""]
+    assert reader.fieldnames == list(UNIFIED_FIELDS)
+    assert [row["user_id"] for row in rows] == ["synthetic.user", ""]
+    assert rows[0]["username"] == "synthetic.user"
+    assert rows[0]["page_name"] == ""
+    assert rows[0]["address"] == ""
+    assert rows[0]["phone_numbers"] == ""
     assert rows[1]["error_code"] == "authenticated_navigation_failed"
 
 
@@ -75,7 +82,9 @@ def test_user_json_keeps_full_result_envelope(tmp_path: Path) -> None:
 
     payload = json.loads(path.read_text(encoding="utf-8"))
 
-    assert payload["records"][0]["user_id"] == "100"
+    assert tuple(payload["records"][0]) == UNIFIED_FIELDS
+    assert payload["records"][0]["user_id"] == "synthetic.user"
+    assert payload["records"][0]["username"] == "synthetic.user"
     assert len(payload["records"]) == 1
     assert payload["stats"]["failed"] == 1
 
@@ -89,7 +98,7 @@ def test_user_txt_writes_records_and_target_issues(
 
     content = path.read_text(encoding="utf-8")
 
-    assert "User ID: 100" in content
+    assert "User ID: synthetic.user" in content
     assert "Error: [authenticated_navigation_failed]" in content
 
 
@@ -126,14 +135,22 @@ def test_user_xlsx_uses_the_same_schema(tmp_path: Path) -> None:
     assert rows[0] == (
         "user_id",
         "name",
+        "username",
+        "page_name",
+        "category",
+        "website",
+        "address",
+        "phone_numbers",
+        "phone_sources",
         "profile_url",
         "source",
         "source_url",
         "error_code",
         "error_message",
     )
-    assert rows[1][0] == "100"
-    assert rows[2][5] == "authenticated_navigation_failed"
+    assert rows[1][0] == "synthetic.user"
+    assert rows[1][2] == "synthetic.user"
+    assert rows[2][12] == "authenticated_navigation_failed"
 
 
 def test_xlsx_missing_dependency_does_not_change_format(

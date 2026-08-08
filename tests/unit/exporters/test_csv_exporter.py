@@ -2,6 +2,8 @@ import csv
 from pathlib import Path
 
 from fb_crawl.core.models import (
+    ContactKind,
+    ContactRecord,
     PageRecord,
     PublicAction,
     ScrapeIssue,
@@ -10,6 +12,7 @@ from fb_crawl.core.models import (
     ScrapeStats,
 )
 from fb_crawl.exporters.csv import write_csv
+from fb_crawl.exporters.schema import UNIFIED_FIELDS
 
 
 def test_empty_result_preserves_existing_csv(
@@ -52,6 +55,17 @@ def test_csv_writes_success_and_issue_rows(
             PageRecord(
                 canonical_url=("https://www.facebook.com/good"),
                 page_name="Good",
+                uid="100",
+                category="Public figure",
+                website="https://good.example",
+                address="123 Example Street, Ha Noi",
+                contacts=(
+                    ContactRecord(
+                        kind=ContactKind.PHONE,
+                        value="+84 123 456 789",
+                        sources=("facebook:profile_card",),
+                    ),
+                ),
             ),
         ),
         issues=(
@@ -83,7 +97,18 @@ def test_csv_writes_success_and_issue_rows(
     )
 
     with destination.open(encoding="utf-8-sig") as file:
-        rows = list(csv.DictReader(file))
+        reader = csv.DictReader(file)
+        rows = list(reader)
 
+    assert reader.fieldnames == list(UNIFIED_FIELDS)
+    assert rows[0]["user_id"] == "100"
+    assert rows[0]["name"] == "Good"
+    assert rows[0]["username"] == "good"
     assert rows[0]["page_name"] == "Good"
+    assert rows[0]["address"] == "123 Example Street, Ha Noi"
+    assert rows[0]["phone_numbers"] == "+84 123 456 789"
+    assert rows[0]["profile_url"] == "https://www.facebook.com/good"
+    assert rows[0]["source_url"] == "https://www.facebook.com/good"
+    assert rows[1]["source"] == PublicAction.PAGE.value
+    assert rows[1]["source_url"] == "https://www.facebook.com/bad"
     assert rows[1]["error_code"] == "public_fetch_failed"

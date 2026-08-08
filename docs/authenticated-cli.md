@@ -80,8 +80,13 @@ runtime/output/batch.csv
 CSV and XLSX columns are:
 
 ```text
-user_id,name,profile_url,source,source_url,error_code,error_message
+user_id,name,username,page_name,category,website,address,phone_numbers,phone_sources,profile_url,source,source_url,error_code,error_message
 ```
+
+Authenticated member/comment records populate the common identity and source
+fields. Page-specific and phone fields remain empty when they are not
+available. Public output uses the exact same schema and populates page-specific
+fields when found.
 
 JSON contains `records`, `issues`, and `stats`.
 

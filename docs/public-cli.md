@@ -148,19 +148,22 @@ Writes use a temporary file in the destination directory followed by an atomic r
 
 CSV files use UTF-8 with a BOM for spreadsheet compatibility.
 
-| Field           | Description                                       |
-| --------------- | ------------------------------------------------- |
-| `url`           | Canonical Facebook URL or failed target URL.      |
-| `page_name`     | Parsed public page/profile name.                  |
-| `uid`           | Facebook page/profile identifier when found.      |
-| `category`      | Public profile category.                          |
-| `website`       | Public website value.                             |
-| `phone_numbers` | Phone values separated by `; `.                   |
-| `phone_sources` | Sources contributing phone values.                |
-| `depth`         | Crawl depth.                                      |
-| `source`        | Seed, keyword, group, or parent discovery source. |
-| `error_code`    | Stable error code for an issue row.               |
-| `error_message` | Safe error message for an issue row.              |
+| Field           | Description                                                        |
+| --------------- | ------------------------------------------------------------------ |
+| `user_id`       | Facebook page/profile identifier when found.                       |
+| `name`          | Common display name; public records use the parsed page name.       |
+| `username`      | Vanity username derived from a supported profile URL.              |
+| `page_name`     | Parsed public page/profile name; empty for authenticated users.     |
+| `category`      | Public profile category; empty when not applicable.                |
+| `website`       | Public website value; empty when not applicable.                   |
+| `address`       | Public address value; empty when not available or not applicable.  |
+| `phone_numbers` | Phone values separated by `; `.                                    |
+| `phone_sources` | Sources contributing phone values.                                 |
+| `profile_url`   | Canonical Facebook page/profile URL.                               |
+| `source`        | Discovery source for records or action name for issue rows.        |
+| `source_url`    | URL from which the record was collected or the failed target URL.  |
+| `error_code`    | Stable error code for an issue row.                                |
+| `error_message` | Safe error message for an issue row.                               |
 
 Successful records are written first. Issues are then written as separate rows without discarding successful data.
 
@@ -181,21 +184,11 @@ JSON output contains a complete result envelope:
 }
 ```
 
-Each record can contain:
-
-- `canonical_url`
-- `page_name`
-- `uid`
-- `category`
-- `website`
-- `contacts`
-- `metadata`
-- `depth`
-- `discovery_source`
-
-Each contact contains `kind`, `value`, and `sources`.
-
-Each issue contains a stable `code`, safe `message`, target, mode, action, and whether the failure is retryable.
+Every item in `records` uses the same fields as CSV. Every item in `issues`
+uses that schema with record fields empty, `source` set to the action,
+`source_url` set to the failed target, and the safe error fields populated.
+This schema is shared with authenticated output so downstream consumers can
+load both modes without separate column mappings.
 
 ## Exit codes
 

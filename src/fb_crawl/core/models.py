@@ -82,6 +82,7 @@ class PageRecord:
     uid: str | None = None
     category: str | None = None
     website: str | None = None
+    address: str | None = None
     contacts: tuple[ContactRecord, ...] = ()
     metadata: Mapping[str, JsonScalar] = field(default_factory=dict)
     depth: int = 0

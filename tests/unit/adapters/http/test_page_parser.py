@@ -22,6 +22,7 @@ def test_parser_builds_typed_page_record() -> None:
     assert record.uid == "1156899667774877"
     assert record.category == "Spa"
     assert record.website == "example.com"
+    assert record.address == "123 Example Street, Ha Noi"
     assert record.metadata["likes_count"] == "1,234"
 
     assert [(contact.kind, contact.value) for contact in record.contacts] == [

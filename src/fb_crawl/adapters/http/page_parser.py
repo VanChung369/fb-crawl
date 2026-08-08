@@ -19,6 +19,8 @@ PROFILE_TYPES = {
     "INTRO_CARD_PROFILE_PHONE": ContactKind.PHONE,
     "INTRO_CARD_PROFILE_EMAIL": ContactKind.EMAIL,
     "INTRO_CARD_WEBSITE": ContactKind.WEBSITE,
+    "INTRO_CARD_ADDRESS": "address",
+    "INTRO_CARD_PROFILE_ADDRESS": "address",
 }
 
 
@@ -96,6 +98,7 @@ class PublicPageParser:
         category: str | None = None
         contacts: list[ContactRecord] = []
         website: str | None = None
+        address: str | None = None
 
         for mapping in mappings:
             item_type = mapping.get("timeline_context_list_item_type")
@@ -107,6 +110,10 @@ class PublicPageParser:
 
             if mapped == "category":
                 category = value
+                continue
+
+            if mapped == "address":
+                address = value
                 continue
 
             contacts.append(
@@ -172,7 +179,13 @@ class PublicPageParser:
 
         has_no_metadata = all(value is None for value in metadata.values())
 
-        if user is None and not contacts and has_no_metadata:
+        if (
+            user is None
+            and not contacts
+            and not category
+            and not address
+            and has_no_metadata
+        ):
             raise ParseError(
                 "No public page data found.",
                 target=canonical_url,
@@ -184,6 +197,7 @@ class PublicPageParser:
             uid=str(uid) if uid else None,
             category=category,
             website=website,
+            address=address,
             contacts=tuple(contacts),
             metadata=metadata,
         )

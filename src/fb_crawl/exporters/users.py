@@ -17,16 +17,13 @@ from fb_crawl.exporters.atomic import (
     atomic_text_writer,
 )
 from fb_crawl.exporters.json import write_json
-
-USER_FIELDS = (
-    "user_id",
-    "name",
-    "profile_url",
-    "source",
-    "source_url",
-    "error_code",
-    "error_message",
+from fb_crawl.exporters.schema import (
+    UNIFIED_FIELDS,
+    issue_row,
+    user_record_row,
 )
+
+USER_FIELDS = UNIFIED_FIELDS
 
 USER_FORMATS = frozenset(
     {
@@ -64,31 +61,8 @@ def _deduplicated_result(
 def _rows(
     result: ScrapeResult[UserRecord],
 ) -> list[dict[str, str]]:
-    rows = [
-        {
-            "user_id": record.user_id,
-            "name": record.name or "",
-            "profile_url": record.profile_url,
-            "source": record.source,
-            "source_url": record.source_url,
-            "error_code": "",
-            "error_message": "",
-        }
-        for record in result.records
-    ]
-
-    rows.extend(
-        {
-            "user_id": "",
-            "name": "",
-            "profile_url": "",
-            "source": issue.action,
-            "source_url": issue.target or "",
-            "error_code": issue.code,
-            "error_message": issue.message,
-        }
-        for issue in result.issues
-    )
+    rows = [user_record_row(record) for record in result.records]
+    rows.extend(issue_row(issue) for issue in result.issues)
 
     return rows
 
