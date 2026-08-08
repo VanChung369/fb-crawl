@@ -1,6 +1,6 @@
 # fb-crawl
 
-`fb-crawl` provides explicit public HTTP and authenticated browser modes. This phase implements the public CLI; it never reads a browser session or starts Selenium.
+`fb-crawl` provides explicit public HTTP and authenticated browser modes behind reusable service boundaries. Public mode never reads a browser session; authenticated mode starts only when selected explicitly.
 
 ## Requirements
 
@@ -28,11 +28,31 @@ Use `--format json` for the full result envelope or `--output PATH` to select a 
 
 Detailed options and output schemas are documented in [docs/public-cli.md](docs/public-cli.md).
 
+## Authenticated commands
+
+Install the optional browser dependencies and bootstrap a session visibly:
+
+```powershell
+python -m pip install -e ".[browser,dev]"
+fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID --no-headless
+```
+
+Then reuse the validated session explicitly:
+
+```powershell
+fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID --headless
+fb-crawl authenticated comments https://www.facebook.com/PAGE/posts/POST_ID --headless
+fb-crawl authenticated batch --input runtime/targets.txt --headless
+```
+
+See [docs/authenticated-cli.md](docs/authenticated-cli.md) for supported URLs, session handling, formats, exit codes, and security guidance.
+
 ## Exit codes
 
 - `0`: run completed without target failures
 - `1`: partial target failure; successful records remain available
 - `2`: invalid input or configuration
+- `3`: authenticated session, login, or manual verification unavailable
 - `4`: output could not be written safely
 
 ## Privacy and safety
