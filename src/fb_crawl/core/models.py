@@ -26,6 +26,15 @@ class AuthenticatedAction(StrEnum):
     BATCH = "batch"
 
 
+class ProfileField(StrEnum):
+    PHONE = "phone"
+    WEBSITE = "website"
+    ADDRESS = "address"
+    CURRENT_CITY = "current_city"
+    HOMETOWN = "hometown"
+    BIRTH_DATE = "birth_date"
+
+
 class TargetKind(StrEnum):
     PAGES = "pages"
     PEOPLE = "people"
@@ -50,6 +59,10 @@ class ScrapeRequest:
     max_nodes: int = 20
     delay_seconds: float = 0.0
     steps: int = 5
+    enrich_profiles: bool = False
+    profile_fields: tuple[ProfileField, ...] = ()
+    profile_limit: int = 20
+    profile_delay_seconds: float = 3.0
 
     def __post_init__(self) -> None:
         if self.limit <= 0:
@@ -66,6 +79,23 @@ class ScrapeRequest:
 
         if self.delay_seconds < 0:
             raise ValueError("delay_seconds must be greater than or equal to 0")
+
+        if self.profile_limit <= 0:
+            raise ValueError("profile_limit must be greater than 0")
+
+        if self.profile_delay_seconds < 0:
+            raise ValueError(
+                "profile_delay_seconds must be greater than or equal to 0"
+            )
+
+        if self.profile_fields and not self.enrich_profiles:
+            raise ValueError("profile_fields require enrich_profiles")
+
+        if any(not isinstance(item, ProfileField) for item in self.profile_fields):
+            raise ValueError("profile_fields must contain ProfileField values")
+
+        if len(set(self.profile_fields)) != len(self.profile_fields):
+            raise ValueError("profile_fields must not contain duplicates")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,12 +120,32 @@ class PageRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class ProfileDetails:
+    phone_numbers: tuple[str, ...] = ()
+    phone_sources: tuple[str, ...] = ()
+    website: str | None = None
+    address: str | None = None
+    current_city: str | None = None
+    hometown: str | None = None
+    birth_date: str | None = None
+    birth_year: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class UserRecord:
     user_id: str
     name: str | None
     profile_url: str
     source: str
     source_url: str
+    phone_numbers: tuple[str, ...] = ()
+    phone_sources: tuple[str, ...] = ()
+    website: str | None = None
+    address: str | None = None
+    current_city: str | None = None
+    hometown: str | None = None
+    birth_date: str | None = None
+    birth_year: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,10 +167,24 @@ class ScrapeStats:
 
 
 @dataclass(frozen=True, slots=True)
+class EnrichmentStats:
+    selected: int
+    attempted: int
+    succeeded: int
+    failed: int
+    phone_found: int
+    address_found: int
+    current_city_found: int
+    hometown_found: int
+    birth_year_found: int
+
+
+@dataclass(frozen=True, slots=True)
 class ScrapeResult(Generic[RecordT]):
     records: tuple[RecordT, ...]
     issues: tuple[ScrapeIssue, ...]
     stats: ScrapeStats
+    enrichment: EnrichmentStats | None = None
 
     @property
     def has_failures(self) -> bool:

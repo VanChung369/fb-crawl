@@ -28,6 +28,14 @@ def result() -> ScrapeResult[UserRecord]:
                 profile_url="https://www.facebook.com/synthetic.user",
                 source="members",
                 source_url="https://www.facebook.com/groups/1/members",
+                phone_numbers=("+84 123 456 789",),
+                phone_sources=("facebook:profile_contact",),
+                website="https://profile.example.test",
+                address="123 Synthetic Street",
+                current_city="Synthetic City",
+                hometown="Synthetic Province",
+                birth_date="1990-01-02",
+                birth_year=1990,
             ),
             UserRecord(
                 user_id="synthetic.user",
@@ -70,8 +78,12 @@ def test_user_csv_deduplicates_and_appends_issue_rows(
     assert [row["user_id"] for row in rows] == ["synthetic.user", ""]
     assert rows[0]["username"] == "synthetic.user"
     assert rows[0]["page_name"] == ""
-    assert rows[0]["address"] == ""
-    assert rows[0]["phone_numbers"] == ""
+    assert rows[0]["address"] == "123 Synthetic Street"
+    assert rows[0]["current_city"] == "Synthetic City"
+    assert rows[0]["hometown"] == "Synthetic Province"
+    assert rows[0]["birth_date"] == "1990-01-02"
+    assert rows[0]["birth_year"] == "1990"
+    assert rows[0]["phone_numbers"] == "+84 123 456 789"
     assert rows[1]["error_code"] == "authenticated_navigation_failed"
 
 
@@ -140,6 +152,10 @@ def test_user_xlsx_uses_the_same_schema(tmp_path: Path) -> None:
         "category",
         "website",
         "address",
+        "current_city",
+        "hometown",
+        "birth_date",
+        "birth_year",
         "phone_numbers",
         "phone_sources",
         "profile_url",
@@ -150,7 +166,7 @@ def test_user_xlsx_uses_the_same_schema(tmp_path: Path) -> None:
     )
     assert rows[1][0] == "synthetic.user"
     assert rows[1][2] == "synthetic.user"
-    assert rows[2][12] == "authenticated_navigation_failed"
+    assert rows[2][16] == "authenticated_navigation_failed"
 
 
 def test_xlsx_missing_dependency_does_not_change_format(
