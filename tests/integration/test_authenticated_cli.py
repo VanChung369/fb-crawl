@@ -13,6 +13,7 @@ from fb_crawl.core.exceptions import (
     ValidationError,
 )
 from fb_crawl.core.models import (
+    EnrichmentStats,
     ScrapeResult,
     ScrapeStats,
     UserRecord,
@@ -57,6 +58,21 @@ class Service:
                 discovered=1,
                 succeeded=1,
                 failed=0,
+            ),
+            enrichment=(
+                EnrichmentStats(
+                    selected=1,
+                    attempted=1,
+                    succeeded=1,
+                    failed=0,
+                    phone_found=1,
+                    address_found=0,
+                    current_city_found=1,
+                    hometown_found=0,
+                    birth_year_found=1,
+                )
+                if request.enrich_profiles
+                else None
             ),
         )
 
@@ -266,3 +282,68 @@ def test_missing_browser_extra_is_sanitized(
         match="browser",
     ):
         authenticated._load_runtime()
+
+
+def test_enrichment_summary_is_printed_and_browser_quits(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    browser = Browser()
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime(browser, Service()),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--enrich-profiles",
+            "--profile-fields",
+            "phone,current_city,birth_date",
+            "--output",
+            str(tmp_path / "members.csv"),
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "enrichment_selected=1" in output
+    assert "phone_found=1" in output
+    assert "current_city_found=1" in output
+    assert "birth_year_found=1" in output
+    assert browser.quit_calls == 1
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--profile-fields", "phone"],
+        ["--enrich-profiles", "--profile-fields", "unknown"],
+        ["--enrich-profiles", "--profile-limit", "0"],
+        ["--enrich-profiles", "--profile-delay", "-1"],
+    ],
+)
+def test_invalid_enrichment_options_fail_before_runtime(
+    monkeypatch,
+    extra: list[str],
+) -> None:
+    runtime_loads: list[bool] = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime_loads.append(True),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            *extra,
+        ]
+    )
+
+    assert exit_code == 2
+    assert runtime_loads == []

@@ -17,6 +17,7 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    ProfileField,
     ScrapeMode,
     ScrapeRequest,
 )
@@ -67,6 +68,27 @@ def _common(
         "--format",
         choices=("csv", "json", "txt", "xlsx"),
         default="csv",
+    )
+    parser.add_argument(
+        "--enrich-profiles",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--profile-fields",
+        help=(
+            "Comma-separated: phone,website,address,current_city,"
+            "hometown,birth_date"
+        ),
+    )
+    parser.add_argument(
+        "--profile-limit",
+        type=int,
+        default=20,
+    )
+    parser.add_argument(
+        "--profile-delay",
+        type=float,
+        default=3.0,
     )
 
 
@@ -135,6 +157,25 @@ def _read_batch(
     )
 
 
+def _profile_fields(value: str | None) -> tuple[ProfileField, ...]:
+    if value is None:
+        return ()
+
+    raw_fields = [item.strip() for item in value.split(",")]
+
+    if not raw_fields or any(not item for item in raw_fields):
+        raise ValidationError("Profile fields must be a non-empty comma list.")
+
+    try:
+        fields = tuple(ProfileField(item) for item in raw_fields)
+    except ValueError as error:
+        raise ValidationError(
+            "An unsupported profile field was provided."
+        ) from error
+
+    return tuple(dict.fromkeys(fields))
+
+
 def request_from_authenticated_args(
     args: argparse.Namespace,
 ) -> ScrapeRequest:
@@ -149,12 +190,21 @@ def request_from_authenticated_args(
     if not targets:
         raise ValidationError("At least one authenticated target is required.")
 
+    profile_fields = _profile_fields(args.profile_fields)
+
+    if profile_fields and not args.enrich_profiles:
+        raise ValidationError("Profile fields require --enrich-profiles.")
+
     return ScrapeRequest(
         mode=ScrapeMode.AUTHENTICATED,
         action=action,
         targets=targets,
         steps=args.steps,
         delay_seconds=args.delay,
+        enrich_profiles=args.enrich_profiles,
+        profile_fields=profile_fields,
+        profile_limit=args.profile_limit,
+        profile_delay_seconds=args.profile_delay,
     )
 
 
@@ -205,6 +255,12 @@ def _load_runtime() -> AuthenticatedRuntime:
         from fb_crawl.adapters.browser.members import (
             MembersCollector,
         )
+        from fb_crawl.adapters.browser.profile_parser import (
+            ProfileParser,
+        )
+        from fb_crawl.adapters.browser.profiles import (
+            ProfileEnricher,
+        )
         from fb_crawl.adapters.browser.session import (
             SessionStore,
         )
@@ -247,6 +303,7 @@ def _load_runtime() -> AuthenticatedRuntime:
             MembersCollector(settings),
             CommentsCollector(settings),
             UserParser(),
+            ProfileEnricher(settings, ProfileParser()),
         )
 
     return AuthenticatedRuntime(
@@ -307,13 +364,25 @@ def execute_authenticated(
         )
         output_status = output if written else "unchanged"
 
-        print(
+        summary = (
             f"requested={result.stats.requested} "
             f"discovered={result.stats.discovered} "
             f"succeeded={result.stats.succeeded} "
             f"failed={result.stats.failed} "
             f"output={output_status}"
         )
+
+        if result.enrichment is not None:
+            summary += (
+                f" enrichment_selected={result.enrichment.selected}"
+                f" enrichment_succeeded={result.enrichment.succeeded}"
+                f" enrichment_failed={result.enrichment.failed}"
+                f" phone_found={result.enrichment.phone_found}"
+                f" current_city_found={result.enrichment.current_city_found}"
+                f" birth_year_found={result.enrichment.birth_year_found}"
+            )
+
+        print(summary)
 
         return 1 if result.has_failures else 0
 
