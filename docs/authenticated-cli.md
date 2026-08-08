@@ -53,13 +53,20 @@ requested. Supported values are `phone`, `website`, `address`, `current_city`,
 birthday/year value.
 
 Each selected unique user is visited at most once after global deduplication.
-The browser opens at most three normalized directory routes per profile:
-`directory_personal_details`, `directory_contact_info`, and `directory_work`.
+The browser opens at most two normalized directory routes per profile:
+`directory_personal_details` and `directory_links`.
 For numeric `profile.php?id=...` identities it uses equivalent bounded `sk=`
 routes, then switches to Facebook's canonical vanity URL when a redirect,
 canonical link, or Open Graph URL exposes it. A failed profile preserves the
 base user and later profiles continue; session loss stops the run. Users beyond
 `--profile-limit` remain valid base records with empty enrichment fields.
+
+Profile sections are rendered asynchronously. The browser waits a bounded time
+for the requested section. A persistent Facebook loading spinner is reported as
+`authenticated_navigation_failed` instead of being exported as a successful
+empty enrichment. `directory_links` is skipped unless `website` is requested;
+failure of the required personal-details section cannot be hidden by a loaded
+links section.
 
 `current_city` (for example, a visible "Lives in" value), `hometown`, and a
 street/business `address` remain distinct. The crawler never guesses one from

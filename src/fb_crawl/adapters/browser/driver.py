@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from selenium.webdriver.firefox.options import Options
 
@@ -10,9 +10,51 @@ from fb_crawl.core.exceptions import (
     ConfigurationError,
 )
 
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium import webdriver
+
+
+MAX_PROFILE_CONTENT_WAIT_SECONDS = 8.0
+
+PROFILE_SECTION_LABELS = {
+    "directory_personal_details": (
+        "basic info",
+        "personal information",
+        "thong tin ca nhan",
+        "thong tin co ban",
+    ),
+    "directory_links": (
+        "address",
+        "contact and basic info",
+        "contact info",
+        "dia chi",
+        "dien thoai",
+        "lien ket",
+        "links",
+        "phone",
+        "so dien thoai",
+        "thong tin lien he",
+    ),
+}
+
+PROFILE_CONTENT_READY_SCRIPT = r"""
+const labels = arguments[0];
+const fold = value => (value || "")
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase()
+  .replace(/\s+/g, " ")
+  .trim();
+const headings = Array.from(document.querySelectorAll("h1,h2,h3,h4"));
+const hasHeading = headings.some(
+  heading => labels.some(label => fold(heading.textContent).includes(label))
+);
+const hasItem = Boolean(
+  document.querySelector('[role="list"] [role="listitem"]')
+);
+return hasHeading && hasItem;
+"""
 
 
 def _apply_proxy(
@@ -123,6 +165,65 @@ def wait_for_document_ready(
 
     except WebDriverException as error:
         raise BrowserNavigationError("Facebook page readiness timed out.") from error
+
+
+def _profile_section(source_url: str) -> str:
+    parsed = urlparse(source_url)
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if len(parts) == 1 and parts[0].casefold() == "profile.php":
+        return parse_qs(parsed.query).get("sk", [""])[0].casefold()
+
+    return parts[-1].casefold() if parts else ""
+
+
+def wait_for_profile_content(
+    browser,
+    timeout_seconds: float,
+    source_url: str,
+) -> bool:
+    labels = PROFILE_SECTION_LABELS.get(_profile_section(source_url))
+
+    if labels is None:
+        return False
+
+    timeout = min(timeout_seconds, MAX_PROFILE_CONTENT_WAIT_SECONDS)
+
+    try:
+        browser.execute_script(
+            "window.scrollTo(0, Math.min(document.body.scrollHeight, 1200))"
+        )
+        WebDriverWait(browser, timeout).until(
+            lambda driver: bool(
+                driver.execute_script(PROFILE_CONTENT_READY_SCRIPT, labels)
+            )
+        )
+
+    except TimeoutException as error:
+        try:
+            still_loading = bool(
+                browser.execute_script(
+                    "return Boolean(document.querySelector('[role=progressbar]'))"
+                )
+            )
+        except WebDriverException as readiness_error:
+            raise BrowserNavigationError(
+                "Facebook profile content readiness failed."
+            ) from readiness_error
+
+        if still_loading:
+            raise BrowserNavigationError(
+                "Facebook profile section did not finish loading."
+            ) from error
+
+        return False
+
+    except WebDriverException as error:
+        raise BrowserNavigationError(
+            "Facebook profile content readiness failed."
+        ) from error
+
+    return True
 
 
 def create_firefox_driver(

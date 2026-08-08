@@ -415,8 +415,7 @@ def profile_directory_urls(
             f"{base}?{urlencode((('id', profile_id), ('sk', section)))}"
             for section in (
                 "directory_personal_details",
-                "directory_contact_info",
-                "directory_work",
+                "directory_links",
             )
         )
 
@@ -429,8 +428,7 @@ def profile_directory_urls(
     base = f"https://www.facebook.com/{first}"
     return (
         f"{base}/directory_personal_details",
-        f"{base}/directory_contact_info",
-        f"{base}/directory_work",
+        f"{base}/directory_links",
     )
 
 

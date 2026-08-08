@@ -17,8 +17,8 @@ merges them into immutable `UserRecord` values and records coverage statistics.
 [`docs/superpowers/specs/2026-08-08-authenticated-profile-enrichment-design.md`](../specs/2026-08-08-authenticated-profile-enrichment-design.md)
 
 > Compatibility update: the implemented route builder now targets Facebook's
-> current `directory_personal_details`, `directory_contact_info`, and
-> `directory_work` sections. References below to the two legacy About routes are
+> current `directory_personal_details` and `directory_links` sections.
+> References below to the two legacy About routes are
 > retained only as historical implementation-plan context.
 
 ## Prerequisite

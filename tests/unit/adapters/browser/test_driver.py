@@ -4,10 +4,11 @@ from fb_crawl.adapters.browser.driver import (
     build_firefox_options,
     create_firefox_driver,
     wait_for_document_ready,
+    wait_for_profile_content,
 )
 from fb_crawl.config import BrowserSettings
-from fb_crawl.core.exceptions import ConfigurationError
-from selenium.common.exceptions import WebDriverException
+from fb_crawl.core.exceptions import BrowserNavigationError, ConfigurationError
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 
 def test_firefox_options_include_headless_window_and_http_proxy() -> None:
@@ -92,6 +93,91 @@ def test_document_ready_wait_uses_explicit_timeout(
     )
 
     assert observed == [12.5]
+
+
+def test_profile_content_wait_scrolls_and_uses_bounded_timeout(monkeypatch) -> None:
+    observed_timeouts: list[float] = []
+    scripts: list[tuple[str, tuple[object, ...]]] = []
+
+    class Browser:
+        def execute_script(self, script: str, *args):
+            scripts.append((script, args))
+            return True
+
+    browser = Browser()
+
+    class FakeWait:
+        def __init__(self, candidate, timeout: float) -> None:
+            assert candidate is browser
+            observed_timeouts.append(timeout)
+
+        def until(self, predicate) -> None:
+            assert predicate(browser) is True
+
+    monkeypatch.setattr(
+        "fb_crawl.adapters.browser.driver.WebDriverWait",
+        FakeWait,
+    )
+
+    assert wait_for_profile_content(
+        browser,
+        30,
+        "https://www.facebook.com/synthetic.user/directory_personal_details",
+    ) is True
+    assert observed_timeouts == [8.0]
+    assert "scrollTo" in scripts[0][0]
+    assert scripts[1][1]
+
+
+def test_profile_content_timeout_is_a_valid_empty_section(monkeypatch) -> None:
+    class Browser:
+        def execute_script(self, script: str, *args):
+            return None
+
+    class FakeWait:
+        def __init__(self, browser, timeout: float) -> None:
+            pass
+
+        def until(self, predicate) -> None:
+            raise TimeoutException()
+
+    monkeypatch.setattr(
+        "fb_crawl.adapters.browser.driver.WebDriverWait",
+        FakeWait,
+    )
+
+    assert wait_for_profile_content(
+        Browser(),
+        30,
+        "https://www.facebook.com/synthetic.user/directory_links",
+    ) is False
+
+
+def test_profile_content_persistent_spinner_is_navigation_failure(
+    monkeypatch,
+) -> None:
+    class Browser:
+        def execute_script(self, script: str, *args):
+            return "progressbar" in script
+
+    class FakeWait:
+        def __init__(self, browser, timeout: float) -> None:
+            pass
+
+        def until(self, predicate) -> None:
+            raise TimeoutException()
+
+    monkeypatch.setattr(
+        "fb_crawl.adapters.browser.driver.WebDriverWait",
+        FakeWait,
+    )
+
+    with pytest.raises(BrowserNavigationError, match="did not finish loading"):
+        wait_for_profile_content(
+            Browser(),
+            30,
+            "https://www.facebook.com/synthetic.user/directory_personal_details",
+        )
 
 
 def test_create_firefox_driver_uses_generated_options(

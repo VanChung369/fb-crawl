@@ -89,9 +89,7 @@ def test_directory_link_and_address_sections_are_parsed_conservatively() -> None
 
     details = ProfileParser().parse(
         html,
-        source_url=(
-            "https://www.facebook.com/synthetic.user/directory_contact_info"
-        ),
+        source_url="https://www.facebook.com/synthetic.user/directory_links",
     )
 
     assert details.website == "https://profile.example.test/"

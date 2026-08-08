@@ -32,6 +32,9 @@ class Browser:
         self.current_url = self.redirects.get(url, url)
         self.page_source = outcome
 
+    def execute_script(self, script: str, *args):
+        return True
+
 
 class Parser:
     def __init__(self, outcomes: dict[str, ProfileDetails | Exception]) -> None:
@@ -58,7 +61,7 @@ def record() -> UserRecord:
     )
 
 
-def routes() -> tuple[str, str, str]:
+def routes() -> tuple[str, str]:
     return (
         (
             "https://www.facebook.com/synthetic.user"
@@ -66,18 +69,14 @@ def routes() -> tuple[str, str, str]:
         ),
         (
             "https://www.facebook.com/synthetic.user"
-            "/directory_contact_info"
-        ),
-        (
-            "https://www.facebook.com/synthetic.user"
-            "/directory_work"
+            "/directory_links"
         ),
     )
 
 
 def test_profile_enricher_visits_directory_routes_once_and_merges_details() -> None:
-    personal, contact, work = routes()
-    browser = Browser({personal: "personal", contact: "contact", work: "work"})
+    personal, links = routes()
+    browser = Browser({personal: "personal", links: "links"})
     parser = Parser(
         {
             personal: ProfileDetails(
@@ -85,40 +84,48 @@ def test_profile_enricher_visits_directory_routes_once_and_merges_details() -> N
                 birth_date="1990-01-02",
                 birth_year=1990,
             ),
-            contact: ProfileDetails(
+            links: ProfileDetails(
                 phone_numbers=("+1 202-555-0147",),
                 phone_sources=("facebook:profile_contact",),
             ),
-            work: ProfileDetails(),
         }
     )
     ready_calls: list[tuple[object, float]] = []
-    fields = (ProfileField.PHONE, ProfileField.BIRTH_DATE)
+    content_calls: list[tuple[object, float, str]] = []
+    fields = (
+        ProfileField.PHONE,
+        ProfileField.BIRTH_DATE,
+        ProfileField.WEBSITE,
+    )
 
     details = ProfileEnricher(
         BrowserSettings(browser_timeout_seconds=7),
         parser,  # type: ignore[arg-type]
         authenticated_func=lambda browser: True,
         ready_func=lambda browser, timeout: ready_calls.append((browser, timeout)),
+        content_ready_func=lambda browser, timeout, route: content_calls.append(
+            (browser, timeout, route)
+        ),
     ).enrich(browser, record(), fields)
 
-    assert browser.get_calls == [personal, contact, work]
-    assert ready_calls == [(browser, 7), (browser, 7), (browser, 7)]
-    assert [call[2] for call in parser.calls] == [fields, fields, fields]
+    assert browser.get_calls == [personal, links]
+    assert ready_calls == [(browser, 7), (browser, 7)]
+    assert content_calls == [
+        (browser, 7, personal),
+        (browser, 7, links),
+    ]
+    assert [call[2] for call in parser.calls] == [fields, fields]
     assert details.current_city == "Synthetic City"
     assert details.birth_year == 1990
     assert details.phone_numbers == ("+1 202-555-0147",)
 
 
-def test_one_failed_route_keeps_successful_partial_details() -> None:
-    personal, contact, work = routes()
-    browser = Browser(
-        {personal: OSError("network"), contact: "contact", work: "work"}
-    )
+def test_failed_optional_links_route_keeps_personal_details() -> None:
+    personal, links = routes()
+    browser = Browser({personal: "personal", links: OSError("network")})
     parser = Parser(
         {
-            contact: ProfileDetails(address="123 Synthetic Street"),
-            work: ProfileDetails(),
+            personal: ProfileDetails(address="123 Synthetic Street"),
         }
     )
 
@@ -130,16 +137,49 @@ def test_one_failed_route_keeps_successful_partial_details() -> None:
     ).enrich(browser, record(), ())
 
     assert details.address == "123 Synthetic Street"
-    assert browser.get_calls == [personal, contact, work]
+    assert browser.get_calls == [personal, links]
+
+
+def test_website_only_skips_personal_route() -> None:
+    _, links = routes()
+    browser = Browser({links: "links"})
+    parser = Parser(
+        {links: ProfileDetails(website="https://profile.example.test")}
+    )
+
+    details = ProfileEnricher(
+        BrowserSettings(),
+        parser,  # type: ignore[arg-type]
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+    ).enrich(browser, record(), (ProfileField.WEBSITE,))
+
+    assert details.website == "https://profile.example.test"
+    assert browser.get_calls == [links]
+
+
+def test_failed_required_personal_route_is_not_hidden_by_loaded_links() -> None:
+    personal, links = routes()
+    browser = Browser({personal: OSError("network"), links: "links"})
+    parser = Parser({links: ProfileDetails()})
+
+    with pytest.raises(BrowserNavigationError, match="profile navigation"):
+        ProfileEnricher(
+            BrowserSettings(),
+            parser,  # type: ignore[arg-type]
+            authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None,
+        ).enrich(browser, record(), ())
+
+    assert browser.get_calls == [personal, links]
 
 
 def test_all_navigation_failures_are_sanitized() -> None:
-    personal, contact, work = routes()
+    personal, links = routes()
     browser = Browser(
         {
             personal: OSError("cookie=secret"),
-            contact: OSError("raw html"),
-            work: OSError("raw html"),
+            links: OSError("raw html"),
         }
     )
 
@@ -156,13 +196,12 @@ def test_all_navigation_failures_are_sanitized() -> None:
 
 
 def test_all_parser_failures_raise_safe_parse_error() -> None:
-    personal, contact, work = routes()
-    browser = Browser({personal: "personal", contact: "contact", work: "work"})
+    personal, links = routes()
+    browser = Browser({personal: "personal", links: "links"})
     parser = Parser(
         {
             personal: ValueError("raw html"),
-            contact: ValueError("raw html"),
-            work: ValueError("raw html"),
+            links: ValueError("raw html"),
         }
     )
 
@@ -176,8 +215,8 @@ def test_all_parser_failures_raise_safe_parse_error() -> None:
 
 
 def test_session_loss_stops_before_later_routes() -> None:
-    personal, contact, work = routes()
-    browser = Browser({personal: "personal", contact: "contact", work: "work"})
+    personal, links = routes()
+    browser = Browser({personal: "personal", links: "links"})
 
     with pytest.raises(SessionError):
         ProfileEnricher(
@@ -195,20 +234,18 @@ def test_numeric_profile_switches_to_redirected_vanity_directory_routes() -> Non
         "https://www.facebook.com/profile.php"
         "?id=123&sk=directory_personal_details"
     )
-    vanity_personal, vanity_contact, vanity_work = routes()
+    vanity_personal, vanity_links = routes()
     browser = Browser(
         {
             numeric_personal: "personal",
-            vanity_contact: "contact",
-            vanity_work: "work",
+            vanity_links: "links",
         },
         redirects={numeric_personal: vanity_personal},
     )
     parser = Parser(
         {
             numeric_personal: ProfileDetails(current_city="Synthetic City"),
-            vanity_contact: ProfileDetails(),
-            vanity_work: ProfileDetails(),
+            vanity_links: ProfileDetails(),
         }
     )
     numeric_record = UserRecord(
@@ -226,7 +263,7 @@ def test_numeric_profile_switches_to_redirected_vanity_directory_routes() -> Non
         ready_func=lambda browser, timeout: None,
     ).enrich(browser, numeric_record, ())
 
-    assert browser.get_calls == [numeric_personal, vanity_contact, vanity_work]
+    assert browser.get_calls == [numeric_personal, vanity_links]
     assert details.canonical_profile_url == (
         "https://www.facebook.com/synthetic.user"
     )
@@ -237,7 +274,7 @@ def test_numeric_profile_can_resolve_vanity_from_canonical_html() -> None:
         "https://www.facebook.com/profile.php"
         "?id=123&sk=directory_personal_details"
     )
-    _, vanity_contact, vanity_work = routes()
+    _, vanity_links = routes()
     canonical_html = """
     <link
       rel="canonical"
@@ -247,15 +284,13 @@ def test_numeric_profile_can_resolve_vanity_from_canonical_html() -> None:
     browser = Browser(
         {
             numeric_personal: canonical_html,
-            vanity_contact: "contact",
-            vanity_work: "work",
+            vanity_links: "links",
         }
     )
     parser = Parser(
         {
             numeric_personal: ProfileDetails(),
-            vanity_contact: ProfileDetails(),
-            vanity_work: ProfileDetails(),
+            vanity_links: ProfileDetails(),
         }
     )
     numeric_record = UserRecord(
@@ -273,7 +308,7 @@ def test_numeric_profile_can_resolve_vanity_from_canonical_html() -> None:
         ready_func=lambda browser, timeout: None,
     ).enrich(browser, numeric_record, ())
 
-    assert browser.get_calls == [numeric_personal, vanity_contact, vanity_work]
+    assert browser.get_calls == [numeric_personal, vanity_links]
     assert details.canonical_profile_url == (
         "https://www.facebook.com/synthetic.user"
     )

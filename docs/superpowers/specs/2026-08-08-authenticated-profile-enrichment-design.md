@@ -246,16 +246,14 @@ Numeric identity routes:
 
 ```text
 https://www.facebook.com/profile.php?id=USER_ID&sk=directory_personal_details
-https://www.facebook.com/profile.php?id=USER_ID&sk=directory_contact_info
-https://www.facebook.com/profile.php?id=USER_ID&sk=directory_work
+https://www.facebook.com/profile.php?id=USER_ID&sk=directory_links
 ```
 
 Vanity identity routes:
 
 ```text
 https://www.facebook.com/USERNAME/directory_personal_details
-https://www.facebook.com/USERNAME/directory_contact_info
-https://www.facebook.com/USERNAME/directory_work
+https://www.facebook.com/USERNAME/directory_links
 ```
 
 The route builder:
@@ -265,7 +263,7 @@ The route builder:
 - rejects login, checkpoint, places, groups, posts, videos, reels, and arbitrary
   external paths;
 - removes unrelated query parameters and fragments;
-- produces at most three routes per selected profile;
+- produces at most two routes per selected profile;
 - never follows an externally supplied directory URL without normalization.
 
 ## Browser collection
@@ -276,7 +274,7 @@ browser.
 
 For each selected user:
 
-1. Build the bounded personal/contact/work directory route list.
+1. Build the bounded personal-details/links directory route list.
 2. Navigate to each route once.
 3. Wait for document readiness with the existing bounded helper.
 4. Check for session-loss routes/cookies after navigation.

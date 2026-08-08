@@ -140,11 +140,7 @@ def test_batch_classifier_rejects_unsupported_urls(
                 ),
                 (
                     "https://www.facebook.com/profile.php"
-                    "?id=123&sk=directory_contact_info"
-                ),
-                (
-                    "https://www.facebook.com/profile.php"
-                    "?id=123&sk=directory_work"
+                    "?id=123&sk=directory_links"
                 ),
             ),
         ),
@@ -158,11 +154,7 @@ def test_batch_classifier_rejects_unsupported_urls(
                 ),
                 (
                     "https://www.facebook.com/synthetic.user"
-                    "/directory_contact_info"
-                ),
-                (
-                    "https://www.facebook.com/synthetic.user"
-                    "/directory_work"
+                    "/directory_links"
                 ),
             ),
         ),

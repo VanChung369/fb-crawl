@@ -6,7 +6,10 @@ from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
-from fb_crawl.adapters.browser.driver import wait_for_document_ready
+from fb_crawl.adapters.browser.driver import (
+    wait_for_document_ready,
+    wait_for_profile_content,
+)
 from fb_crawl.adapters.browser.profile_parser import ProfileParser
 from fb_crawl.adapters.browser.session import is_authenticated
 from fb_crawl.config import BrowserSettings
@@ -109,11 +112,16 @@ class ProfileEnricher:
         *,
         authenticated_func: Callable[[object], bool] = is_authenticated,
         ready_func: Callable[[object, float], None] = wait_for_document_ready,
+        content_ready_func: Callable[
+            [object, float, str],
+            bool | None,
+        ] = wait_for_profile_content,
     ) -> None:
         self._settings = settings
         self._parser = parser or ProfileParser()
         self._authenticated = authenticated_func
         self._ready = ready_func
+        self._content_ready = content_ready_func
 
     def enrich(
         self,
@@ -133,11 +141,20 @@ class ProfileEnricher:
         succeeded = 0
         navigation_failures = 0
         parse_failures = 0
+        critical_navigation_failure = False
+        critical_parse_failure = False
+
+        requested = frozenset(fields) if fields else frozenset(ProfileField)
+        personal_requested = bool(requested - {ProfileField.WEBSITE})
+        route_indexes = (
+            *((0,) if personal_requested else ()),
+            *((1,) if ProfileField.WEBSITE in requested else ()),
+        )
 
         route_profile_url = record.profile_url
         route_identity = record.user_id
 
-        for route_index in range(len(routes)):
+        for route_index in route_indexes:
             current_routes = profile_directory_urls(
                 route_profile_url,
                 route_identity,
@@ -158,11 +175,18 @@ class ProfileEnricher:
                         "The authenticated Facebook session is no longer valid."
                     )
 
+                self._content_ready(
+                    browser,
+                    self._settings.browser_timeout_seconds,
+                    route,
+                )
+
             except SessionError:
                 raise
 
             except Exception:
                 navigation_failures += 1
+                critical_navigation_failure |= route_index == 0
                 continue
 
             html = str(browser.page_source)
@@ -190,10 +214,23 @@ class ProfileEnricher:
 
             except Exception:
                 parse_failures += 1
+                critical_parse_failure |= route_index == 0
                 continue
 
             details = _merge_details(details, parsed)
             succeeded += 1
+
+        if critical_parse_failure:
+            raise BrowserParseError(
+                "Authenticated profile parsing failed.",
+                target=record.profile_url,
+            )
+
+        if critical_navigation_failure:
+            raise BrowserNavigationError(
+                "Authenticated profile navigation failed.",
+                target=record.profile_url,
+            )
 
         if succeeded:
             return details
