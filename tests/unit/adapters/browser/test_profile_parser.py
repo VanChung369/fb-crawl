@@ -146,6 +146,58 @@ def test_current_labelled_dom_parses_contact_values_without_role_list() -> None:
     assert details.website == "https://profile.example.test/"
 
 
+def test_directory_links_parses_unlabelled_external_anchor() -> None:
+    html = """
+    <nav><a href="https://www.facebook.com/home.php">Home</a></nav>
+    <main>
+      <h2>Links</h2>
+      <div><a href="https://social.example.test/user?fbclid=synthetic">Social</a></div>
+    </main>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url="https://www.facebook.com/synthetic.user/directory_links",
+        requested_fields=(ProfileField.WEBSITE,),
+    )
+
+    assert details.website == "https://social.example.test/user"
+
+
+def test_directory_links_parses_visible_domain_from_role_link() -> None:
+    html = """
+    <main>
+      <h2>Links</h2>
+      <span role="link" tabindex="0">social.example.test/user</span>
+    </main>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url="https://www.facebook.com/synthetic.user/directory_links",
+        requested_fields=(ProfileField.WEBSITE,),
+    )
+
+    assert details.website == "https://social.example.test/user"
+
+
+def test_directory_links_parses_visible_domain_from_nested_text() -> None:
+    html = """
+    <main>
+      <h2>Links</h2>
+      <div><span><span>social.example.test/user</span></span></div>
+    </main>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url="https://www.facebook.com/synthetic.user/directory_links",
+        requested_fields=(ProfileField.WEBSITE,),
+    )
+
+    assert details.website == "https://social.example.test/user"
+
+
 @pytest.mark.parametrize(
     ("value", "expected_date", "expected_year"),
     [

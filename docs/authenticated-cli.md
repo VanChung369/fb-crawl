@@ -68,6 +68,10 @@ the current value/label rows such as `Current city`, `Birthday`, `Mobile`,
 requested; failure of the required personal-details section cannot be hidden by
 a loaded links section.
 
+On the Links section, external websites may be rendered as visible domain text
+without an `href`. The parser accepts that shape only on `directory_links` and
+continues to reject Facebook-owned domains.
+
 `current_city` (for example, a visible "Lives in" value), `hometown`, and a
 street/business `address` remain distinct. The crawler never guesses one from
 another.

@@ -15,7 +15,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium import webdriver
 
 
-MAX_PROFILE_CONTENT_WAIT_SECONDS = 8.0
+MAX_PROFILE_CONTENT_WAIT_SECONDS = 15.0
 
 PROFILE_SECTION_LABELS = {
     "directory_personal_details": (
@@ -44,6 +44,7 @@ PROFILE_SECTION_LABELS = {
 
 PROFILE_CONTENT_READY_SCRIPT = r"""
 const labels = arguments[0];
+const section = arguments[1];
 const fold = value => (value || "")
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
@@ -57,6 +58,28 @@ const hasHeading = headings.some(
 const hasItem = Boolean(
   document.querySelector('[role="list"] [role="listitem"]')
 );
+if (section === "directory_personal_details") {
+  const text = fold(document.body ? document.body.innerText : "");
+  const fieldLabels = [
+    "birthday", "current city", "hometown", "mobile", "phone",
+    "address", "sinh nhat", "thanh pho hien tai", "que quan",
+    "dien thoai", "dia chi"
+  ];
+  return hasHeading && fieldLabels.some(label => text.includes(label));
+}
+if (section === "directory_links") {
+  const facebookHost = host => host === "facebook.com" ||
+    host.endsWith(".facebook.com");
+  const hasExternalAnchor = Array.from(document.querySelectorAll("a[href]"))
+    .some(anchor => {
+      try { return !facebookHost(new URL(anchor.href).hostname.toLowerCase()); }
+      catch { return false; }
+    });
+  const domainPattern = /(?:https?:\/\/)?(?:www\.)?[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:\/\S*)?/i;
+  const hasVisibleDomain = Array.from(document.querySelectorAll('[role="link"]'))
+    .some(link => domainPattern.test(link.innerText || ""));
+  return hasHeading && (hasExternalAnchor || hasVisibleDomain);
+}
 return hasHeading && hasItem;
 """
 
@@ -187,6 +210,7 @@ def wait_for_profile_content(
     source_url: str,
 ) -> bool:
     labels = PROFILE_SECTION_LABELS.get(_profile_section(source_url))
+    section = _profile_section(source_url)
 
     if labels is None:
         return False
@@ -199,7 +223,11 @@ def wait_for_profile_content(
         )
         WebDriverWait(browser, timeout).until(
             lambda driver: bool(
-                driver.execute_script(PROFILE_CONTENT_READY_SCRIPT, labels)
+                driver.execute_script(
+                    PROFILE_CONTENT_READY_SCRIPT,
+                    labels,
+                    section,
+                )
             )
         )
 

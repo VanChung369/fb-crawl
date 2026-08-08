@@ -124,10 +124,11 @@ def test_profile_content_wait_scrolls_and_uses_bounded_timeout(monkeypatch) -> N
         30,
         "https://www.facebook.com/synthetic.user/directory_personal_details",
     ) is True
-    assert observed_timeouts == [8.0]
+    assert observed_timeouts == [15.0]
     assert "scrollTo" in scripts[0][0]
     assert scripts[1][1]
     assert "location" in scripts[1][1][0]
+    assert scripts[1][1][1] == "directory_personal_details"
 
 
 def test_profile_content_timeout_is_a_valid_empty_section(monkeypatch) -> None:

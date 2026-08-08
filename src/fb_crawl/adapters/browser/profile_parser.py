@@ -3,7 +3,14 @@ from __future__ import annotations
 import re
 import unicodedata
 from datetime import date
-from urllib.parse import parse_qsl, unquote, urlencode, urlparse, urlunparse
+from urllib.parse import (
+    parse_qs,
+    parse_qsl,
+    unquote,
+    urlencode,
+    urlparse,
+    urlunparse,
+)
 
 from bs4 import BeautifulSoup
 
@@ -130,6 +137,12 @@ ENGLISH_DATE = re.compile(
     re.IGNORECASE,
 )
 YEAR_ONLY = re.compile(r"\b(?:born|nam sinh|sinh nam)\D*(?P<year>\d{4})\b", re.I)
+VISIBLE_DOMAIN = re.compile(
+    r"(?<![@\w])(?P<url>(?:https?://)?(?:www\.)?"
+    r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"
+    r"(?:/[^\s]*)?)",
+    re.IGNORECASE,
+)
 
 MONTHS = {
     name: index
@@ -276,7 +289,7 @@ def _external_website(value: str) -> str | None:
     if parsed.scheme not in {"http", "https"} or not host:
         return None
 
-    if host in FACEBOOK_HOSTS:
+    if host in FACEBOOK_HOSTS or host.endswith(".facebook.com"):
         return None
 
     query = urlencode(
@@ -287,6 +300,30 @@ def _external_website(value: str) -> str | None:
         ]
     )
     return urlunparse(parsed._replace(query=query, fragment=""))
+
+
+def _visible_website(value: str) -> str | None:
+    match = VISIBLE_DOMAIN.search(value)
+
+    if match is None:
+        return None
+
+    candidate = match.group("url").rstrip(".,;:)")
+
+    if not candidate.casefold().startswith(("http://", "https://")):
+        candidate = f"https://{candidate}"
+
+    return _external_website(candidate)
+
+
+def _profile_section(source_url: str) -> str:
+    parsed = urlparse(source_url)
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if len(parts) == 1 and parts[0].casefold() == "profile.php":
+        return parse_qs(parsed.query).get("sk", [""])[0].casefold()
+
+    return parts[-1].casefold() if parts else ""
 
 
 class ProfileParser:
@@ -314,6 +351,27 @@ class ProfileParser:
                 if href.casefold().startswith("tel:"):
                     for phone in extract_phone_numbers(unquote(href[4:])):
                         phones.setdefault(re.sub(r"\D", "", phone), phone)
+
+        if (
+            ProfileField.WEBSITE in requested
+            and _profile_section(source_url) == "directory_links"
+        ):
+            for anchor in soup.find_all("a", href=True):
+                website = _external_website(str(anchor.get("href") or ""))
+                if website is not None:
+                    break
+
+            if website is None:
+                for link in soup.find_all(attrs={"role": "link"}):
+                    website = _visible_website(_visible_text(link))
+                    if website is not None:
+                        break
+
+            if website is None:
+                for value in soup.stripped_strings:
+                    website = _visible_website(str(value))
+                    if website is not None:
+                        break
 
         for container in soup.find_all(attrs={"role": "list"}):
             section = _section_name(container, soup)
