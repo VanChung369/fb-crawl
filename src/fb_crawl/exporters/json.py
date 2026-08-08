@@ -4,15 +4,16 @@ import json
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from fb_crawl.core.models import (
-    PageRecord,
     ScrapeResult,
 )
 from fb_crawl.exporters.atomic import (
     atomic_text_writer,
 )
+
+RecordT = TypeVar("RecordT")
 
 
 def _jsonable(value: Any) -> Any:
@@ -32,7 +33,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def write_json(
-    result: ScrapeResult[PageRecord],
+    result: ScrapeResult[RecordT],
     path: Path,
 ) -> bool:
     if not result.records and not result.issues:

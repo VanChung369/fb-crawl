@@ -56,3 +56,35 @@ def atomic_text_writer(
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+@contextmanager
+def atomic_output_path(
+    destination: Path,
+    *,
+    temporary_suffix: str = ".tmp",
+) -> Iterator[Path]:
+    destination = Path(destination)
+    temporary = destination.with_name(destination.name + temporary_suffix)
+
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        yield temporary
+
+        with temporary.open("rb+") as file:
+            os.fsync(file.fileno())
+
+        os.replace(temporary, destination)
+
+    except OSError as error:
+        raise ExportError(
+            f"Cannot write output file {destination}.",
+            target=str(destination),
+        ) from error
+
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
