@@ -51,6 +51,58 @@ PHONE_HEADINGS = frozenset(
     }
 )
 
+CURRENT_CITY_LABELS = frozenset(
+    {
+        "current city",
+        "noi song hien tai",
+        "thanh pho hien tai",
+    }
+)
+HOMETOWN_LABELS = frozenset(
+    {
+        "hometown",
+        "que quan",
+    }
+)
+BIRTHDAY_LABELS = frozenset(
+    {
+        "birthday",
+        "ngay sinh",
+        "sinh nhat",
+    }
+)
+PHONE_LABELS = frozenset(
+    {
+        "dien thoai",
+        "di dong",
+        "mobile",
+        "phone",
+        "phone number",
+        "so dien thoai",
+    }
+)
+ADDRESS_LABELS = frozenset(
+    {
+        "address",
+        "dia chi",
+    }
+)
+WEBSITE_LABELS = frozenset(
+    {
+        "trang web",
+        "website",
+        "websites",
+    }
+)
+FIELD_LABELS = frozenset().union(
+    CURRENT_CITY_LABELS,
+    HOMETOWN_LABELS,
+    BIRTHDAY_LABELS,
+    PHONE_LABELS,
+    ADDRESS_LABELS,
+    WEBSITE_LABELS,
+)
+
 CURRENT_CITY_PREFIXES = (
     "lives in ",
     "song o ",
@@ -144,6 +196,44 @@ def _value_after_prefix(value: str, prefixes: tuple[str, ...]) -> str | None:
             prefix_word_count = len(prefix.split())
             result = " ".join(words[prefix_word_count:]).strip(" :-")
             return result or None
+
+    return None
+
+
+def _labelled_row(label_node, label: str):
+    if label_node.name in {"h1", "h2", "h3", "h4"}:
+        return None
+
+    if label_node.find_parent(("h1", "h2", "h3", "h4")) is not None:
+        return None
+
+    current = label_node.parent
+
+    for _ in range(6):
+        if current is None or not hasattr(current, "stripped_strings"):
+            return None
+
+        values = tuple(
+            dict.fromkeys(
+                " ".join(str(value).split())
+                for value in current.stripped_strings
+                if str(value).strip()
+            )
+        )
+
+        if len(values) > 4:
+            return None
+
+        candidates = tuple(
+            value
+            for value in values
+            if _fold(value) != label and _fold(value) not in FIELD_LABELS
+        )
+
+        if candidates:
+            return current, candidates[0]
+
+        current = current.parent
 
     return None
 
@@ -276,6 +366,61 @@ class ProfileParser:
                         website = _external_website(str(anchor.get("href") or ""))
                         if website is not None:
                             break
+
+        for text_node in soup.find_all(string=True):
+            label = _fold(str(text_node))
+
+            if label not in FIELD_LABELS:
+                continue
+
+            labelled = _labelled_row(text_node.parent, label)
+
+            if labelled is None:
+                continue
+
+            row, value = labelled
+
+            if (
+                label in CURRENT_CITY_LABELS
+                and ProfileField.CURRENT_CITY in requested
+                and current_city is None
+            ):
+                current_city = value
+
+            elif (
+                label in HOMETOWN_LABELS
+                and ProfileField.HOMETOWN in requested
+                and hometown is None
+            ):
+                hometown = value
+
+            elif (
+                label in BIRTHDAY_LABELS
+                and ProfileField.BIRTH_DATE in requested
+                and birth_year is None
+            ):
+                birth_date, birth_year = _birthday(value)
+
+            elif label in PHONE_LABELS and ProfileField.PHONE in requested:
+                for phone in extract_phone_numbers(value):
+                    phones.setdefault(re.sub(r"\D", "", phone), phone)
+
+            elif (
+                label in ADDRESS_LABELS
+                and ProfileField.ADDRESS in requested
+                and address is None
+            ):
+                address = value
+
+            elif (
+                label in WEBSITE_LABELS
+                and ProfileField.WEBSITE in requested
+                and website is None
+            ):
+                for anchor in row.find_all("a", href=True):
+                    website = _external_website(str(anchor.get("href") or ""))
+                    if website is not None:
+                        break
 
         phone_values = tuple(phones.values())
         return ProfileDetails(

@@ -20,7 +20,11 @@ MAX_PROFILE_CONTENT_WAIT_SECONDS = 8.0
 PROFILE_SECTION_LABELS = {
     "directory_personal_details": (
         "basic info",
+        "birthday",
+        "location",
+        "personal details",
         "personal information",
+        "status",
         "thong tin ca nhan",
         "thong tin co ban",
     ),
@@ -199,23 +203,7 @@ def wait_for_profile_content(
             )
         )
 
-    except TimeoutException as error:
-        try:
-            still_loading = bool(
-                browser.execute_script(
-                    "return Boolean(document.querySelector('[role=progressbar]'))"
-                )
-            )
-        except WebDriverException as readiness_error:
-            raise BrowserNavigationError(
-                "Facebook profile content readiness failed."
-            ) from readiness_error
-
-        if still_loading:
-            raise BrowserNavigationError(
-                "Facebook profile section did not finish loading."
-            ) from error
-
+    except TimeoutException:
         return False
 
     except WebDriverException as error:

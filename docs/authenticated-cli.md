@@ -62,11 +62,11 @@ base user and later profiles continue; session loss stops the run. Users beyond
 `--profile-limit` remain valid base records with empty enrichment fields.
 
 Profile sections are rendered asynchronously. The browser waits a bounded time
-for the requested section. A persistent Facebook loading spinner is reported as
-`authenticated_navigation_failed` instead of being exported as a successful
-empty enrichment. `directory_links` is skipped unless `website` is requested;
-failure of the required personal-details section cannot be hidden by a loaded
-links section.
+for the requested section. The parser supports both older semantic lists and
+the current value/label rows such as `Current city`, `Birthday`, `Mobile`,
+`Address`, and `Website`. `directory_links` is skipped unless `website` is
+requested; failure of the required personal-details section cannot be hidden by
+a loaded links section.
 
 `current_city` (for example, a visible "Lives in" value), `hometown`, and a
 street/business `address` remain distinct. The crawler never guesses one from

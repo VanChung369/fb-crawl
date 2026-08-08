@@ -7,7 +7,7 @@ from fb_crawl.adapters.browser.driver import (
     wait_for_profile_content,
 )
 from fb_crawl.config import BrowserSettings
-from fb_crawl.core.exceptions import BrowserNavigationError, ConfigurationError
+from fb_crawl.core.exceptions import ConfigurationError
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 
@@ -127,6 +127,7 @@ def test_profile_content_wait_scrolls_and_uses_bounded_timeout(monkeypatch) -> N
     assert observed_timeouts == [8.0]
     assert "scrollTo" in scripts[0][0]
     assert scripts[1][1]
+    assert "location" in scripts[1][1][0]
 
 
 def test_profile_content_timeout_is_a_valid_empty_section(monkeypatch) -> None:
@@ -153,7 +154,7 @@ def test_profile_content_timeout_is_a_valid_empty_section(monkeypatch) -> None:
     ) is False
 
 
-def test_profile_content_persistent_spinner_is_navigation_failure(
+def test_profile_content_timeout_ignores_unrelated_global_spinner(
     monkeypatch,
 ) -> None:
     class Browser:
@@ -172,12 +173,11 @@ def test_profile_content_persistent_spinner_is_navigation_failure(
         FakeWait,
     )
 
-    with pytest.raises(BrowserNavigationError, match="did not finish loading"):
-        wait_for_profile_content(
-            Browser(),
-            30,
-            "https://www.facebook.com/synthetic.user/directory_personal_details",
-        )
+    assert wait_for_profile_content(
+        Browser(),
+        30,
+        "https://www.facebook.com/synthetic.user/directory_personal_details",
+    ) is False
 
 
 def test_create_firefox_driver_uses_generated_options(

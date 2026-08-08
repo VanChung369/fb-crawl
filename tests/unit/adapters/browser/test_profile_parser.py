@@ -96,6 +96,56 @@ def test_directory_link_and_address_sections_are_parsed_conservatively() -> None
     assert details.address == "123 Đường Ví Dụ"
 
 
+def test_current_labelled_dom_parses_personal_details_without_role_list() -> None:
+    html = """
+    <section>
+      <h2>Location</h2>
+      <div role="button">
+        <a href="https://www.facebook.com/synthetic-city">Synthetic City</a>
+        <span>Current city</span>
+      </div>
+      <h2>Birthday</h2>
+      <div>
+        <span>November 30, 1997</span>
+        <span>Birthday</span>
+      </div>
+    </section>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url=(
+            "https://www.facebook.com/synthetic.user/directory_personal_details"
+        ),
+    )
+
+    assert details.current_city == "Synthetic City"
+    assert details.birth_date == "1997-11-30"
+    assert details.birth_year == 1997
+
+
+def test_current_labelled_dom_parses_contact_values_without_role_list() -> None:
+    html = """
+    <section>
+      <div><span>+1 202-555-0147</span><span>Mobile</span></div>
+      <div><span>123 Synthetic Street</span><span>Address</span></div>
+      <div>
+        <a href="https://profile.example.test/?fbclid=synthetic">Profile site</a>
+        <span>Website</span>
+      </div>
+    </section>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url="https://www.facebook.com/synthetic.user/directory_links",
+    )
+
+    assert details.phone_numbers == ("+1 202-555-0147",)
+    assert details.address == "123 Synthetic Street"
+    assert details.website == "https://profile.example.test/"
+
+
 @pytest.mark.parametrize(
     ("value", "expected_date", "expected_year"),
     [

@@ -296,10 +296,11 @@ CSS classes or SVG path data.
 It uses, in priority order:
 
 1. semantic links (`tel:`, `mailto:`, external website `href`);
-2. headings and `aria-labelledby` relationships for section context;
-3. `role="list"` and `role="listitem"` boundaries;
-4. normalized visible text and conservative multilingual phrases;
-5. date parsing only inside personal/basic-information sections.
+2. explicit value/label rows such as `Current city` and `Birthday`;
+3. headings and `aria-labelledby` relationships for section context;
+4. `role="list"` and `role="listitem"` boundaries;
+5. normalized visible text and conservative multilingual phrases;
+6. date parsing only inside personal/basic-information fields or sections.
 
 Initial language coverage:
 
