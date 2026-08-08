@@ -49,3 +49,4 @@ def test_json_writes_full_result_envelope(
     assert payload["records"][0]["profile_url"].endswith("/good")
 
     assert payload["stats"]["succeeded"] == 1
+    assert payload["enrichment"] is None

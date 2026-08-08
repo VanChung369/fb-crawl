@@ -94,6 +94,22 @@ def _write_txt(
     ) as file:
         for record in result.records:
             file.write(f"User ID: {record.user_id}\n")
+            if record.name:
+                file.write(f"Name: {record.name}\n")
+            if record.phone_numbers:
+                file.write(f"Phone Numbers: {'; '.join(record.phone_numbers)}\n")
+            if record.website:
+                file.write(f"Website: {record.website}\n")
+            if record.address:
+                file.write(f"Address: {record.address}\n")
+            if record.current_city:
+                file.write(f"Current City: {record.current_city}\n")
+            if record.hometown:
+                file.write(f"Hometown: {record.hometown}\n")
+            if record.birth_date:
+                file.write(f"Birth Date: {record.birth_date}\n")
+            if record.birth_year is not None:
+                file.write(f"Birth Year: {record.birth_year}\n")
 
         for issue in result.issues:
             file.write(

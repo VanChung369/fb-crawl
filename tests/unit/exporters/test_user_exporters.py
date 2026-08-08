@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    EnrichmentStats,
     ScrapeIssue,
     ScrapeMode,
     ScrapeResult,
@@ -60,6 +61,17 @@ def result() -> ScrapeResult[UserRecord]:
             succeeded=1,
             failed=1,
         ),
+        enrichment=EnrichmentStats(
+            selected=1,
+            attempted=1,
+            succeeded=1,
+            failed=0,
+            phone_found=1,
+            address_found=1,
+            current_city_found=1,
+            hometown_found=1,
+            birth_year_found=1,
+        ),
     )
 
 
@@ -99,6 +111,7 @@ def test_user_json_keeps_full_result_envelope(tmp_path: Path) -> None:
     assert payload["records"][0]["username"] == "synthetic.user"
     assert len(payload["records"]) == 1
     assert payload["stats"]["failed"] == 1
+    assert payload["enrichment"]["birth_year_found"] == 1
 
 
 def test_user_txt_writes_records_and_target_issues(
@@ -111,6 +124,12 @@ def test_user_txt_writes_records_and_target_issues(
     content = path.read_text(encoding="utf-8")
 
     assert "User ID: synthetic.user" in content
+    assert "Phone Numbers: +84 123 456 789" in content
+    assert "Address: 123 Synthetic Street" in content
+    assert "Current City: Synthetic City" in content
+    assert "Hometown: Synthetic Province" in content
+    assert "Birth Date: 1990-01-02" in content
+    assert "Birth Year: 1990" in content
     assert "Error: [authenticated_navigation_failed]" in content
 
 

@@ -157,6 +157,10 @@ CSV files use UTF-8 with a BOM for spreadsheet compatibility.
 | `category`      | Public profile category; empty when not applicable.                |
 | `website`       | Public website value; empty when not applicable.                   |
 | `address`       | Public address value; empty when not available or not applicable.  |
+| `current_city`  | Authenticated visible current city; empty for public page records.  |
+| `hometown`      | Authenticated visible hometown; empty for public page records.      |
+| `birth_date`    | Authenticated visible birthday normalized to `YYYY-MM-DD`.          |
+| `birth_year`    | Year derived from an authenticated visible birthday/year.          |
 | `phone_numbers` | Phone values separated by `; `.                                    |
 | `phone_sources` | Sources contributing phone values.                                 |
 | `profile_url`   | Canonical Facebook page/profile URL.                               |
@@ -169,7 +173,7 @@ Successful records are written first. Issues are then written as separate rows w
 
 ## JSON schema
 
-JSON output contains a complete result envelope:
+JSON output contains a normalized result envelope:
 
 ```json
 {
@@ -180,7 +184,8 @@ JSON output contains a complete result envelope:
     "discovered": 0,
     "succeeded": 0,
     "failed": 0
-  }
+  },
+  "enrichment": null
 }
 ```
 

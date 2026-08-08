@@ -42,6 +42,7 @@ def write_json(
         "records": [record_row(record) for record in result.records],
         "issues": [issue_row(issue) for issue in result.issues],
         "stats": _jsonable(result.stats),
+        "enrichment": _jsonable(result.enrichment),
     }
 
     with atomic_text_writer(

@@ -32,6 +32,35 @@ fb-crawl authenticated comments https://www.facebook.com/PAGE/posts/POST_ID --he
 
 Headless mode never requests credentials. It exits with code `3` when the saved session is missing, expired, or redirected to a login, checkpoint, or two-step route.
 
+## Optional profile enrichment
+
+Members/comments pages usually expose only identity links. Phone numbers,
+website, address, location, and birthday may appear only on a profile's visible
+About pages. Enrichment is therefore explicit and disabled by default.
+
+```powershell
+fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
+  --enrich-profiles `
+  --profile-fields phone,address,current_city,hometown,birth_date `
+  --profile-limit 20 `
+  --profile-delay 3
+```
+
+When `--profile-fields` is omitted, all documented enrichment fields are
+requested. Supported values are `phone`, `website`, `address`, `current_city`,
+`hometown`, and `birth_date`. `birth_year` is derived from a visible valid
+birthday/year value.
+
+Each selected unique user is visited at most once after global deduplication.
+The browser opens at most two normalized About routes per profile. A failed
+profile preserves the base user and later profiles continue; session loss stops
+the run. Users beyond `--profile-limit` remain valid base records with empty
+enrichment fields.
+
+`current_city` (for example, a visible "Lives in" value), `hometown`, and a
+street/business `address` remain distinct. The crawler never guesses one from
+another.
+
 ## Batch
 
 Create a UTF-8 file with one supported URL per line. Blank lines and lines beginning with `#` are ignored.
@@ -64,6 +93,10 @@ Invalid targets and bounded navigation or parser failures become issue rows whil
 - `--browser-timeout` overrides `FB_CRAWL_BROWSER_TIMEOUT_SECONDS`; the default is `30` seconds.
 - `--verification-timeout` overrides `FB_CRAWL_VERIFICATION_TIMEOUT_SECONDS`; the default is `300` seconds.
 - `--format` accepts `csv`, `json`, `txt`, or `xlsx`; the default is `csv`.
+- `--enrich-profiles` explicitly enables visible profile About collection.
+- `--profile-fields` selects a comma-separated subset of enrichment fields.
+- `--profile-limit` defaults to `20` and must be greater than zero.
+- `--profile-delay` defaults to `3.0` seconds and must be zero or greater.
 
 A repository-local session path must stay under `runtime/`. An absolute external path may be used for a managed secret mount.
 
@@ -80,7 +113,7 @@ runtime/output/batch.csv
 CSV and XLSX columns are:
 
 ```text
-user_id,name,username,page_name,category,website,address,phone_numbers,phone_sources,profile_url,source,source_url,error_code,error_message
+user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,phone_numbers,phone_sources,profile_url,source,source_url,error_code,error_message
 ```
 
 Authenticated member/comment records populate the common identity and source
@@ -88,9 +121,9 @@ fields. Page-specific and phone fields remain empty when they are not
 available. Public output uses the exact same schema and populates page-specific
 fields when found.
 
-JSON contains `records`, `issues`, and `stats`.
+JSON contains `records`, `issues`, `stats`, and optional `enrichment` coverage.
 
-TXT contains `User ID` lines followed by target-error lines.
+TXT contains user IDs, non-empty enrichment fields, and target-error lines.
 
 Existing output is preserved when both records and issues are empty. Every non-empty write uses a same-directory temporary file and atomic replacement.
 
@@ -113,4 +146,11 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - Invalid or expired session: rerun visibly with `--no-headless` to create a new validated session.
 - Checkpoint or two-factor prompt: complete it manually in the visible browser; the tool never bypasses it.
 - Empty output: increase `--steps` within a reasonable bound and confirm the account can see the requested members or comments in Firefox.
+- Empty enrichment fields: confirm the field is visible on the profile's About
+  pages to the same account. Missing/hidden fields are not errors and are never
+  guessed.
+- Slow enrichment: each unique profile can require two bounded page loads plus
+  `--profile-delay`; reduce `--profile-limit` for a shorter run.
+- Treat exported birthday and location values as personal data and apply an
+  appropriate retention/deletion policy.
 - Selector failure after a Facebook UI change: retain the safe error message and CLI version, but do not include page HTML or session data.

@@ -45,6 +45,16 @@ fb-crawl authenticated comments https://www.facebook.com/PAGE/posts/POST_ID --he
 fb-crawl authenticated batch --input runtime/targets.txt --headless
 ```
 
+Optionally enrich a bounded number of unique profiles with fields visible to
+the authenticated account:
+
+```powershell
+fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
+  --enrich-profiles `
+  --profile-fields phone,current_city,birth_date `
+  --profile-limit 20
+```
+
 See [docs/authenticated-cli.md](docs/authenticated-cli.md) for supported URLs, session handling, formats, exit codes, and security guidance.
 
 ## Exit codes
