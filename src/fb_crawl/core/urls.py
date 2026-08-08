@@ -51,6 +51,7 @@ FACEBOOK_INTERNAL_PATHS = {
     "plugins",
     "policies",
     "privacy",
+    "profile.php",
     "public",
     "qr_code_login",
     "recover",
@@ -386,7 +387,7 @@ def normalize_comments_url(
     return None
 
 
-def profile_about_urls(
+def profile_directory_urls(
     profile_url: str | None,
     user_id: str,
 ) -> tuple[str, ...]:
@@ -412,7 +413,11 @@ def profile_about_urls(
         base = "https://www.facebook.com/profile.php"
         return tuple(
             f"{base}?{urlencode((('id', profile_id), ('sk', section)))}"
-            for section in ("about", "about_contact_and_basic_info")
+            for section in (
+                "directory_personal_details",
+                "directory_contact_info",
+                "directory_work",
+            )
         )
 
     if lowered in FACEBOOK_INTERNAL_PATHS or first.casefold() != user_id.casefold():
@@ -423,9 +428,18 @@ def profile_about_urls(
 
     base = f"https://www.facebook.com/{first}"
     return (
-        f"{base}/about",
-        f"{base}/about_contact_and_basic_info",
+        f"{base}/directory_personal_details",
+        f"{base}/directory_contact_info",
+        f"{base}/directory_work",
     )
+
+
+def profile_about_urls(
+    profile_url: str | None,
+    user_id: str,
+) -> tuple[str, ...]:
+    """Backward-compatible alias for the current profile directory routes."""
+    return profile_directory_urls(profile_url, user_id)
 
 
 def classify_authenticated_url(

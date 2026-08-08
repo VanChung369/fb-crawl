@@ -14,6 +14,7 @@ from fb_crawl.core.models import (
 )
 from fb_crawl.exporters.users import write_users
 from fb_crawl.exporters.schema import UNIFIED_FIELDS
+from fb_crawl.exporters.schema import user_record_row
 from fb_crawl.core.exceptions import (
     ConfigurationError,
     ExportError,
@@ -112,6 +113,18 @@ def test_user_json_keeps_full_result_envelope(tmp_path: Path) -> None:
     assert len(payload["records"]) == 1
     assert payload["stats"]["failed"] == 1
     assert payload["enrichment"]["birth_year_found"] == 1
+
+
+def test_numeric_profile_php_is_not_exported_as_username() -> None:
+    record = UserRecord(
+        user_id="123",
+        name="Synthetic User",
+        profile_url="https://www.facebook.com/profile.php?id=123",
+        source="members",
+        source_url="https://www.facebook.com/groups/1/members",
+    )
+
+    assert user_record_row(record)["username"] == ""
 
 
 def test_user_txt_writes_records_and_target_issues(

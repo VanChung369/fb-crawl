@@ -44,6 +44,9 @@ def _username(profile_url: str, user_id: str = "") -> str:
         return ""
 
     candidate = parts[0]
+    if candidate.casefold() == "profile.php":
+        return ""
+
     if candidate.casefold() in FACEBOOK_INTERNAL_PATHS:
         return ""
 

@@ -193,6 +193,7 @@ def _merge_record(
 def _merge_details(record: UserRecord, details: ProfileDetails) -> UserRecord:
     return replace(
         record,
+        profile_url=(details.canonical_profile_url or record.profile_url),
         phone_numbers=tuple(
             dict.fromkeys((*record.phone_numbers, *details.phone_numbers))
         ),

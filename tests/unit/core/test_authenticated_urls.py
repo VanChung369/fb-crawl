@@ -4,7 +4,7 @@ from fb_crawl.core.urls import (
     classify_authenticated_url,
     normalize_comments_url,
     normalize_members_url,
-    profile_about_urls,
+    profile_directory_urls,
 )
 
 from fb_crawl.core.models import AuthenticatedAction
@@ -134,10 +134,17 @@ def test_batch_classifier_rejects_unsupported_urls(
             "https://m.facebook.com/profile.php?id=123&ref=share#top",
             "123",
             (
-                "https://www.facebook.com/profile.php?id=123&sk=about",
                 (
                     "https://www.facebook.com/profile.php"
-                    "?id=123&sk=about_contact_and_basic_info"
+                    "?id=123&sk=directory_personal_details"
+                ),
+                (
+                    "https://www.facebook.com/profile.php"
+                    "?id=123&sk=directory_contact_info"
+                ),
+                (
+                    "https://www.facebook.com/profile.php"
+                    "?id=123&sk=directory_work"
                 ),
             ),
         ),
@@ -145,21 +152,28 @@ def test_batch_classifier_rejects_unsupported_urls(
             "https://web.facebook.com/synthetic.user?ref=share#top",
             "synthetic.user",
             (
-                "https://www.facebook.com/synthetic.user/about",
                 (
                     "https://www.facebook.com/synthetic.user"
-                    "/about_contact_and_basic_info"
+                    "/directory_personal_details"
+                ),
+                (
+                    "https://www.facebook.com/synthetic.user"
+                    "/directory_contact_info"
+                ),
+                (
+                    "https://www.facebook.com/synthetic.user"
+                    "/directory_work"
                 ),
             ),
         ),
     ],
 )
-def test_profile_about_urls_are_normalized_and_bounded(
+def test_profile_directory_urls_are_normalized_and_bounded(
     profile_url: str,
     user_id: str,
     expected: tuple[str, ...],
 ) -> None:
-    assert profile_about_urls(profile_url, user_id) == expected
+    assert profile_directory_urls(profile_url, user_id) == expected
 
 
 @pytest.mark.parametrize(
@@ -181,8 +195,8 @@ def test_profile_about_urls_are_normalized_and_bounded(
         ("https://www.facebook.com/synthetic.user", ""),
     ],
 )
-def test_profile_about_urls_reject_unsupported_or_mismatched_identity(
+def test_profile_directory_urls_reject_unsupported_or_mismatched_identity(
     profile_url: str | None,
     user_id: str,
 ) -> None:
-    assert profile_about_urls(profile_url, user_id) == ()
+    assert profile_directory_urls(profile_url, user_id) == ()

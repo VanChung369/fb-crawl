@@ -36,7 +36,8 @@ Headless mode never requests credentials. It exits with code `3` when the saved 
 
 Members/comments pages usually expose only identity links. Phone numbers,
 website, address, location, and birthday may appear only on a profile's visible
-About pages. Enrichment is therefore explicit and disabled by default.
+profile-information sections. Enrichment is therefore explicit and disabled by
+default.
 
 ```powershell
 fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
@@ -52,10 +53,13 @@ requested. Supported values are `phone`, `website`, `address`, `current_city`,
 birthday/year value.
 
 Each selected unique user is visited at most once after global deduplication.
-The browser opens at most two normalized About routes per profile. A failed
-profile preserves the base user and later profiles continue; session loss stops
-the run. Users beyond `--profile-limit` remain valid base records with empty
-enrichment fields.
+The browser opens at most three normalized directory routes per profile:
+`directory_personal_details`, `directory_contact_info`, and `directory_work`.
+For numeric `profile.php?id=...` identities it uses equivalent bounded `sk=`
+routes, then switches to Facebook's canonical vanity URL when a redirect,
+canonical link, or Open Graph URL exposes it. A failed profile preserves the
+base user and later profiles continue; session loss stops the run. Users beyond
+`--profile-limit` remain valid base records with empty enrichment fields.
 
 `current_city` (for example, a visible "Lives in" value), `hometown`, and a
 street/business `address` remain distinct. The crawler never guesses one from
@@ -93,7 +97,7 @@ Invalid targets and bounded navigation or parser failures become issue rows whil
 - `--browser-timeout` overrides `FB_CRAWL_BROWSER_TIMEOUT_SECONDS`; the default is `30` seconds.
 - `--verification-timeout` overrides `FB_CRAWL_VERIFICATION_TIMEOUT_SECONDS`; the default is `300` seconds.
 - `--format` accepts `csv`, `json`, `txt`, or `xlsx`; the default is `csv`.
-- `--enrich-profiles` explicitly enables visible profile About collection.
+- `--enrich-profiles` explicitly enables visible profile-directory collection.
 - `--profile-fields` selects a comma-separated subset of enrichment fields.
 - `--profile-limit` defaults to `20` and must be greater than zero.
 - `--profile-delay` defaults to `3.0` seconds and must be zero or greater.

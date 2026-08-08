@@ -235,21 +235,27 @@ Mapping rules:
 
 ## Profile URL and route policy
 
+> Implementation update: Facebook's current profile UI exposes the relevant
+> sections through `directory_*` routes. These replace the older `/about` routes
+> in the initial design while preserving the same bounded-navigation policy.
+
 Only normalized Facebook profile URLs discovered by the existing authenticated
 parser are eligible.
 
 Numeric identity routes:
 
 ```text
-https://www.facebook.com/profile.php?id=USER_ID&sk=about
-https://www.facebook.com/profile.php?id=USER_ID&sk=about_contact_and_basic_info
+https://www.facebook.com/profile.php?id=USER_ID&sk=directory_personal_details
+https://www.facebook.com/profile.php?id=USER_ID&sk=directory_contact_info
+https://www.facebook.com/profile.php?id=USER_ID&sk=directory_work
 ```
 
 Vanity identity routes:
 
 ```text
-https://www.facebook.com/USERNAME/about
-https://www.facebook.com/USERNAME/about_contact_and_basic_info
+https://www.facebook.com/USERNAME/directory_personal_details
+https://www.facebook.com/USERNAME/directory_contact_info
+https://www.facebook.com/USERNAME/directory_work
 ```
 
 The route builder:
@@ -259,8 +265,8 @@ The route builder:
 - rejects login, checkpoint, places, groups, posts, videos, reels, and arbitrary
   external paths;
 - removes unrelated query parameters and fragments;
-- produces at most two routes per selected profile;
-- never follows an externally supplied About URL without normalization.
+- produces at most three routes per selected profile;
+- never follows an externally supplied directory URL without normalization.
 
 ## Browser collection
 
@@ -270,7 +276,7 @@ browser.
 
 For each selected user:
 
-1. Build the bounded overview/contact route list.
+1. Build the bounded personal/contact/work directory route list.
 2. Navigate to each route once.
 3. Wait for document readiness with the existing bounded helper.
 4. Check for session-loss routes/cookies after navigation.

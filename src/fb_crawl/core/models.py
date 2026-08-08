@@ -129,6 +129,7 @@ class ProfileDetails:
     hometown: str | None = None
     birth_date: str | None = None
     birth_year: int | None = None
+    canonical_profile_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

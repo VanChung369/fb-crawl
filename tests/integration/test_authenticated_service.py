@@ -363,6 +363,9 @@ def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
             "100": ProfileDetails(
                 phone_numbers=("+1 202-555-0147",),
                 phone_sources=("facebook:profile_contact",),
+                canonical_profile_url=(
+                    "https://www.facebook.com/synthetic.user"
+                ),
                 current_city="Synthetic City",
                 birth_date="1990-01-02",
                 birth_year=1990,
@@ -393,6 +396,9 @@ def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
 
     assert profiles.calls == [("100", fields)]
     assert result.records[0].name == "Filled Name"
+    assert result.records[0].profile_url == (
+        "https://www.facebook.com/synthetic.user"
+    )
     assert result.records[0].phone_numbers == ("+1 202-555-0147",)
     assert result.records[0].current_city == "Synthetic City"
     assert result.records[0].birth_year == 1990

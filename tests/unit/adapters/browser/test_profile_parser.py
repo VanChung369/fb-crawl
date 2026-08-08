@@ -73,6 +73,31 @@ def test_valid_empty_about_page_is_successful_empty_details() -> None:
     ) == ProfileDetails()
 
 
+def test_directory_link_and_address_sections_are_parsed_conservatively() -> None:
+    html = """
+    <h2 id="links">Liên kết</h2>
+    <div role="list" aria-labelledby="links">
+      <div role="listitem">
+        <a href="https://profile.example.test/?fbclid=synthetic">Website</a>
+      </div>
+    </div>
+    <h2 id="address">Địa chỉ</h2>
+    <div role="list" aria-labelledby="address">
+      <div role="listitem">123 Đường Ví Dụ</div>
+    </div>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url=(
+            "https://www.facebook.com/synthetic.user/directory_contact_info"
+        ),
+    )
+
+    assert details.website == "https://profile.example.test/"
+    assert details.address == "123 Đường Ví Dụ"
+
+
 @pytest.mark.parametrize(
     ("value", "expected_date", "expected_year"),
     [

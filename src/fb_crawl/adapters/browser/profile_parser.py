@@ -28,6 +28,28 @@ CONTACT_HEADINGS = frozenset(
         "thong tin lien he va co ban",
     }
 )
+LINK_HEADINGS = frozenset(
+    {
+        "link",
+        "links",
+        "lien ket",
+    }
+)
+ADDRESS_HEADINGS = frozenset(
+    {
+        "address",
+        "dia chi",
+    }
+)
+PHONE_HEADINGS = frozenset(
+    {
+        "mobile",
+        "phone",
+        "phone number",
+        "dien thoai",
+        "so dien thoai",
+    }
+)
 
 CURRENT_CITY_PREFIXES = (
     "lives in ",
@@ -207,8 +229,11 @@ class ProfileParser:
             section = _section_name(container, soup)
             is_personal = section in PERSONAL_HEADINGS
             is_contact = section in CONTACT_HEADINGS
+            is_link = section in LINK_HEADINGS
+            is_address = section in ADDRESS_HEADINGS
+            is_phone = section in PHONE_HEADINGS
 
-            if not is_personal and not is_contact:
+            if not any((is_personal, is_contact, is_link, is_address, is_phone)):
                 continue
 
             items = container.find_all(attrs={"role": "listitem"})
@@ -226,19 +251,31 @@ class ProfileParser:
                     if ProfileField.BIRTH_DATE in requested and birth_year is None:
                         birth_date, birth_year = _birthday(text)
 
-                if is_contact:
+                if is_contact or is_phone:
                     if ProfileField.PHONE in requested:
                         for phone in extract_phone_numbers(text):
                             phones.setdefault(re.sub(r"\D", "", phone), phone)
 
+                if is_contact:
                     if ProfileField.ADDRESS in requested and address is None:
                         address = _value_after_prefix(text, ADDRESS_PREFIXES)
 
-                    if ProfileField.WEBSITE in requested and website is None:
-                        for anchor in item.find_all("a", href=True):
-                            website = _external_website(str(anchor.get("href") or ""))
-                            if website is not None:
-                                break
+                if (
+                    is_address
+                    and ProfileField.ADDRESS in requested
+                    and address is None
+                ):
+                    address = text or None
+
+                if (
+                    (is_contact or is_link)
+                    and ProfileField.WEBSITE in requested
+                    and website is None
+                ):
+                    for anchor in item.find_all("a", href=True):
+                        website = _external_website(str(anchor.get("href") or ""))
+                        if website is not None:
+                            break
 
         phone_values = tuple(phones.values())
         return ProfileDetails(
