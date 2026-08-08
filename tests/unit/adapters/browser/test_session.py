@@ -1,5 +1,8 @@
 import pytest
 
+import os
+import stat
+
 import json
 from pathlib import Path
 
@@ -7,6 +10,9 @@ from fb_crawl.adapters.browser.session import (
     SessionStore,
     is_authenticated,
 )
+
+
+from fb_crawl.core.exceptions import SessionError
 
 
 class FakeBrowser:
@@ -133,3 +139,37 @@ def test_restore_treats_malformed_content_as_unavailable(
     )
 
     assert SessionStore(path).restore(FakeBrowser()) is False
+
+
+def test_save_is_atomic_owner_only_and_requires_authentication(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "nested" / "session.json"
+
+    authenticated = FakeBrowser(
+        [
+            {
+                "name": "c_user",
+                "value": "100",
+                "domain": ".facebook.com",
+                "sameSite": "Lax",
+            }
+        ]
+    )
+
+    SessionStore(path).save(authenticated)
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload[0]["name"] == "c_user"
+
+    assert not path.with_name("session.json.tmp").exists()
+
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    with pytest.raises(
+        SessionError,
+        match="valid authenticated session",
+    ):
+        SessionStore(tmp_path / "invalid.json").save(FakeBrowser())

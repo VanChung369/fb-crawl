@@ -2,7 +2,11 @@ from __future__ import annotations
 
 
 import json
+import os
+
+
 from pathlib import Path
+from fb_crawl.core.exceptions import SessionError
 
 from collections.abc import Mapping
 from urllib.parse import urlparse
@@ -136,3 +140,75 @@ class SessionStore:
             # Session restoration failed, so we treat the session as invalid. The browser may have
             # regarded as invalid session.
             return False
+
+    def save(
+        self,
+        browser,
+    ) -> None:
+        if not is_authenticated(browser):
+            raise SessionError("Cannot save without a valid " "authenticated session.")
+
+        cookies = [
+            cookie
+            for item in browser.get_cookies()
+            if (cookie := _compatible_cookie(item)) is not None
+        ]
+
+        temporary = self.path.with_name(self.path.name + ".tmp")
+
+        try:
+            self.path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            descriptor = os.open(
+                temporary,
+                (os.O_WRONLY | os.O_CREAT | os.O_TRUNC),
+                0o600,
+            )
+
+            with os.fdopen(
+                descriptor,
+                "w",
+                encoding="utf-8",
+            ) as file:
+                json.dump(
+                    cookies,
+                    file,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
+
+            os.replace(
+                temporary,
+                self.path,
+            )
+
+            try:
+                os.chmod(
+                    self.path,
+                    0o600,
+                )
+            except OSError:
+                # Windows không đảm bảo Unix permission bits.
+                pass
+
+        except (
+            OSError,
+            TypeError,
+            ValueError,
+        ) as error:
+            raise SessionError(
+                f"Cannot persist session file " f"{self.path}."
+            ) from error
+
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
