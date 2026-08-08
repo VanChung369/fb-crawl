@@ -7,6 +7,8 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    ProfileDetails,
+    ProfileField,
     ScrapeMode,
     ScrapeRequest,
     UserRecord,
@@ -92,6 +94,7 @@ class Parser:
 def request(
     action: AuthenticatedAction,
     *targets: str,
+    **overrides,
 ) -> ScrapeRequest:
     return ScrapeRequest(
         mode=ScrapeMode.AUTHENTICATED,
@@ -99,6 +102,7 @@ def request(
         targets=targets,
         steps=2,
         delay_seconds=0,
+        **overrides,
     )
 
 
@@ -156,6 +160,28 @@ def test_explicit_invalid_target_fails_before_session() -> None:
             request(
                 AuthenticatedAction.MEMBERS,
                 "https://facebook.com/acme",
+            ),
+            object(),
+        )
+
+    assert session.ensure_calls == 0
+
+
+def test_enrichment_without_runtime_fails_before_session() -> None:
+    session = Session()
+    service = AuthenticatedService(
+        session,
+        Collector({}),
+        Collector({}),
+        Parser(),
+    )
+
+    with pytest.raises(ValidationError, match="enrichment runtime"):
+        service.run(
+            request(
+                AuthenticatedAction.MEMBERS,
+                "https://facebook.com/groups/1",
+                enrich_profiles=True,
             ),
             object(),
         )
@@ -312,3 +338,216 @@ def test_empty_parsed_target_is_success_not_failure() -> None:
     assert result.stats.discovered == 0
     assert result.stats.succeeded == 0
     assert result.stats.failed == 0
+
+
+class ProfileEnricher:
+    def __init__(self, outcomes: dict[str, ProfileDetails | Exception]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[tuple[str, tuple[ProfileField, ...]]] = []
+
+    def enrich(self, browser, record: UserRecord, fields):
+        self.calls.append((record.user_id, fields))
+        outcome = self.outcomes[record.user_id]
+
+        if isinstance(outcome, Exception):
+            raise outcome
+
+        return outcome
+
+
+def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
+    first = "https://www.facebook.com/acme/posts/1"
+    second = "https://www.facebook.com/acme/posts/2"
+    profiles = ProfileEnricher(
+        {
+            "100": ProfileDetails(
+                phone_numbers=("+1 202-555-0147",),
+                phone_sources=("facebook:profile_contact",),
+                current_city="Synthetic City",
+                birth_date="1990-01-02",
+                birth_year=1990,
+            )
+        }
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({first: "100:", second: "100:Filled Name"}),
+        Parser(),
+        profiles,
+        sleep_func=lambda seconds: None,
+    )
+    fields = (ProfileField.PHONE, ProfileField.BIRTH_DATE)
+
+    result = service.run(
+        request(
+            AuthenticatedAction.COMMENTS,
+            first,
+            second,
+            enrich_profiles=True,
+            profile_fields=fields,
+            profile_delay_seconds=0,
+        ),
+        object(),
+    )
+
+    assert profiles.calls == [("100", fields)]
+    assert result.records[0].name == "Filled Name"
+    assert result.records[0].phone_numbers == ("+1 202-555-0147",)
+    assert result.records[0].current_city == "Synthetic City"
+    assert result.records[0].birth_year == 1990
+    assert result.enrichment is not None
+    assert result.enrichment.selected == 1
+    assert result.enrichment.succeeded == 1
+    assert result.enrichment.phone_found == 1
+    assert result.enrichment.birth_year_found == 1
+
+
+def test_enrichment_limit_delay_and_empty_success_are_bounded() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+
+    class MultiParser:
+        def parse(self, html, *, source, source_url):
+            return tuple(
+                UserRecord(
+                    user_id=user_id,
+                    name=f"User {user_id}",
+                    profile_url=f"https://www.facebook.com/profile.php?id={user_id}",
+                    source=source,
+                    source_url=source_url,
+                )
+                for user_id in ("100", "200", "300")
+            )
+
+    profiles = ProfileEnricher(
+        {
+            "100": ProfileDetails(),
+            "200": ProfileDetails(address="123 Synthetic Street"),
+        }
+    )
+    sleeps: list[float] = []
+    service = AuthenticatedService(
+        Session(),
+        Collector({target: "ignored"}),
+        Collector({}),
+        MultiParser(),
+        profiles,
+        sleep_func=sleeps.append,
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.MEMBERS,
+            target,
+            enrich_profiles=True,
+            profile_limit=2,
+            profile_delay_seconds=1.5,
+        ),
+        object(),
+    )
+
+    assert [item[0] for item in profiles.calls] == ["100", "200"]
+    assert sleeps == [1.5]
+    assert result.records[2].user_id == "300"
+    assert result.enrichment is not None
+    assert result.enrichment.selected == 2
+    assert result.enrichment.succeeded == 2
+    assert result.enrichment.address_found == 1
+
+
+def test_profile_failure_preserves_base_record_and_continues() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+
+    class TwoUsers:
+        def parse(self, html, *, source, source_url):
+            return tuple(
+                UserRecord(
+                    user_id=user_id,
+                    name=f"User {user_id}",
+                    profile_url=f"https://www.facebook.com/profile.php?id={user_id}",
+                    source=source,
+                    source_url=source_url,
+                )
+                for user_id in ("100", "200")
+            )
+
+    profiles = ProfileEnricher(
+        {
+            "100": BrowserNavigationError(
+                "Authenticated profile navigation failed.",
+                target="https://www.facebook.com/profile.php?id=100",
+            ),
+            "200": ProfileDetails(current_city="Synthetic City"),
+        }
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({target: "ignored"}),
+        Collector({}),
+        TwoUsers(),
+        profiles,
+        sleep_func=lambda seconds: None,
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.MEMBERS,
+            target,
+            enrich_profiles=True,
+            profile_delay_seconds=0,
+        ),
+        object(),
+    )
+
+    assert [record.user_id for record in result.records] == ["100", "200"]
+    assert result.records[0].current_city is None
+    assert result.records[1].current_city == "Synthetic City"
+    assert result.issues[-1].action == "profile_enrichment"
+    assert result.enrichment is not None
+    assert result.enrichment.failed == 1
+    assert result.enrichment.succeeded == 1
+
+
+def test_profile_session_loss_stops_later_profiles() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+
+    class TwoUsers:
+        def parse(self, html, *, source, source_url):
+            return tuple(
+                UserRecord(
+                    user_id=user_id,
+                    name=None,
+                    profile_url=f"https://www.facebook.com/profile.php?id={user_id}",
+                    source=source,
+                    source_url=source_url,
+                )
+                for user_id in ("100", "200")
+            )
+
+    profiles = ProfileEnricher(
+        {
+            "100": SessionError("Session unavailable."),
+            "200": ProfileDetails(),
+        }
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({target: "ignored"}),
+        Collector({}),
+        TwoUsers(),
+        profiles,
+        sleep_func=lambda seconds: None,
+    )
+
+    with pytest.raises(SessionError):
+        service.run(
+            request(
+                AuthenticatedAction.MEMBERS,
+                target,
+                enrich_profiles=True,
+                profile_delay_seconds=0,
+            ),
+            object(),
+        )
+
+    assert [item[0] for item in profiles.calls] == ["100"]

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from typing import Protocol
+import time
+from collections.abc import Callable
 from dataclasses import replace
+from typing import Protocol
 
 from urllib.parse import (
     urlsplit,
@@ -16,6 +18,9 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    EnrichmentStats,
+    ProfileDetails,
+    ProfileField,
     ScrapeIssue,
     ScrapeMode,
     ScrapeRequest,
@@ -61,6 +66,15 @@ class UserParserPort(Protocol):
         source: str,
         source_url: str,
     ) -> tuple[UserRecord, ...]: ...
+
+
+class ProfileEnricherPort(Protocol):
+    def enrich(
+        self,
+        browser,
+        record: UserRecord,
+        fields: tuple[ProfileField, ...],
+    ) -> ProfileDetails: ...
 
 
 PreparedTarget = tuple[
@@ -161,6 +175,36 @@ def _merge_record(
         first,
         name=first.name or later.name,
         profile_url=(first.profile_url or later.profile_url),
+        phone_numbers=tuple(
+            dict.fromkeys((*first.phone_numbers, *later.phone_numbers))
+        ),
+        phone_sources=tuple(
+            dict.fromkeys((*first.phone_sources, *later.phone_sources))
+        ),
+        website=first.website or later.website,
+        address=first.address or later.address,
+        current_city=first.current_city or later.current_city,
+        hometown=first.hometown or later.hometown,
+        birth_date=first.birth_date or later.birth_date,
+        birth_year=first.birth_year or later.birth_year,
+    )
+
+
+def _merge_details(record: UserRecord, details: ProfileDetails) -> UserRecord:
+    return replace(
+        record,
+        phone_numbers=tuple(
+            dict.fromkeys((*record.phone_numbers, *details.phone_numbers))
+        ),
+        phone_sources=tuple(
+            dict.fromkeys((*record.phone_sources, *details.phone_sources))
+        ),
+        website=record.website or details.website,
+        address=record.address or details.address,
+        current_city=record.current_city or details.current_city,
+        hometown=record.hometown or details.hometown,
+        birth_date=record.birth_date or details.birth_date,
+        birth_year=record.birth_year or details.birth_year,
     )
 
 
@@ -171,11 +215,16 @@ class AuthenticatedService:
         members: CollectionPort,
         comments: CollectionPort,
         parser: UserParserPort,
+        profile_enricher: ProfileEnricherPort | None = None,
+        *,
+        sleep_func: Callable[[float], None] = time.sleep,
     ) -> None:
         self._session = session
         self._members = members
         self._comments = comments
         self._parser = parser
+        self._profile_enricher = profile_enricher
+        self._sleep = sleep_func
 
     def validate(
         self,
@@ -183,12 +232,18 @@ class AuthenticatedService:
     ) -> None:
         _prepared_targets(request)
 
+        if request.enrich_profiles and self._profile_enricher is None:
+            raise ValidationError("Profile enrichment runtime is unavailable.")
+
     def run(
         self,
         request: ScrapeRequest,
         browser,
     ) -> ScrapeResult[UserRecord]:
         prepared, issues = _prepared_targets(request)
+
+        if request.enrich_profiles and self._profile_enricher is None:
+            raise ValidationError("Profile enrichment runtime is unavailable.")
 
         if prepared:
             self._session.ensure_authenticated(browser)
@@ -263,6 +318,89 @@ class AuthenticatedService:
                     )
                 )
 
+        enrichment: EnrichmentStats | None = None
+
+        if request.enrich_profiles:
+            selected_ids = tuple(records_by_id)[: request.profile_limit]
+            fields = request.profile_fields or tuple(ProfileField)
+            attempted = 0
+            enrichment_succeeded = 0
+            enrichment_failed = 0
+            phone_found = 0
+            address_found = 0
+            current_city_found = 0
+            hometown_found = 0
+            birth_year_found = 0
+
+            for index, user_id in enumerate(selected_ids):
+                record = records_by_id[user_id]
+                attempted += 1
+
+                try:
+                    details = self._profile_enricher.enrich(
+                        browser,
+                        record,
+                        fields,
+                    )
+
+                except SessionError:
+                    raise
+
+                except (
+                    BrowserNavigationError,
+                    BrowserParseError,
+                ) as error:
+                    enrichment_failed += 1
+                    issues.append(
+                        ScrapeIssue(
+                            code=error.code,
+                            message=error.safe_message,
+                            target=(error.target or record.profile_url),
+                            mode=ScrapeMode.AUTHENTICATED,
+                            action="profile_enrichment",
+                        )
+                    )
+
+                except Exception:
+                    enrichment_failed += 1
+                    safe_error = BrowserParseError(
+                        "Authenticated profile parsing failed.",
+                        target=record.profile_url,
+                    )
+                    issues.append(
+                        ScrapeIssue(
+                            code=safe_error.code,
+                            message=safe_error.safe_message,
+                            target=record.profile_url,
+                            mode=ScrapeMode.AUTHENTICATED,
+                            action="profile_enrichment",
+                        )
+                    )
+
+                else:
+                    records_by_id[user_id] = _merge_details(record, details)
+                    enrichment_succeeded += 1
+                    phone_found += bool(details.phone_numbers)
+                    address_found += bool(details.address)
+                    current_city_found += bool(details.current_city)
+                    hometown_found += bool(details.hometown)
+                    birth_year_found += details.birth_year is not None
+
+                if index + 1 < len(selected_ids) and request.profile_delay_seconds:
+                    self._sleep(request.profile_delay_seconds)
+
+            enrichment = EnrichmentStats(
+                selected=len(selected_ids),
+                attempted=attempted,
+                succeeded=enrichment_succeeded,
+                failed=enrichment_failed,
+                phone_found=phone_found,
+                address_found=address_found,
+                current_city_found=current_city_found,
+                hometown_found=hometown_found,
+                birth_year_found=birth_year_found,
+            )
+
         records = tuple(records_by_id.values())
 
         return ScrapeResult(
@@ -274,4 +412,5 @@ class AuthenticatedService:
                 succeeded=len(records),
                 failed=len(issues),
             ),
+            enrichment=enrichment,
         )
