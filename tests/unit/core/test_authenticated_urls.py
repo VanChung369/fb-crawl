@@ -4,6 +4,7 @@ from fb_crawl.core.urls import (
     classify_authenticated_url,
     normalize_comments_url,
     normalize_members_url,
+    profile_about_urls,
 )
 
 from fb_crawl.core.models import AuthenticatedAction
@@ -124,3 +125,64 @@ def test_batch_classifier_rejects_unsupported_urls(
     raw: str,
 ) -> None:
     assert classify_authenticated_url(raw) is None
+
+
+@pytest.mark.parametrize(
+    ("profile_url", "user_id", "expected"),
+    [
+        (
+            "https://m.facebook.com/profile.php?id=123&ref=share#top",
+            "123",
+            (
+                "https://www.facebook.com/profile.php?id=123&sk=about",
+                (
+                    "https://www.facebook.com/profile.php"
+                    "?id=123&sk=about_contact_and_basic_info"
+                ),
+            ),
+        ),
+        (
+            "https://web.facebook.com/synthetic.user?ref=share#top",
+            "synthetic.user",
+            (
+                "https://www.facebook.com/synthetic.user/about",
+                (
+                    "https://www.facebook.com/synthetic.user"
+                    "/about_contact_and_basic_info"
+                ),
+            ),
+        ),
+    ],
+)
+def test_profile_about_urls_are_normalized_and_bounded(
+    profile_url: str,
+    user_id: str,
+    expected: tuple[str, ...],
+) -> None:
+    assert profile_about_urls(profile_url, user_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("profile_url", "user_id"),
+    [
+        ("https://example.test/synthetic.user", "synthetic.user"),
+        ("https://www.facebook.com/login", "login"),
+        ("https://www.facebook.com/checkpoint/", "checkpoint"),
+        (
+            "https://www.facebook.com/two_step_verification/",
+            "two_step_verification",
+        ),
+        ("https://www.facebook.com/groups/1", "1"),
+        ("https://www.facebook.com/synthetic.user/posts/1", "synthetic.user"),
+        ("https://www.facebook.com/profile.php?id=123", "456"),
+        ("https://www.facebook.com/synthetic.user", "different.user"),
+        ("https://www.facebook.com/synthetic.user/about", "synthetic.user"),
+        (None, "synthetic.user"),
+        ("https://www.facebook.com/synthetic.user", ""),
+    ],
+)
+def test_profile_about_urls_reject_unsupported_or_mismatched_identity(
+    profile_url: str | None,
+    user_id: str,
+) -> None:
+    assert profile_about_urls(profile_url, user_id) == ()

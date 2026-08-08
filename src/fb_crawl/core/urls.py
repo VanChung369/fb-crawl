@@ -29,6 +29,7 @@ FACEBOOK_INTERNAL_PATHS = {
     "about",
     "business",
     "careers",
+    "checkpoint",
     "events",
     "friends",
     "gaming",
@@ -62,6 +63,7 @@ FACEBOOK_INTERNAL_PATHS = {
     "sharer",
     "stories",
     "story.php",
+    "two_step_verification",
     "watch",
 }
 
@@ -382,6 +384,48 @@ def normalize_comments_url(
         return "https://www.facebook.com/photo.php?" + urlencode(values)
 
     return None
+
+
+def profile_about_urls(
+    profile_url: str | None,
+    user_id: str,
+) -> tuple[str, ...]:
+    parsed = _facebook_parts(profile_url)
+
+    if parsed is None or not _valid_authenticated_id(user_id):
+        return ()
+
+    parts, query = parsed
+
+    if len(parts) != 1:
+        return ()
+
+    first = parts[0]
+    lowered = first.lower()
+
+    if lowered == "profile.php":
+        profile_id = query.get("id", [""])[0]
+
+        if not profile_id.isdigit() or user_id != profile_id:
+            return ()
+
+        base = "https://www.facebook.com/profile.php"
+        return tuple(
+            f"{base}?{urlencode((('id', profile_id), ('sk', section)))}"
+            for section in ("about", "about_contact_and_basic_info")
+        )
+
+    if lowered in FACEBOOK_INTERNAL_PATHS or first.casefold() != user_id.casefold():
+        return ()
+
+    if not _valid_authenticated_id(first):
+        return ()
+
+    base = f"https://www.facebook.com/{first}"
+    return (
+        f"{base}/about",
+        f"{base}/about_contact_and_basic_info",
+    )
 
 
 def classify_authenticated_url(
