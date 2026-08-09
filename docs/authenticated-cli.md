@@ -387,8 +387,9 @@ parser version. It never writes DOM text, raw HTML, screenshots, or cookies.
 
 ## Direct PostgreSQL persistence
 
-The `members`, `comments`, `friends`, `followers`, and `reactions` actions can
-send their in-memory user result through FBNumber and into PostgreSQL:
+The `profile`, `members`, `comments`, `friends`, `followers`, `reactions`,
+`engagement`, and `batch` actions can send their in-memory user result through
+FBNumber and into PostgreSQL:
 
 ```powershell
 $env:DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@localhost:5432/fb_pipeline"
@@ -397,6 +398,21 @@ fb-crawl pipeline migrate
 fb-crawl authenticated friends https://www.facebook.com/example `
   --persist --headless
 ```
+
+Direct profile enrichment can persist its richer visible fields without an
+intermediate artifact:
+
+```powershell
+fb-crawl authenticated profile https://www.facebook.com/example `
+  --profile-fields phone,address,birth_date,gender `
+  --persist --headless
+```
+
+For `batch`, only the deduplicated `user_result` is passed to FBNumber and
+PostgreSQL. Message and inspect records are never converted into users. A
+message/inspect-only batch performs zero provider calls and zero user database
+transactions. With `--keep-output`, the normal user, message, and inspect batch
+artifacts are still written before persistence starts.
 
 `--persist` does not create a CSV, JSON, TXT, XLSX, or phone-evidence sidecar.
 PostgreSQL is the authoritative output. To keep the normal compatibility

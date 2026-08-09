@@ -348,24 +348,25 @@ def test_repair_parser_builds_bounded_identity_repair_arguments() -> None:
 
 
 @pytest.mark.parametrize(
-    ("action", "target"),
+    "arguments",
     [
-        ("members", "https://www.facebook.com/groups/1"),
-        ("comments", "https://www.facebook.com/acme/posts/1"),
-        ("friends", "https://www.facebook.com/synthetic.user"),
-        ("followers", "https://www.facebook.com/synthetic.user"),
-        ("reactions", "https://www.facebook.com/acme/posts/1"),
+        ["members", "https://www.facebook.com/groups/1"],
+        ["comments", "https://www.facebook.com/acme/posts/1"],
+        ["friends", "https://www.facebook.com/synthetic.user"],
+        ["followers", "https://www.facebook.com/synthetic.user"],
+        ["reactions", "https://www.facebook.com/acme/posts/1"],
+        ["profile", "https://www.facebook.com/synthetic.user"],
+        ["engagement", "https://www.facebook.com/acme/posts/1"],
+        ["batch", "--input", "runtime/targets.txt"],
     ],
 )
 def test_user_actions_accept_persistence_flags(
-    action: str,
-    target: str,
+    arguments: list[str],
 ) -> None:
     args = build_parser().parse_args(
         [
             "authenticated",
-            action,
-            target,
+            *arguments,
             "--persist",
             "--keep-output",
         ]
@@ -378,11 +379,8 @@ def test_user_actions_accept_persistence_flags(
 @pytest.mark.parametrize(
     "arguments",
     [
-        ["profile", "https://www.facebook.com/synthetic.user"],
-        ["engagement", "https://www.facebook.com/acme/posts/1"],
         ["messages", "https://www.facebook.com/messages/t/123"],
         ["inspect", "https://www.facebook.com/synthetic.user"],
-        ["batch", "--input", "runtime/targets.txt"],
         ["repair", "runtime/output/friends.csv"],
     ],
 )

@@ -87,11 +87,13 @@ rolls back only that user and the batch continues; a connection or driver
 failure stops the run. Earlier committed users remain valid and a rerun is
 idempotent except for evidence counters and attempt audit rows.
 
-Authenticated `members`, `comments`, `friends`, `followers`, and `reactions`
-commands opt into this flow with `--persist`. The typed `ScrapeResult` is passed
-directly in memory; no intermediate artifact is created or deleted. Add
-`--keep-output` to also write the normal compatibility output. Existing files,
-cache, session, targets, and checkpoints are retained.
+Authenticated `profile`, `members`, `comments`, `friends`, `followers`,
+`reactions`, `engagement`, and `batch` commands opt into this flow with
+`--persist`. The typed `ScrapeResult` is passed directly in memory; no
+intermediate artifact is created or deleted. Batch unwraps only its typed
+`user_result`; message and inspect records are not written as Facebook users.
+Add `--keep-output` to also write the normal compatibility output. Existing
+files, cache, session, targets, and checkpoints are retained.
 
 ```powershell
 $env:FB_NUMBER_API_TOKEN = "replace-with-secret"

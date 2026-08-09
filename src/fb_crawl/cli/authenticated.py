@@ -18,6 +18,7 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    AuthenticatedBatchResult,
     ProfileField,
     ScrapeResult,
     ScrapeMode,
@@ -216,6 +217,7 @@ def add_authenticated_parser(
     )
     profile.add_argument("urls", nargs="+")
     _common(profile)
+    _persistence_options(profile)
 
     friends = actions.add_parser(
         "friends",
@@ -251,6 +253,7 @@ def add_authenticated_parser(
     )
     engagement.add_argument("urls", nargs="+")
     _common(engagement)
+    _persistence_options(engagement)
 
     messages = actions.add_parser(
         "messages",
@@ -278,6 +281,7 @@ def add_authenticated_parser(
     batch.add_argument("--depth", type=int, default=1)
     batch.add_argument("--max-users", type=int, default=1000)
     _common(batch)
+    _persistence_options(batch)
 
     repair = actions.add_parser(
         "repair",
@@ -455,6 +459,19 @@ def _validate_persistence_args(args: argparse.Namespace) -> None:
         raise ValidationError(
             "--output requires --keep-output when --persist is used."
         )
+
+
+def _pipeline_user_result(
+    action: AuthenticatedAction,
+    result: ScrapeResult[UserRecord] | AuthenticatedBatchResult,
+) -> ScrapeResult[UserRecord]:
+    if action is AuthenticatedAction.BATCH:
+        if not isinstance(result, AuthenticatedBatchResult):
+            raise TypeError("Batch action returned an unsupported result.")
+        return result.user_result
+    if not isinstance(result, ScrapeResult):
+        raise TypeError("Authenticated action returned an unsupported result.")
+    return result
 
 
 class ServicePort(Protocol):
@@ -889,7 +906,9 @@ def execute_authenticated(
             output_status = "not_requested"
 
         ingestion_report = (
-            persistence_runtime.ingest_result(result)
+            persistence_runtime.ingest_result(
+                _pipeline_user_result(action, result)
+            )
             if persistence_runtime is not None
             else None
         )

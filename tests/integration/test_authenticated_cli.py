@@ -8,6 +8,7 @@ from fb_crawl.cli.authenticated import (
     AuthenticatedRuntime,
     IdentityRepairRuntime,
     _load_persistence_runtime,
+    _pipeline_user_result,
 )
 from fb_crawl.core.exceptions import (
     ConfigurationError,
@@ -16,9 +17,13 @@ from fb_crawl.core.exceptions import (
     ValidationError,
 )
 from fb_crawl.core.models import (
+    AuthenticatedAction,
+    AuthenticatedBatchResult,
     EnrichmentStats,
     IdentityRepairResult,
     IdentityRepairStats,
+    InspectRecord,
+    MessageRecord,
     RetryStats,
     ScrapeResult,
     ScrapeStats,
@@ -152,6 +157,89 @@ def ingestion_report(
             failures=failures,
         ),
     )
+
+
+def empty_ingestion_report() -> IngestionReport:
+    return IngestionReport(
+        pipeline=PipelineReport(
+            users=0,
+            input_records=0,
+            skipped_records=0,
+            invalid_crawler_phones=0,
+            phone_1_found=0,
+            phone_2_found=0,
+            provider_found=0,
+            provider_not_found=0,
+            provider_failed=0,
+        ),
+        persistence=PersistenceReport(
+            intended=0,
+            persisted=0,
+            provider_retries_required=0,
+            user_ids=(),
+        ),
+    )
+
+
+def test_pipeline_user_result_routes_regular_and_batch_results() -> None:
+    regular = ScrapeResult(
+        records=(
+            UserRecord(
+                user_id="100",
+                name="Synthetic User",
+                profile_url="https://www.facebook.com/synthetic.user",
+                source="profile",
+                source_url="https://www.facebook.com/synthetic.user",
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(1, 1, 1, 0),
+    )
+    message_result = ScrapeResult(
+        records=(
+            MessageRecord(
+                message_id="message-1",
+                sender_name="Sender",
+                sender_profile_url=None,
+                text="Visible message",
+                sent_at=None,
+                thread_url="https://www.facebook.com/messages/t/1",
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(1, 1, 1, 0),
+    )
+    inspect_result = ScrapeResult(
+        records=(
+            InspectRecord(
+                target_url="https://www.facebook.com/synthetic.user",
+                target_action="inspect",
+                session_valid=True,
+                document_ready=True,
+                main_found=True,
+                dialog_count=0,
+                visible_profile_links=1,
+                message_rows=0,
+                profile_field_labels=0,
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(1, 1, 1, 0),
+    )
+    batch = AuthenticatedBatchResult(
+        user_result=regular,
+        message_result=message_result,
+        inspect_result=inspect_result,
+        stats=ScrapeStats(3, 3, 3, 0),
+        issues=(),
+    )
+
+    assert _pipeline_user_result(AuthenticatedAction.PROFILE, regular) is regular
+    assert (
+        _pipeline_user_result(AuthenticatedAction.ENGAGEMENT, regular)
+        is regular
+    )
+    assert _pipeline_user_result(AuthenticatedAction.BATCH, batch) is regular
 
 
 def test_persistence_runtime_composes_empty_in_memory_ingestion(
@@ -1011,3 +1099,289 @@ def test_missing_pipeline_configuration_returns_five_before_browser(
     assert browser_creations == []
     assert "Persistence pipeline configuration is incomplete." in error
     assert "DATABASE_URL" not in error
+
+
+def test_batch_persistence_ingests_only_user_result(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    user_result = ScrapeResult(
+        records=(
+            UserRecord(
+                user_id="100",
+                name="Synthetic User",
+                profile_url="https://www.facebook.com/synthetic.user",
+                source="profile",
+                source_url="https://www.facebook.com/synthetic.user",
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(1, 1, 1, 0),
+    )
+    empty = ScrapeResult(
+        records=(),
+        issues=(),
+        stats=ScrapeStats(0, 0, 0, 0),
+    )
+    batch_result = AuthenticatedBatchResult(
+        user_result=user_result,
+        message_result=empty,
+        inspect_result=empty,
+        stats=ScrapeStats(1, 1, 1, 0),
+        issues=(),
+    )
+
+    class BatchService(Service):
+        def run(self, request, browser):
+            return batch_result
+
+    targets = tmp_path / "targets.txt"
+    targets.write_text(
+        "profile:https://www.facebook.com/synthetic.user\n",
+        encoding="utf-8",
+    )
+    browser = Browser()
+    exported: list[object] = []
+    ingested: list[object] = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: AuthenticatedRuntime(
+            create_browser=lambda settings: browser,
+            create_service=lambda settings, credentials: BatchService(),
+            ensure_format=lambda format_name: None,
+            write_result=lambda *args: exported.append(args) or True,
+        ),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=(
+                lambda result: ingested.append(result) or ingestion_report()
+            ),
+            close=lambda: None,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "batch",
+            "--input",
+            str(targets),
+            "--persist",
+        ]
+    )
+
+    assert exit_code == 0
+    assert ingested == [user_result]
+    assert exported == []
+
+
+@pytest.mark.parametrize(
+    ("action", "target"),
+    [
+        ("profile", "https://www.facebook.com/synthetic.user"),
+        ("engagement", "https://www.facebook.com/acme/posts/1"),
+    ],
+)
+def test_profile_and_engagement_persist_exact_scrape_result(
+    monkeypatch,
+    action: str,
+    target: str,
+) -> None:
+    browser = Browser()
+    service = Service()
+    ingested: list[object] = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime(browser, service),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=(
+                lambda result: ingested.append(result) or ingestion_report()
+            ),
+            close=lambda: None,
+        ),
+    )
+
+    exit_code = main(
+        ["authenticated", action, target, "--persist"]
+    )
+
+    assert exit_code == 0
+    assert len(ingested) == 1
+    assert isinstance(ingested[0], ScrapeResult)
+    assert ingested[0].records[0].user_id == "100"
+
+
+def test_non_user_batch_persists_zero_users_without_export(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    empty_users = ScrapeResult(
+        records=(),
+        issues=(),
+        stats=ScrapeStats(0, 0, 0, 0),
+    )
+    message_result = ScrapeResult(
+        records=(
+            MessageRecord(
+                message_id="message-1",
+                sender_name="Sender",
+                sender_profile_url=None,
+                text="Visible message",
+                sent_at=None,
+                thread_url="https://www.facebook.com/messages/t/1",
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(1, 1, 1, 0),
+    )
+    empty_inspect = ScrapeResult(
+        records=(),
+        issues=(),
+        stats=ScrapeStats(0, 0, 0, 0),
+    )
+    batch_result = AuthenticatedBatchResult(
+        user_result=empty_users,
+        message_result=message_result,
+        inspect_result=empty_inspect,
+        stats=ScrapeStats(1, 1, 1, 0),
+        issues=(),
+    )
+
+    class BatchService(Service):
+        def run(self, request, browser):
+            return batch_result
+
+    targets = tmp_path / "targets.txt"
+    targets.write_text(
+        "messages:https://www.facebook.com/messages/t/1\n",
+        encoding="utf-8",
+    )
+    browser = Browser()
+    exported: list[object] = []
+    ingested: list[object] = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: AuthenticatedRuntime(
+            create_browser=lambda settings: browser,
+            create_service=lambda settings, credentials: BatchService(),
+            ensure_format=lambda format_name: None,
+            write_result=lambda *args: exported.append(args) or True,
+        ),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=(
+                lambda result: ingested.append(result)
+                or empty_ingestion_report()
+            ),
+            close=lambda: None,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "batch",
+            "--input",
+            str(targets),
+            "--persist",
+        ]
+    )
+
+    summary = capsys.readouterr().out
+    assert exit_code == 0
+    assert ingested == [empty_users]
+    assert exported == []
+    assert "pipeline_users=0" in summary
+    assert "persisted=0" in summary
+
+
+def test_batch_keep_output_exports_before_user_ingestion(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    user_result = ScrapeResult(
+        records=(
+            UserRecord(
+                user_id="100",
+                name="Synthetic User",
+                profile_url="https://www.facebook.com/synthetic.user",
+                source="profile",
+                source_url="https://www.facebook.com/synthetic.user",
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(1, 1, 1, 0),
+    )
+    empty = ScrapeResult(
+        records=(),
+        issues=(),
+        stats=ScrapeStats(0, 0, 0, 0),
+    )
+    batch_result = AuthenticatedBatchResult(
+        user_result=user_result,
+        message_result=empty,
+        inspect_result=empty,
+        stats=ScrapeStats(1, 1, 1, 0),
+        issues=(),
+    )
+
+    class BatchService(Service):
+        def run(self, request, browser):
+            return batch_result
+
+    targets = tmp_path / "targets.txt"
+    targets.write_text(
+        "profile:https://www.facebook.com/synthetic.user\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "batch.csv"
+    events: list[str] = []
+
+    def write_result(result, path: Path, format_name: str) -> bool:
+        events.append("export")
+        path.write_text("saved", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: AuthenticatedRuntime(
+            create_browser=lambda settings: Browser(),
+            create_service=lambda settings, credentials: BatchService(),
+            ensure_format=lambda format_name: None,
+            write_result=write_result,
+        ),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=(
+                lambda result: events.append("ingest") or ingestion_report()
+            ),
+            close=lambda: events.append("close"),
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "batch",
+            "--input",
+            str(targets),
+            "--persist",
+            "--keep-output",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert output.read_text(encoding="utf-8") == "saved"
+    assert events == ["export", "ingest", "close"]
