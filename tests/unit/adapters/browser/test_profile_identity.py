@@ -7,7 +7,11 @@ from fb_crawl.adapters.browser.profile_identity import (
     ProfileIdentityResolver,
 )
 from fb_crawl.config import BrowserSettings
-from fb_crawl.core.exceptions import IdentityResolutionError, SessionError
+from fb_crawl.core.exceptions import (
+    IdentityResolutionError,
+    RateLimitError,
+    SessionError,
+)
 from fb_crawl.core.models import ProfileIdentity, UserRecord
 
 
@@ -138,3 +142,17 @@ def test_resolver_preserves_session_failure() -> None:
 
     with pytest.raises(SessionError):
         resolver.resolve(Browser(""), _record())
+
+
+def test_resolver_detects_visible_facebook_rate_limit_surface() -> None:
+    resolver = ProfileIdentityResolver(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+    )
+    browser = Browser(
+        "<html><body>We limit how often you can do certain things.</body></html>"
+    )
+
+    with pytest.raises(RateLimitError):
+        resolver.resolve(browser, _record())

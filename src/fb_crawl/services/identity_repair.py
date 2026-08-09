@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import Protocol
 
 from fb_crawl.core.exceptions import (
+    BrowserNavigationError,
     FbCrawlError,
     IdentityResolutionError,
+    RateLimitError,
     SessionError,
 )
 from fb_crawl.core.identity import is_suspicious_profile_name
@@ -112,6 +115,9 @@ def needs_identity_repair(
     if status == "failed":
         return retry_failed
 
+    if status in {"interrupted", "running"}:
+        return True
+
     if status in {"verified", "repaired"}:
         return False
 
@@ -128,6 +134,28 @@ def _failure(row: dict[str, str], error: FbCrawlError) -> None:
     row["identity_source"] = "facebook:profile"
     row["identity_error_code"] = error.code
     row["identity_error_message"] = error.safe_message
+
+
+def _running(row: dict[str, str]) -> None:
+    row["identity_status"] = "running"
+    row["identity_source"] = "facebook:profile"
+    row["identity_error_code"] = ""
+    row["identity_error_message"] = ""
+
+
+def _interrupted(
+    row: dict[str, str],
+    *,
+    error: FbCrawlError | None = None,
+) -> None:
+    row["identity_status"] = "interrupted"
+    row["identity_source"] = "facebook:profile"
+    row["identity_error_code"] = error.code if error is not None else "interrupted"
+    row["identity_error_message"] = (
+        error.safe_message
+        if error is not None
+        else "Identity repair was interrupted safely."
+    )
 
 
 def _apply_identity(
@@ -173,10 +201,12 @@ class IdentityRepairService:
         resolver: IdentityResolverPort,
         *,
         sleep_func: Callable[[float], None] = time.sleep,
+        jitter_func: Callable[[float, float], float] = random.uniform,
     ) -> None:
         self._session = session
         self._resolver = resolver
         self._sleep = sleep_func
+        self._jitter = jitter_func
 
     def run(
         self,
@@ -188,6 +218,10 @@ class IdentityRepairService:
         retry_failed: bool = False,
         limit: int = 20,
         delay_seconds: float = 3.0,
+        max_retries: int = 2,
+        retry_backoff_seconds: float = 5.0,
+        retry_jitter_seconds: float = 1.0,
+        progress_func: Callable[[IdentityRepairResult], None] | None = None,
     ) -> IdentityRepairResult:
         if limit <= 0:
             raise ValueError("repair limit must be greater than 0")
@@ -195,6 +229,14 @@ class IdentityRepairService:
         if delay_seconds < 0:
             raise ValueError(
                 "repair delay_seconds must be greater than or equal to 0"
+            )
+
+        if max_retries < 0:
+            raise ValueError("max_retries must be greater than or equal to 0")
+
+        if retry_backoff_seconds < 0 or retry_jitter_seconds < 0:
+            raise ValueError(
+                "retry backoff and jitter must be greater than or equal to 0"
             )
 
         rows = [dict(row) for row in source_rows]
@@ -211,9 +253,48 @@ class IdentityRepairService:
         repaired = 0
         verified = 0
         failed = 0
+        attempted = 0
+        retried = 0
+        rate_limited = 0
+        session_failed = 0
+        interrupted = 0
+
+        def result() -> IdentityRepairResult:
+            completed = repaired + verified + failed
+            return IdentityRepairResult(
+                fieldnames=tuple(fieldnames),
+                rows=tuple(dict(row) for row in rows),
+                stats=IdentityRepairStats(
+                    rows=len(rows),
+                    eligible=len(eligible),
+                    attempted=attempted,
+                    repaired=repaired,
+                    verified=verified,
+                    failed=failed,
+                    skipped=len(rows) - len(eligible),
+                    pending=max(0, len(eligible) - completed),
+                    retried=retried,
+                    rate_limited=rate_limited,
+                    session_failed=session_failed,
+                    interrupted=interrupted,
+                ),
+            )
+
+        def progress() -> None:
+            if progress_func is not None:
+                progress_func(result())
 
         if selected:
-            self._session.ensure_authenticated(browser)
+            try:
+                self._session.ensure_authenticated(browser)
+            except KeyboardInterrupt:
+                interrupted = 1
+                progress()
+                return result()
+            except SessionError:
+                session_failed = 1
+                progress()
+                return result()
 
         for position, index in enumerate(selected):
             row = rows[index]
@@ -222,46 +303,84 @@ class IdentityRepairService:
             if target is None:
                 continue
 
-            self._session.assert_authenticated(browser)
+            _running(row)
+            attempted += 1
+            progress()
+            stop = False
 
-            try:
-                status = _apply_identity(
-                    row,
-                    self._resolver.resolve(browser, target),
-                )
-            except SessionError:
-                raise
-            except FbCrawlError as error:
-                _failure(row, error)
-                failed += 1
-            except Exception:
-                _failure(
-                    row,
-                    IdentityResolutionError(
-                        "Authenticated profile identity resolution failed.",
-                        target=target.profile_url,
-                    ),
-                )
-                failed += 1
-            else:
-                repaired += status == "repaired"
-                verified += status == "verified"
+            for retry_index in range(max_retries + 1):
+                try:
+                    self._session.assert_authenticated(browser)
+                    status = _apply_identity(
+                        row,
+                        self._resolver.resolve(browser, target),
+                    )
+                except KeyboardInterrupt:
+                    _interrupted(row)
+                    interrupted = 1
+                    stop = True
+                    break
+                except SessionError as error:
+                    _interrupted(row, error=error)
+                    session_failed = 1
+                    stop = True
+                    break
+                except FbCrawlError as error:
+                    rate_limited += isinstance(error, RateLimitError)
+                    retryable = isinstance(
+                        error,
+                        (BrowserNavigationError, IdentityResolutionError),
+                    )
+
+                    if retryable and retry_index < max_retries:
+                        retried += 1
+                        backoff = min(
+                            retry_backoff_seconds * (2**retry_index),
+                            300.0,
+                        )
+
+                        try:
+                            self._sleep(
+                                backoff
+                                + self._jitter(0.0, retry_jitter_seconds)
+                            )
+                        except KeyboardInterrupt:
+                            _interrupted(row)
+                            interrupted = 1
+                            stop = True
+                            break
+
+                        continue
+
+                    _failure(row, error)
+                    failed += 1
+                    break
+                except Exception:
+                    _failure(
+                        row,
+                        IdentityResolutionError(
+                            "Authenticated profile identity resolution failed.",
+                            target=target.profile_url,
+                        ),
+                    )
+                    failed += 1
+                    break
+                else:
+                    repaired += status == "repaired"
+                    verified += status == "verified"
+                    break
+
+            progress()
+
+            if stop:
+                break
 
             if position + 1 < len(selected) and delay_seconds:
-                self._sleep(delay_seconds)
+                try:
+                    self._sleep(delay_seconds)
+                except KeyboardInterrupt:
+                    interrupted = 1
+                    progress()
+                    break
 
-        attempted = len(selected)
-        return IdentityRepairResult(
-            fieldnames=tuple(fieldnames),
-            rows=tuple(rows),
-            stats=IdentityRepairStats(
-                rows=len(rows),
-                eligible=len(eligible),
-                attempted=attempted,
-                repaired=repaired,
-                verified=verified,
-                failed=failed,
-                skipped=len(rows) - len(eligible),
-                pending=len(eligible) - attempted,
-            ),
-        )
+        return result()

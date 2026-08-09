@@ -1,4 +1,8 @@
-from fb_crawl.core.exceptions import IdentityResolutionError
+from fb_crawl.core.exceptions import (
+    IdentityResolutionError,
+    RateLimitError,
+    SessionError,
+)
 from fb_crawl.core.models import ProfileIdentity
 from fb_crawl.services.identity_repair import (
     IdentityRepairService,
@@ -59,7 +63,7 @@ class Resolver:
         self.records.append(record)
         outcome = next(self.outcomes)
 
-        if isinstance(outcome, Exception):
+        if isinstance(outcome, BaseException):
             raise outcome
 
         return outcome
@@ -173,3 +177,113 @@ def test_good_completed_rows_do_not_start_authenticated_session() -> None:
 
     assert result.stats.attempted == 0
     assert session.ensure_calls == 0
+
+
+def test_retryable_failure_uses_exponential_backoff_and_then_succeeds() -> None:
+    sleeps = []
+    resolver = Resolver(
+        [
+            IdentityResolutionError("Temporary profile parse failure."),
+            identity(),
+        ]
+    )
+    result = IdentityRepairService(
+        Session(),
+        resolver,
+        sleep_func=sleeps.append,
+        jitter_func=lambda low, high: high / 2,
+    ).run(
+        FIELDS,
+        [row()],
+        object(),
+        delay_seconds=0,
+        max_retries=1,
+        retry_backoff_seconds=2,
+        retry_jitter_seconds=0.5,
+    )
+
+    assert result.stats.retried == 1
+    assert result.stats.repaired == 1
+    assert len(resolver.records) == 2
+    assert sleeps == [2.25]
+
+
+def test_rate_limit_is_counted_and_retried() -> None:
+    result = IdentityRepairService(
+        Session(),
+        Resolver(
+            [
+                RateLimitError("Facebook temporarily limited requests."),
+                identity(),
+            ]
+        ),
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda low, high: 0,
+    ).run(
+        FIELDS,
+        [row()],
+        object(),
+        delay_seconds=0,
+        max_retries=1,
+    )
+
+    assert result.stats.rate_limited == 1
+    assert result.stats.retried == 1
+    assert result.stats.repaired == 1
+
+
+def test_progress_is_checkpointed_before_and_after_each_profile() -> None:
+    statuses = []
+    IdentityRepairService(
+        Session(),
+        Resolver([identity()]),
+        sleep_func=lambda seconds: None,
+    ).run(
+        FIELDS,
+        [row()],
+        object(),
+        delay_seconds=0,
+        progress_func=lambda result: statuses.append(
+            result.rows[0]["identity_status"]
+        ),
+    )
+
+    assert statuses == ["running", "repaired"]
+
+
+def test_keyboard_interrupt_is_persisted_as_resumable_state() -> None:
+    snapshots = []
+    result = IdentityRepairService(
+        Session(),
+        Resolver([KeyboardInterrupt()]),
+        sleep_func=lambda seconds: None,
+    ).run(
+        FIELDS,
+        [row()],
+        object(),
+        delay_seconds=0,
+        progress_func=lambda result: snapshots.append(result),
+    )
+
+    assert result.stats.interrupted == 1
+    assert result.stats.pending == 1
+    assert result.rows[0]["identity_status"] == "interrupted"
+    assert needs_identity_repair(result.rows[0]) is True
+    assert snapshots[-1].rows[0]["identity_status"] == "interrupted"
+
+
+def test_session_loss_stops_run_and_leaves_current_row_resumable() -> None:
+    class ExpiredSession(Session):
+        def assert_authenticated(self, browser) -> None:
+            raise SessionError("Authenticated session unavailable.")
+
+    result = IdentityRepairService(
+        ExpiredSession(),
+        Resolver([identity()]),
+    ).run(FIELDS, [row(), row()], object(), delay_seconds=0)
+
+    assert result.stats.session_failed == 1
+    assert result.stats.attempted == 1
+    assert result.stats.pending == 2
+    assert result.rows[0]["identity_status"] == "interrupted"
+    assert result.rows[1]["identity_status"] == ""

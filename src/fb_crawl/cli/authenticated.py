@@ -248,6 +248,9 @@ def add_authenticated_parser(
     repair.add_argument("--output", type=Path)
     repair.add_argument("--limit", type=int, default=20)
     repair.add_argument("--delay", type=float, default=3.0)
+    repair.add_argument("--max-retries", type=int, default=2)
+    repair.add_argument("--retry-backoff", type=float, default=5.0)
+    repair.add_argument("--retry-jitter", type=float, default=1.0)
     repair.add_argument(
         "--retry-failed",
         action="store_true",
@@ -423,6 +426,10 @@ class RepairServicePort(Protocol):
         retry_failed: bool,
         limit: int,
         delay_seconds: float,
+        max_retries: int,
+        retry_backoff_seconds: float,
+        retry_jitter_seconds: float,
+        progress_func,
     ): ...
 
 
@@ -617,6 +624,14 @@ def execute_identity_repair(args: argparse.Namespace) -> int:
             "Repair delay must be greater than or equal to 0."
         )
 
+    if args.max_retries < 0:
+        raise ValidationError("Repair max retries must be zero or greater.")
+
+    if args.retry_backoff < 0 or args.retry_jitter < 0:
+        raise ValidationError(
+            "Repair retry backoff and jitter must be zero or greater."
+        )
+
     runtime = _load_repair_runtime()
     fieldnames, rows = runtime.read_rows(args.input)
     output = args.output or args.input.with_name(
@@ -643,6 +658,13 @@ def execute_identity_repair(args: argparse.Namespace) -> int:
             retry_failed=args.retry_failed,
             limit=args.limit,
             delay_seconds=args.delay,
+            max_retries=args.max_retries,
+            retry_backoff_seconds=args.retry_backoff,
+            retry_jitter_seconds=args.retry_jitter,
+            progress_func=lambda partial: runtime.write_result(
+                partial,
+                output,
+            ),
         )
         runtime.write_result(result, output)
         stats = result.stats
@@ -653,9 +675,20 @@ def execute_identity_repair(args: argparse.Namespace) -> int:
             f"repaired={stats.repaired} "
             f"verified={stats.verified} "
             f"failed={stats.failed} "
+            f"retried={stats.retried} "
+            f"rate_limited={stats.rate_limited} "
+            f"session_failed={stats.session_failed} "
+            f"interrupted={stats.interrupted} "
             f"pending={stats.pending} "
             f"output={output}"
         )
+
+        if stats.session_failed:
+            return 3
+
+        if stats.interrupted:
+            return 130
+
         return 1 if result.has_failures else 0
 
     finally:

@@ -101,13 +101,16 @@ surface again:
 
 ```powershell
 fb-crawl authenticated repair runtime/output/friends.csv `
-  --output runtime/output/friends-repaired.csv --limit 20 --headless
+  --output runtime/output/friends-repaired.csv --limit 20 `
+  --max-retries 2 --retry-backoff 5 --retry-jitter 1 --headless
 ```
 
 The repair pass preserves every existing CSV column, verifies only suspicious
 rows, and records `identity_status` plus `identity_source`. Use
 `--retry-failed` for previous repair failures or `--force` to verify every
-supported profile row.
+supported profile row. Progress is written atomically before and after every
+profile; `Ctrl+C` leaves a resumable `interrupted` row instead of discarding the
+completed batch.
 
 See [docs/authenticated-cli.md](docs/authenticated-cli.md) for supported URLs, session handling, formats, exit codes, and security guidance.
 
@@ -122,6 +125,7 @@ the current CLI.
 - `2`: invalid input or configuration
 - `3`: authenticated session, login, or manual verification unavailable
 - `4`: output could not be written safely
+- `130`: identity repair was stopped safely with `Ctrl+C`
 
 ## Privacy and safety
 

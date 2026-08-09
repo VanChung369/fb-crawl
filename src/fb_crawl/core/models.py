@@ -293,6 +293,10 @@ class IdentityRepairStats:
     failed: int
     skipped: int
     pending: int
+    retried: int = 0
+    rate_limited: int = 0
+    session_failed: int = 0
+    interrupted: int = 0
 
 
 @dataclass(frozen=True, slots=True)

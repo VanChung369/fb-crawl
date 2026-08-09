@@ -285,6 +285,12 @@ def test_repair_parser_builds_bounded_identity_repair_arguments() -> None:
             "7",
             "--delay",
             "1.5",
+            "--max-retries",
+            "4",
+            "--retry-backoff",
+            "2.5",
+            "--retry-jitter",
+            "0.25",
             "--retry-failed",
             "--force",
             "--headless",
@@ -296,6 +302,9 @@ def test_repair_parser_builds_bounded_identity_repair_arguments() -> None:
     assert args.output == Path("runtime/output/friends-repaired.csv")
     assert args.limit == 7
     assert args.delay == 1.5
+    assert args.max_retries == 4
+    assert args.retry_backoff == 2.5
+    assert args.retry_jitter == 0.25
     assert args.retry_failed is True
     assert args.force is True
     assert args.headless is True

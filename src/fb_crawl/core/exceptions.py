@@ -56,3 +56,7 @@ class UidResolutionError(BrowserParseError):
 
 class IdentityResolutionError(BrowserParseError):
     code = "authenticated_identity_resolution_failed"
+
+
+class RateLimitError(BrowserNavigationError):
+    code = "authenticated_rate_limited"

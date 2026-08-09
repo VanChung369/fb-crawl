@@ -13,9 +13,10 @@ from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import (
     BrowserNavigationError,
     IdentityResolutionError,
+    RateLimitError,
     SessionError,
 )
-from fb_crawl.core.identity import is_suspicious_profile_name
+from fb_crawl.core.identity import ascii_fold, is_suspicious_profile_name
 from fb_crawl.core.models import ProfileIdentity, UserRecord
 from fb_crawl.core.urls import FACEBOOK_HOSTS, FACEBOOK_INTERNAL_PATHS
 
@@ -28,6 +29,15 @@ USERNAME_KEYS = (
     "username_for_profile",
     "username",
     "vanity",
+)
+
+RATE_LIMIT_MARKERS = (
+    "you're temporarily blocked",
+    "you’re temporarily blocked",
+    "we limit how often",
+    "temporarily blocked",
+    "chung toi gioi han tan suat",
+    "ban tam thoi bi chan",
 )
 
 
@@ -149,6 +159,14 @@ def _collect_identity(
     return matched
 
 
+def _is_rate_limited(html: str) -> bool:
+    soup = BeautifulSoup(html, "html.parser")
+    surface = soup.body or soup
+    text = " ".join(surface.stripped_strings)
+    folded = " ".join(ascii_fold(text).split())
+    return any(marker in folded for marker in RATE_LIMIT_MARKERS)
+
+
 class ProfileIdentityParser:
     def parse(
         self,
@@ -265,8 +283,16 @@ class ProfileIdentityResolver:
                 target=record.profile_url,
             ) from error
 
+        html = str(browser.page_source)
+
+        if _is_rate_limited(html):
+            raise RateLimitError(
+                "Facebook temporarily limited authenticated profile requests.",
+                target=record.profile_url,
+            )
+
         identity = self._parser.parse(
-            str(browser.page_source),
+            html,
             expected_user_id=(record.user_id if record.user_id.isdigit() else None),
             expected_username=(
                 record.username

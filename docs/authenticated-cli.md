@@ -150,7 +150,8 @@ column.
 ```powershell
 fb-crawl authenticated repair runtime/output/friends.csv `
   --output runtime/output/friends-repaired.csv `
-  --limit 20 --delay 3 --headless
+  --limit 20 --delay 3 `
+  --max-retries 2 --retry-backoff 5 --retry-jitter 1 --headless
 ```
 
 The input file is never overwritten by default. The default destination is a
@@ -165,6 +166,10 @@ Repair provenance uses these columns:
 - `identity_status=verified`: the profile confirmed the existing identity.
 - `identity_status=repaired`: at least one identity value was corrected.
 - `identity_status=failed`: the bounded verification attempt failed.
+- `identity_status=running`: the atomic checkpoint was written immediately
+  before opening this profile.
+- `identity_status=interrupted`: processing stopped safely before this row
+  completed; it is selected automatically on the next run.
 - `identity_source=facebook:profile`: identity was checked on the target
   profile.
 - `identity_error_code` and `identity_error_message`: safe failure details that
@@ -176,6 +181,19 @@ Successfully verified/repaired rows are skipped automatically. Add
 `--retry-failed` to retry failed rows, or `--force` to verify all supported
 profile rows again. A blank username remains valid when Facebook exposes only a
 numeric `profile.php?id=...` identity.
+
+The output CSV is also the per-profile checkpoint. It is written atomically
+before and after every profile, so completed rows survive `Ctrl+C`, browser
+navigation failures, and session loss. Use the repaired output as the next
+input; `verified` and `repaired` rows are skipped while `running` and
+`interrupted` rows resume automatically.
+
+Transient navigation, blank-profile parsing, and rate-limit surfaces use a
+finite retry policy. `--max-retries` defaults to `2`; `--retry-backoff`
+defaults to `5` seconds and grows exponentially up to 300 seconds;
+`--retry-jitter` defaults to `1` second. Session/checkpoint failures are never
+retried blindly. The summary reports `retried`, `rate_limited`,
+`session_failed`, `interrupted`, and `pending` separately.
 
 ## Visible post reactions
 
@@ -383,6 +401,7 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - `2`: invalid target, configuration, or missing optional dependency.
 - `3`: authenticated session, login, or manual verification unavailable.
 - `4`: output could not be replaced safely.
+- `130`: identity repair was interrupted safely and its progress was saved.
 
 ## Security and troubleshooting
 

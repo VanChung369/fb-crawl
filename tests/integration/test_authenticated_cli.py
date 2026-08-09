@@ -368,6 +368,7 @@ def test_identity_repair_command_reads_writes_and_quits_browser(
     )
     output = tmp_path / "friends-fixed.csv"
     calls = []
+    writes = []
     fieldnames = (
         "user_id",
         "name",
@@ -386,7 +387,7 @@ def test_identity_repair_command_reads_writes_and_quits_browser(
     class RepairService:
         def run(self, *args, **kwargs):
             calls.append((args, kwargs))
-            return IdentityRepairResult(
+            result = IdentityRepairResult(
                 fieldnames=fieldnames,
                 rows=(repaired_row,),
                 stats=IdentityRepairStats(
@@ -400,8 +401,11 @@ def test_identity_repair_command_reads_writes_and_quits_browser(
                     pending=0,
                 ),
             )
+            kwargs["progress_func"](result)
+            return result
 
     def write_result(result, path: Path) -> bool:
+        writes.append(path)
         path.write_text(result.rows[0]["name"], encoding="utf-8")
         return True
 
@@ -435,11 +439,29 @@ def test_identity_repair_command_reads_writes_and_quits_browser(
     assert output.read_text(encoding="utf-8") == "Synthetic User"
     assert calls[0][1]["limit"] == 1
     assert calls[0][1]["delay_seconds"] == 0
+    assert calls[0][1]["max_retries"] == 2
+    assert calls[0][1]["retry_backoff_seconds"] == 5
+    assert calls[0][1]["retry_jitter_seconds"] == 1
+    assert writes == [output, output]
     assert "repaired=1" in summary
+    assert "retried=0" in summary
     assert browser.quit_calls == 1
 
 
-def test_invalid_identity_repair_limit_fails_before_runtime(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--limit", "0"],
+        ["--delay", "-1"],
+        ["--max-retries", "-1"],
+        ["--retry-backoff", "-1"],
+        ["--retry-jitter", "-1"],
+    ],
+)
+def test_invalid_identity_repair_reliability_options_fail_before_runtime(
+    monkeypatch,
+    extra: list[str],
+) -> None:
     runtime_loads = []
     monkeypatch.setattr(
         "fb_crawl.cli.authenticated._load_repair_runtime",
@@ -451,10 +473,73 @@ def test_invalid_identity_repair_limit_fails_before_runtime(monkeypatch) -> None
             "authenticated",
             "repair",
             "runtime/output/friends.csv",
-            "--limit",
-            "0",
+            *extra,
         ]
     )
 
     assert exit_code == 2
     assert runtime_loads == []
+
+
+@pytest.mark.parametrize(
+    ("stat_name", "expected_exit"),
+    [("session_failed", 3), ("interrupted", 130)],
+)
+def test_identity_repair_uses_distinct_session_and_interrupt_exit_codes(
+    tmp_path: Path,
+    monkeypatch,
+    stat_name: str,
+    expected_exit: int,
+) -> None:
+    browser = Browser()
+    fieldnames = ("user_id", "name", "username", "profile_url")
+    row = {
+        "user_id": "123",
+        "name": "Synthetic User",
+        "username": "",
+        "profile_url": "https://www.facebook.com/profile.php?id=123",
+    }
+    values = {"session_failed": 0, "interrupted": 0}
+    values[stat_name] = 1
+    result = IdentityRepairResult(
+        fieldnames=fieldnames,
+        rows=(row,),
+        stats=IdentityRepairStats(
+            rows=1,
+            eligible=1,
+            attempted=1,
+            repaired=0,
+            verified=0,
+            failed=0,
+            skipped=0,
+            pending=1,
+            session_failed=values["session_failed"],
+            interrupted=values["interrupted"],
+        ),
+    )
+
+    class RepairService:
+        def run(self, *args, **kwargs):
+            return result
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_repair_runtime",
+        lambda: IdentityRepairRuntime(
+            create_browser=lambda settings: browser,
+            create_service=lambda settings, credentials: RepairService(),
+            read_rows=lambda path: (fieldnames, (row,)),
+            write_result=lambda result, path: True,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "repair",
+            str(tmp_path / "friends.csv"),
+            "--headless",
+        ]
+    )
+
+    assert exit_code == expected_exit
+    assert browser.quit_calls == 1
