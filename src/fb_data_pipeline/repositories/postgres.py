@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import psycopg
 
@@ -16,7 +17,9 @@ from fb_data_pipeline.repositories.errors import (
     DatabaseError,
     DatabaseIdentityConflict,
 )
-from fb_data_pipeline.services.pipeline import EnrichedUser
+
+if TYPE_CHECKING:
+    from fb_data_pipeline.services.pipeline import EnrichedUser
 
 
 def _now_utc() -> datetime:
@@ -47,6 +50,14 @@ class PostgresRepository:
         self.clock = clock
 
     def save_enriched_user(self, enriched: EnrichedUser) -> int:
+        try:
+            return self._save_enriched_user(enriched)
+        except DatabaseError:
+            raise
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database operation failed.") from error
+
+    def _save_enriched_user(self, enriched: EnrichedUser) -> int:
         if not enriched.bundle.identity.is_usable:
             raise DatabaseIdentityConflict(
                 "Cannot persist a Facebook user without an identity alias."

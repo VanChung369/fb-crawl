@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 import pytest
 
+from fb_crawl.core.models import ScrapeResult, ScrapeStats, UserRecord
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
     PhoneEvidence,
@@ -17,7 +18,9 @@ from fb_data_pipeline.core.models import (
 from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 from fb_data_pipeline.repositories.migrations import MigrationRunner
 from fb_data_pipeline.repositories.postgres import PostgresRepository
-from fb_data_pipeline.services.pipeline import EnrichedUser
+from fb_data_pipeline.services.ingestion import AuthenticatedIngestionService
+from fb_data_pipeline.services.persistence import PipelinePersistenceService
+from fb_data_pipeline.services.pipeline import EnrichedUser, EnrichmentPipeline
 
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -375,3 +378,84 @@ def test_deleting_user_cascades_to_profile_snapshot() -> None:
             )
 
     assert scalar("SELECT count(*) FROM facebook_user_profiles") == 0
+
+
+def test_in_memory_crawl_enrichment_persists_authoritative_view() -> None:
+    captured_at = datetime(2026, 8, 9, 6, 0, tzinfo=UTC)
+
+    class StaticProvider:
+        def search(self, identity: FacebookIdentity) -> ProviderResult:
+            assert identity.uid == "100"
+            return ProviderResult(
+                provider="fbnumber",
+                status=ProviderStatus.FOUND,
+                evidence=(
+                    PhoneEvidence(
+                        phone_number="0987654321",
+                        normalized_phone="+84987654321",
+                        source="external:fbnumber",
+                        captured_at=captured_at,
+                        confidence="provider",
+                        provider="fbnumber",
+                    ),
+                ),
+                checked_at=captured_at,
+            )
+
+    result = ScrapeResult(
+        records=(
+            UserRecord(
+                user_id="100",
+                name="Synthetic User",
+                username="synthetic.user",
+                profile_url="https://www.facebook.com/synthetic.user",
+                source="friends",
+                source_url="https://www.facebook.com/source/friends",
+                phone_numbers=("0912345678",),
+                phone_sources=("profile_about",),
+                address="Ha Noi",
+                birth_date="12 thang 8, 1990",
+                gender="Nam",
+                last_enriched_at=captured_at.isoformat(),
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(
+            requested=1,
+            discovered=1,
+            succeeded=1,
+            failed=0,
+        ),
+    )
+    service = AuthenticatedIngestionService(
+        EnrichmentPipeline(StaticProvider()),
+        PipelinePersistenceService(PostgresRepository(TEST_DATABASE_URL)),
+    )
+
+    report = service.ingest(result)
+
+    assert report.persistence.persisted == 1
+    with psycopg.connect(TEST_DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    facebook_uid,
+                    facebook_username,
+                    phone_1,
+                    phone_2,
+                    address,
+                    birth_date,
+                    gender
+                FROM facebook_user_phone_slots
+                """
+            )
+            assert cursor.fetchone() == (
+                "100",
+                "synthetic.user",
+                "+84987654321",
+                "+84912345678",
+                "Ha Noi",
+                "12 thang 8, 1990",
+                "Nam",
+            )

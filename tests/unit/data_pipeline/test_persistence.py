@@ -8,7 +8,9 @@ from fb_data_pipeline.core.models import (
     ProviderStatus,
     UserBundle,
 )
+from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 from fb_data_pipeline.services.persistence import (
+    PersistenceFailure,
     PersistenceReport,
     PipelinePersistenceService,
 )
@@ -25,16 +27,23 @@ class RecordingRepository:
         user_ids: tuple[int, ...],
         *,
         fail_at: int | None = None,
+        conflict_at: int | None = None,
     ) -> None:
         self.user_ids = user_ids
         self.fail_at = fail_at
+        self.conflict_at = conflict_at
         self.saved: list[EnrichedUser] = []
+        self.successes = 0
 
     def save_enriched_user(self, enriched: EnrichedUser) -> int:
         self.saved.append(enriched)
         if self.fail_at == len(self.saved):
             raise RuntimeError("database unavailable")
-        return self.user_ids[len(self.saved) - 1]
+        if self.conflict_at == len(self.saved):
+            raise DatabaseIdentityConflict("Identity conflict.")
+        user_id = self.user_ids[self.successes]
+        self.successes += 1
+        return user_id
 
 
 def make_run(statuses: tuple[ProviderStatus, ...]) -> PipelineRun:
@@ -104,3 +113,28 @@ def test_persistence_stops_and_propagates_repository_error() -> None:
         PipelinePersistenceService(repository).persist(run)
 
     assert repository.saved == list(run.users[:2])
+
+
+def test_persistence_isolates_identity_conflict_and_continues() -> None:
+    run = make_run((ProviderStatus.FOUND,) * 3)
+    repository = RecordingRepository(
+        (101, 103),
+        conflict_at=2,
+    )
+
+    report = PipelinePersistenceService(repository).persist(run)
+
+    assert repository.saved == list(run.users)
+    assert report == PersistenceReport(
+        intended=3,
+        persisted=2,
+        provider_retries_required=0,
+        user_ids=(101, 103),
+        failures=(
+            PersistenceFailure(
+                aliases=run.users[1].bundle.identity.aliases,
+                error_code="database_identity_conflict",
+            ),
+        ),
+    )
+    assert report.db_failed == 1

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from fb_data_pipeline.core.models import ProviderStatus
+from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 
 if TYPE_CHECKING:
     from fb_data_pipeline.services.pipeline import EnrichedUser, PipelineRun
@@ -15,11 +16,22 @@ class EnrichedUserRepository(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class PersistenceFailure:
+    aliases: tuple[str, ...]
+    error_code: str
+
+
+@dataclass(frozen=True, slots=True)
 class PersistenceReport:
     intended: int
     persisted: int
     provider_retries_required: int
     user_ids: tuple[int, ...]
+    failures: tuple[PersistenceFailure, ...] = ()
+
+    @property
+    def db_failed(self) -> int:
+        return len(self.failures)
 
 
 class PipelinePersistenceService:
@@ -28,9 +40,18 @@ class PipelinePersistenceService:
 
     def persist(self, run: PipelineRun) -> PersistenceReport:
         user_ids: list[int] = []
+        failures: list[PersistenceFailure] = []
         retries = 0
         for enriched in run.users:
-            user_ids.append(self.repository.save_enriched_user(enriched))
+            try:
+                user_ids.append(self.repository.save_enriched_user(enriched))
+            except DatabaseIdentityConflict as error:
+                failures.append(
+                    PersistenceFailure(
+                        aliases=enriched.bundle.identity.aliases,
+                        error_code=error.code,
+                    )
+                )
             if enriched.provider_result.status in {
                 ProviderStatus.RATE_LIMITED,
                 ProviderStatus.FAILED,
@@ -41,4 +62,5 @@ class PipelinePersistenceService:
             persisted=len(user_ids),
             provider_retries_required=retries,
             user_ids=tuple(user_ids),
+            failures=tuple(failures),
         )

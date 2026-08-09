@@ -345,3 +345,51 @@ def test_repair_parser_builds_bounded_identity_repair_arguments() -> None:
     assert args.retry_failed is True
     assert args.force is True
     assert args.headless is True
+
+
+@pytest.mark.parametrize(
+    ("action", "target"),
+    [
+        ("members", "https://www.facebook.com/groups/1"),
+        ("comments", "https://www.facebook.com/acme/posts/1"),
+        ("friends", "https://www.facebook.com/synthetic.user"),
+        ("followers", "https://www.facebook.com/synthetic.user"),
+        ("reactions", "https://www.facebook.com/acme/posts/1"),
+    ],
+)
+def test_user_actions_accept_persistence_flags(
+    action: str,
+    target: str,
+) -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            action,
+            target,
+            "--persist",
+            "--keep-output",
+        ]
+    )
+
+    assert args.persist is True
+    assert args.keep_output is True
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["profile", "https://www.facebook.com/synthetic.user"],
+        ["engagement", "https://www.facebook.com/acme/posts/1"],
+        ["messages", "https://www.facebook.com/messages/t/123"],
+        ["inspect", "https://www.facebook.com/synthetic.user"],
+        ["batch", "--input", "runtime/targets.txt"],
+        ["repair", "runtime/output/friends.csv"],
+    ],
+)
+def test_other_actions_reject_persistence_flag(
+    arguments: list[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["authenticated", *arguments, "--persist"]
+        )

@@ -144,9 +144,20 @@ $env:DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@localhost:5432/fb_
 fb-crawl pipeline migrate
 ```
 
-PostgreSQL is authoritative; output files are not deleted automatically. See
-[docs/postgresql.md](docs/postgresql.md) for schema, tests, security, and the
-current integration boundary.
+Set the FBNumber credential and persist supported authenticated user results
+directly from memory:
+
+```powershell
+$env:FB_NUMBER_API_TOKEN = "replace-with-secret"
+fb-crawl authenticated friends https://www.facebook.com/example `
+  --persist --headless
+```
+
+`members`, `comments`, `friends`, `followers`, and `reactions` support
+`--persist`. This mode does not create a CSV by default. Add `--keep-output`
+to also write the normal compatibility artifact. Cache, session, checkpoint,
+and existing output files are never deleted. See
+[docs/postgresql.md](docs/postgresql.md) for schema, tests, and security.
 
 ## Merge crawl output
 

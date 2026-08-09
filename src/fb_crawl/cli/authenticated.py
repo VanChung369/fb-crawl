@@ -5,7 +5,7 @@ import getpass
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from fb_crawl.config import (
     BrowserSettings,
@@ -19,9 +19,14 @@ from fb_crawl.core.exceptions import (
 from fb_crawl.core.models import (
     AuthenticatedAction,
     ProfileField,
+    ScrapeResult,
     ScrapeMode,
     ScrapeRequest,
+    UserRecord,
 )
+
+if TYPE_CHECKING:
+    from fb_data_pipeline.services.ingestion import IngestionReport
 
 DEFAULT_OUTPUTS = {
     AuthenticatedAction.MEMBERS: "members",
@@ -157,6 +162,19 @@ def _common(
         )
 
 
+def _persistence_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--persist",
+        action="store_true",
+        help="Enrich users with FBNumber and persist them to PostgreSQL",
+    )
+    parser.add_argument(
+        "--keep-output",
+        action="store_true",
+        help="Also write the normal output artifact when persisting",
+    )
+
+
 def add_authenticated_parser(
     mode_subparsers,
 ) -> None:
@@ -179,6 +197,7 @@ def add_authenticated_parser(
         nargs="+",
     )
     _common(members)
+    _persistence_options(members)
 
     comments = actions.add_parser(
         "comments",
@@ -189,6 +208,7 @@ def add_authenticated_parser(
         nargs="+",
     )
     _common(comments)
+    _persistence_options(comments)
 
     profile = actions.add_parser(
         "profile",
@@ -205,6 +225,7 @@ def add_authenticated_parser(
     friends.add_argument("--depth", type=int, default=1)
     friends.add_argument("--max-users", type=int, default=1000)
     _common(friends)
+    _persistence_options(friends)
 
     followers = actions.add_parser(
         "followers",
@@ -214,6 +235,7 @@ def add_authenticated_parser(
     followers.add_argument("--depth", type=int, default=1)
     followers.add_argument("--max-users", type=int, default=1000)
     _common(followers)
+    _persistence_options(followers)
 
     reactions = actions.add_parser(
         "reactions",
@@ -221,6 +243,7 @@ def add_authenticated_parser(
     )
     reactions.add_argument("urls", nargs="+")
     _common(reactions)
+    _persistence_options(reactions)
 
     engagement = actions.add_parser(
         "engagement",
@@ -421,6 +444,19 @@ def request_from_authenticated_args(
     )
 
 
+def _validate_persistence_args(args: argparse.Namespace) -> None:
+    persist = bool(getattr(args, "persist", False))
+    keep_output = bool(getattr(args, "keep_output", False))
+
+    if keep_output and not persist:
+        raise ValidationError("--keep-output requires --persist.")
+
+    if persist and args.output is not None and not keep_output:
+        raise ValidationError(
+            "--output requires --keep-output when --persist is used."
+        )
+
+
 class ServicePort(Protocol):
     def validate(
         self,
@@ -452,6 +488,53 @@ class AuthenticatedRuntime:
         [object, Path, str],
         bool,
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedPersistenceRuntime:
+    ingest_result: Callable[[ScrapeResult[UserRecord]], IngestionReport]
+    close: Callable[[], None]
+
+
+def _load_persistence_runtime() -> AuthenticatedPersistenceRuntime:
+    from fb_data_pipeline.config import load_pipeline_settings
+    from fb_data_pipeline.exceptions import PipelineExecutionError
+    from fb_data_pipeline.providers.fbnumber import FBNumberProvider
+    from fb_data_pipeline.repositories.postgres import PostgresRepository
+    from fb_data_pipeline.services.ingestion import (
+        AuthenticatedIngestionService,
+    )
+    from fb_data_pipeline.services.persistence import (
+        PipelinePersistenceService,
+    )
+    from fb_data_pipeline.services.pipeline import EnrichmentPipeline
+
+    try:
+        settings = load_pipeline_settings()
+        settings.require_database()
+        settings.require_fb_number()
+    except ConfigurationError as error:
+        raise PipelineExecutionError(
+            "Persistence pipeline configuration is incomplete."
+        ) from error
+    provider = FBNumberProvider.from_settings(settings)
+    repository = PostgresRepository(
+        settings.database_url,
+        statement_timeout_seconds=(
+            settings.database_statement_timeout_seconds
+        ),
+    )
+    ingestion = AuthenticatedIngestionService(
+        EnrichmentPipeline(provider),
+        PipelinePersistenceService(repository),
+    )
+    return AuthenticatedPersistenceRuntime(
+        ingest_result=lambda result: ingestion.ingest(
+            result,
+            default_country_code=settings.default_country_code,
+        ),
+        close=provider.close,
+    )
 
 
 class RepairServicePort(Protocol):
@@ -744,6 +827,7 @@ def execute_authenticated(
     if args.action == "repair":
         return execute_identity_repair(args)
 
+    _validate_persistence_args(args)
     request = request_from_authenticated_args(args)
 
     if request.checkpoint_path is not None:
@@ -766,9 +850,13 @@ def execute_authenticated(
     )
 
     runtime = _load_runtime()
-    runtime.ensure_format(args.format)
+    persist = bool(getattr(args, "persist", False))
+    keep_output = bool(getattr(args, "keep_output", False))
+    if not persist or keep_output:
+        runtime.ensure_format(args.format)
 
     browser = None
+    persistence_runtime = None
 
     try:
         service = runtime.create_service(
@@ -779,6 +867,9 @@ def execute_authenticated(
         # Target phải hợp lệ trước khi khởi động Firefox.
         service.validate(request)
 
+        if persist:
+            persistence_runtime = _load_persistence_runtime()
+
         browser = runtime.create_browser(settings)
         result = service.run(request, browser)
 
@@ -787,12 +878,21 @@ def execute_authenticated(
             Path("runtime/output") / f"{DEFAULT_OUTPUTS[action]}.{args.format}"
         )
 
-        written = runtime.write_result(
-            result,
-            output,
-            args.format,
+        if not persist or keep_output:
+            written = runtime.write_result(
+                result,
+                output,
+                args.format,
+            )
+            output_status = output if written else "unchanged"
+        else:
+            output_status = "not_requested"
+
+        ingestion_report = (
+            persistence_runtime.ingest_result(result)
+            if persistence_runtime is not None
+            else None
         )
-        output_status = output if written else "unchanged"
 
         summary = (
             f"requested={result.stats.requested} "
@@ -851,14 +951,45 @@ def execute_authenticated(
                 f" interrupted={result.retry.interrupted}"
             )
 
+        if ingestion_report is not None:
+            pipeline = ingestion_report.pipeline
+            persistence = ingestion_report.persistence
+            summary += (
+                f" pipeline_users={pipeline.users}"
+                f" persisted={persistence.persisted}"
+                f" db_failed={persistence.db_failed}"
+                f" provider_found={pipeline.provider_found}"
+                f" provider_not_found={pipeline.provider_not_found}"
+                f" provider_failed={pipeline.provider_failed}"
+                " provider_retries_required="
+                f"{persistence.provider_retries_required}"
+            )
+
         print(summary)
 
         if result.retry is not None and result.retry.interrupted:
             return 130
 
+        if (
+            ingestion_report is not None
+            and ingestion_report.has_database_failures
+        ):
+            return 5
+
+        if (
+            ingestion_report is not None
+            and ingestion_report.has_provider_retries
+        ):
+            return 1
+
         return 1 if result.has_failures else 0
 
     finally:
+        if persistence_runtime is not None:
+            try:
+                persistence_runtime.close()
+            except Exception:
+                pass
         if browser is not None:
             try:
                 browser.quit()

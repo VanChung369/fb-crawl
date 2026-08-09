@@ -4,8 +4,10 @@ from pathlib import Path
 
 from fb_crawl.cli.app import main
 from fb_crawl.cli.authenticated import (
+    AuthenticatedPersistenceRuntime,
     AuthenticatedRuntime,
     IdentityRepairRuntime,
+    _load_persistence_runtime,
 )
 from fb_crawl.core.exceptions import (
     ConfigurationError,
@@ -22,6 +24,13 @@ from fb_crawl.core.models import (
     ScrapeStats,
     UserRecord,
 )
+from fb_data_pipeline.repositories.errors import DatabaseError
+from fb_data_pipeline.services.ingestion import IngestionReport
+from fb_data_pipeline.services.persistence import (
+    PersistenceFailure,
+    PersistenceReport,
+)
+from fb_data_pipeline.services.pipeline import PipelineReport
 
 
 class Browser:
@@ -102,6 +111,77 @@ def runtime(
         ensure_format=lambda format_name: None,
         write_result=write_result,
     )
+
+
+def ingestion_report(
+    *,
+    provider_found: int = 1,
+    provider_not_found: int = 0,
+    provider_failed: int = 0,
+    provider_retries_required: int = 0,
+    database_failure: bool = False,
+) -> IngestionReport:
+    failures = (
+        (
+            PersistenceFailure(
+                aliases=("uid:100",),
+                error_code="database_identity_conflict",
+            ),
+        )
+        if database_failure
+        else ()
+    )
+    persisted = 0 if database_failure else 1
+    return IngestionReport(
+        pipeline=PipelineReport(
+            users=1,
+            input_records=1,
+            skipped_records=0,
+            invalid_crawler_phones=0,
+            phone_1_found=provider_found,
+            phone_2_found=0,
+            provider_found=provider_found,
+            provider_not_found=provider_not_found,
+            provider_failed=provider_failed,
+        ),
+        persistence=PersistenceReport(
+            intended=1,
+            persisted=persisted,
+            provider_retries_required=provider_retries_required,
+            user_ids=(41,) if persisted else (),
+            failures=failures,
+        ),
+    )
+
+
+def test_persistence_runtime_composes_empty_in_memory_ingestion(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://pipeline:secret@localhost/pipeline",
+    )
+    monkeypatch.setenv("FB_NUMBER_API_TOKEN", "provider-secret")
+    runtime = _load_persistence_runtime()
+    result = ScrapeResult(
+        records=(),
+        issues=(),
+        stats=ScrapeStats(
+            requested=0,
+            discovered=0,
+            succeeded=0,
+            failed=0,
+        ),
+    )
+
+    try:
+        report = runtime.ingest_result(result)
+    finally:
+        runtime.close()
+
+    assert isinstance(runtime, AuthenticatedPersistenceRuntime)
+    assert report.pipeline.users == 0
+    assert report.persistence.persisted == 0
 
 
 def test_authenticated_command_writes_output_and_quits(
@@ -625,3 +705,309 @@ def test_invalid_authenticated_retry_options_fail_before_runtime(
 
     assert exit_code == 2
     assert runtime_loads == []
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--keep-output"],
+        [
+            "--persist",
+            "--output",
+            "runtime/output/explicit.csv",
+        ],
+    ],
+)
+def test_invalid_persistence_output_flags_fail_before_runtime(
+    monkeypatch,
+    extra: list[str],
+) -> None:
+    runtime_loads: list[bool] = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime_loads.append(True),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            *extra,
+        ]
+    )
+
+    assert exit_code == 2
+    assert runtime_loads == []
+
+
+def test_persist_ingests_in_memory_without_export(
+    monkeypatch,
+    capsys,
+) -> None:
+    browser = Browser()
+    service = Service()
+    exported: list[object] = []
+    ingested: list[object] = []
+    closed: list[bool] = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: AuthenticatedRuntime(
+            create_browser=lambda settings: browser,
+            create_service=lambda settings, credentials: service,
+            ensure_format=lambda format_name: None,
+            write_result=lambda *args: exported.append(args) or True,
+        ),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=(
+                lambda result: ingested.append(result) or ingestion_report()
+            ),
+            close=lambda: closed.append(True),
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--persist",
+            "--headless",
+        ]
+    )
+
+    summary = capsys.readouterr().out
+    assert exit_code == 0
+    assert len(ingested) == 1
+    assert ingested[0].records[0].user_id == "100"
+    assert exported == []
+    assert closed == [True]
+    assert browser.quit_calls == 1
+    assert "output=not_requested" in summary
+    assert "pipeline_users=1" in summary
+    assert "persisted=1" in summary
+    assert "db_failed=0" in summary
+    assert "provider_found=1" in summary
+    assert "provider_not_found=0" in summary
+    assert "provider_failed=0" in summary
+    assert "provider_retries_required=0" in summary
+
+
+def test_keep_output_exports_before_ingestion(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    browser = Browser()
+    service = Service()
+    events: list[str] = []
+    output = tmp_path / "members.csv"
+
+    def write_result(result, path: Path, format_name: str) -> bool:
+        events.append("export")
+        path.write_text("saved", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: AuthenticatedRuntime(
+            create_browser=lambda settings: browser,
+            create_service=lambda settings, credentials: service,
+            ensure_format=lambda format_name: None,
+            write_result=write_result,
+        ),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=(
+                lambda result: events.append("ingest") or ingestion_report()
+            ),
+            close=lambda: events.append("close"),
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--persist",
+            "--keep-output",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 0
+    assert output.read_text(encoding="utf-8") == "saved"
+    assert events == ["export", "ingest", "close"]
+
+
+@pytest.mark.parametrize(
+    ("report", "expected_exit"),
+    [
+        (
+            ingestion_report(
+                provider_found=0,
+                provider_not_found=1,
+            ),
+            0,
+        ),
+        (
+            ingestion_report(
+                provider_found=0,
+                provider_failed=1,
+                provider_retries_required=1,
+            ),
+            1,
+        ),
+        (ingestion_report(database_failure=True), 5),
+    ],
+)
+def test_persistence_report_controls_exit_code(
+    monkeypatch,
+    report: IngestionReport,
+    expected_exit: int,
+) -> None:
+    browser = Browser()
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime(browser, Service()),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=lambda result: report,
+            close=lambda: None,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--persist",
+        ]
+    )
+
+    assert exit_code == expected_exit
+
+
+def test_interruption_takes_precedence_over_pipeline_failures(
+    monkeypatch,
+) -> None:
+    browser = Browser()
+
+    class InterruptedService(Service):
+        def run(self, request, browser):
+            result = super().run(request, browser)
+            return ScrapeResult(
+                records=result.records,
+                issues=result.issues,
+                stats=result.stats,
+                retry=RetryStats(
+                    attempted_targets=1,
+                    retried=0,
+                    rate_limited=0,
+                    pending=1,
+                    interrupted=1,
+                ),
+            )
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime(browser, InterruptedService()),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=lambda result: ingestion_report(
+                provider_found=0,
+                provider_failed=1,
+                provider_retries_required=1,
+                database_failure=True,
+            ),
+            close=lambda: None,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--persist",
+        ]
+    )
+
+    assert exit_code == 130
+
+
+def test_database_failure_closes_browser_and_pipeline_runtime(
+    monkeypatch,
+) -> None:
+    browser = Browser()
+    closed: list[bool] = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime(browser, Service()),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: AuthenticatedPersistenceRuntime(
+            ingest_result=lambda result: (_ for _ in ()).throw(
+                DatabaseError("Database operation failed.")
+            ),
+            close=lambda: closed.append(True),
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--persist",
+        ]
+    )
+
+    assert exit_code == 5
+    assert closed == [True]
+    assert browser.quit_calls == 1
+
+
+def test_missing_pipeline_configuration_returns_five_before_browser(
+    monkeypatch,
+    capsys,
+) -> None:
+    browser_creations: list[object] = []
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("FB_NUMBER_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: AuthenticatedRuntime(
+            create_browser=lambda settings: browser_creations.append(settings),
+            create_service=lambda settings, credentials: Service(),
+            ensure_format=lambda format_name: None,
+            write_result=lambda *args: True,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--persist",
+        ]
+    )
+
+    error = capsys.readouterr().err
+    assert exit_code == 5
+    assert browser_creations == []
+    assert "Persistence pipeline configuration is incomplete." in error
+    assert "DATABASE_URL" not in error

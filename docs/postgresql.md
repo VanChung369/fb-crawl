@@ -82,14 +82,22 @@ failed attempt is stored so a later job can retry.
 
 `EnrichmentPipeline` calls FBNumber before database persistence. Its
 `PipelineRun` is then passed to `PipelinePersistenceService`, which writes one
-user per short transaction through `PostgresRepository`. Identity conflict or
-database failure stops the run; earlier committed users remain valid and a
-rerun is idempotent except for evidence counters and attempt audit rows.
+user per short transaction through `PostgresRepository`. An identity conflict
+rolls back only that user and the batch continues; a connection or driver
+failure stops the run. Earlier committed users remain valid and a rerun is
+idempotent except for evidence counters and attempt audit rows.
 
-The existing public/authenticated CLI commands are not automatically wired to
-this persistence service yet. Automatic crawl-to-provider-to-database wiring
-and artifact cleanup are separate follow-up phases. No output file is deleted
-by the current implementation.
+Authenticated `members`, `comments`, `friends`, `followers`, and `reactions`
+commands opt into this flow with `--persist`. The typed `ScrapeResult` is passed
+directly in memory; no intermediate artifact is created or deleted. Add
+`--keep-output` to also write the normal compatibility output. Existing files,
+cache, session, targets, and checkpoints are retained.
+
+```powershell
+$env:FB_NUMBER_API_TOKEN = "replace-with-secret"
+fb-crawl authenticated members https://www.facebook.com/groups/123 `
+  --persist --headless
+```
 
 ## Integration tests
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+import psycopg
 import pytest
 
 from fb_data_pipeline.core.models import (
@@ -13,7 +14,10 @@ from fb_data_pipeline.core.models import (
     ProviderStatus,
     UserBundle,
 )
-from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
+from fb_data_pipeline.repositories.errors import (
+    DatabaseError,
+    DatabaseIdentityConflict,
+)
 from fb_data_pipeline.repositories.postgres import PostgresRepository
 from fb_data_pipeline.services.pipeline import EnrichedUser
 
@@ -367,3 +371,19 @@ def test_repository_rolls_back_when_profile_write_fails() -> None:
     assert not any(
         "INSERT INTO phone_numbers" in sql for sql, _params in cursor.commands
     )
+
+
+def test_repository_hides_driver_connection_details() -> None:
+    def unavailable(_database_url: str):
+        raise psycopg.OperationalError("secret DSN and password")
+
+    repository = PostgresRepository(
+        "postgresql://hidden",
+        connect_factory=unavailable,
+    )
+
+    with pytest.raises(DatabaseError) as captured:
+        repository.save_enriched_user(make_enriched())
+
+    assert captured.value.safe_message == "Database operation failed."
+    assert "secret" not in captured.value.safe_message

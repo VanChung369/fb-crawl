@@ -385,6 +385,41 @@ parser version. It never writes DOM text, raw HTML, screenshots, or cookies.
 - `--checkpoint` overrides the default JSON path and requires one of the two
   checkpoint modes.
 
+## Direct PostgreSQL persistence
+
+The `members`, `comments`, `friends`, `followers`, and `reactions` actions can
+send their in-memory user result through FBNumber and into PostgreSQL:
+
+```powershell
+$env:DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@localhost:5432/fb_pipeline"
+$env:FB_NUMBER_API_TOKEN = "replace-with-secret"
+fb-crawl pipeline migrate
+fb-crawl authenticated friends https://www.facebook.com/example `
+  --persist --headless
+```
+
+`--persist` does not create a CSV, JSON, TXT, XLSX, or phone-evidence sidecar.
+PostgreSQL is the authoritative output. To keep the normal compatibility
+artifact as well, use:
+
+```powershell
+fb-crawl authenticated friends https://www.facebook.com/example `
+  --persist --keep-output --output runtime/output/friends.csv --headless
+```
+
+An explicit `--output` used with `--persist` requires `--keep-output`.
+`--keep-output` without `--persist` is invalid. Output is written immediately
+after crawling and before provider/database work, so an explicitly requested
+recovery artifact survives a later pipeline failure.
+
+FBNumber supplies preferred `phone_1`; Facebook-visible crawler evidence
+supplies preferred `phone_2`. A provider `not_found` result is successful. A
+provider failure or rate limit still stores the Facebook identity, crawler
+phone evidence, profile fields, and safe attempt status for a later retry.
+One identity conflict is rolled back and reported while remaining users
+continue; a connection or driver failure stops the batch. Cache, session,
+checkpoint, target, and pre-existing output files are never deleted.
+
 A repository-local session path must stay under `runtime/`. An absolute external path may be used for a managed secret mount.
 
 ## Output
@@ -453,6 +488,9 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - `2`: invalid target, configuration, or missing optional dependency.
 - `3`: authenticated session, login, or manual verification unavailable.
 - `4`: output could not be replaced safely.
+- `5`: persistence pipeline configuration/database failure, or one or more
+  isolated PostgreSQL identity conflicts. Provider `failed`/`rate_limited`
+  results use exit `1` after Facebook data is safely persisted.
 - `130`: authenticated collection was interrupted safely; completed target
   progress was preserved.
 
