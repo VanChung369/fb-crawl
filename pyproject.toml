@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Public and authenticated Facebook data collection CLI"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["curl-cffi", "selectolax"]
+dependencies = ["curl-cffi", "httpx>=0.28,<1", "selectolax"]
 
 [project.optional-dependencies]
 browser = ["selenium>=4.16,<5", "beautifulsoup4>=4.12,<5"]
