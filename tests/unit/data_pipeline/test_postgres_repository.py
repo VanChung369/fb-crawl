@@ -27,22 +27,31 @@ class RecordingCursor:
         self,
         *,
         matching_user_ids: list[list[tuple[int]]] | None = None,
+        retry_rows: list[tuple[object, ...]] | None = None,
+        lock_acquired: bool = True,
         inserted_user_id: int | None = 41,
         fail_on: str = "",
     ) -> None:
         self.matching_user_ids = matching_user_ids or [[]]
+        self.retry_rows = retry_rows or []
+        self.lock_acquired = lock_acquired
         self.inserted_user_id = inserted_user_id
         self.fail_on = fail_on
         self.commands: list[tuple[str, tuple[object, ...] | None]] = []
         self._rows: list[tuple[object, ...]] = []
         self._row: tuple[object, ...] | None = None
         self._phone_ids: dict[str, int] = {}
+        self.closed = False
 
     def __enter__(self) -> RecordingCursor:
         return self
 
     def __exit__(self, *_args: object) -> None:
+        self.closed = True
         return None
+
+    def close(self) -> None:
+        self.closed = True
 
     def execute(
         self,
@@ -55,7 +64,13 @@ class RecordingCursor:
 
         self._rows = []
         self._row = None
-        if "FROM facebook_users" in sql and "FOR UPDATE" in sql:
+        if "pg_try_advisory_lock" in sql:
+            self._row = (self.lock_acquired,)
+        elif "pg_advisory_unlock" in sql:
+            self._row = (True,)
+        elif "WITH latest AS" in sql:
+            self._rows = list(self.retry_rows)
+        elif "FROM facebook_users" in sql and "FOR UPDATE" in sql:
             self._rows = list(self.matching_user_ids.pop(0))
         elif "INSERT INTO facebook_users" in sql:
             if self.inserted_user_id is not None:
@@ -84,6 +99,8 @@ class RecordingConnection:
         self.recording_cursor = cursor
         self.committed = False
         self.rolled_back = False
+        self.autocommit = False
+        self.closed = False
 
     def __enter__(self) -> RecordingConnection:
         return self
@@ -96,9 +113,13 @@ class RecordingConnection:
     ) -> None:
         self.committed = exc_type is None
         self.rolled_back = exc_type is not None
+        self.closed = True
 
     def cursor(self) -> RecordingCursor:
         return self.recording_cursor
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def connection_factory(
@@ -387,3 +408,115 @@ def test_repository_hides_driver_connection_details() -> None:
 
     assert captured.value.safe_message == "Database operation failed."
     assert "secret" not in captured.value.safe_message
+
+
+def test_fbnumber_retry_lock_is_nonblocking_autocommit_and_released() -> None:
+    cursor = RecordingCursor(lock_acquired=True)
+    connection = RecordingConnection(cursor)
+    repository = PostgresRepository(
+        "postgresql://hidden",
+        connect_factory=connection_factory(connection),
+    )
+
+    with repository.fbnumber_retry_lock() as acquired:
+        assert acquired is True
+        assert connection.autocommit is True
+
+    sql = [command for command, _params in cursor.commands]
+    assert any("pg_try_advisory_lock" in command for command in sql)
+    assert any("pg_advisory_unlock" in command for command in sql)
+    assert connection.closed is True
+    assert cursor.closed is True
+
+
+def test_busy_fbnumber_retry_lock_is_not_unlocked_by_non_owner() -> None:
+    cursor = RecordingCursor(lock_acquired=False)
+    repository = PostgresRepository(
+        "postgresql://hidden",
+        connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+
+    with repository.fbnumber_retry_lock() as acquired:
+        assert acquired is False
+
+    assert not any(
+        "pg_advisory_unlock" in sql for sql, _params in cursor.commands
+    )
+
+
+def test_repository_maps_latest_retry_candidates() -> None:
+    checked_at = datetime(2026, 8, 8, tzinfo=UTC)
+    cursor = RecordingCursor(
+        retry_rows=[
+            (
+                7,
+                "100",
+                "sample.user",
+                "Sample User",
+                "https://www.facebook.com/sample.user",
+                "failed",
+                checked_at,
+                "provider_transport_error",
+            )
+        ]
+    )
+    repository = PostgresRepository(
+        "postgresql://hidden",
+        connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+
+    candidates = repository.list_fbnumber_retry_candidates(
+        eligible_before=checked_at,
+        limit=20,
+    )
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.user_id == 7
+    assert candidate.identity == FacebookIdentity(
+        uid="100",
+        username="sample.user",
+        name="Sample User",
+        profile_url="https://www.facebook.com/sample.user",
+    )
+    assert candidate.status is ProviderStatus.FAILED
+    assert candidate.checked_at == checked_at
+    assert candidate.error_code == "provider_transport_error"
+    query = next(
+        item for item in cursor.commands if "WITH latest AS" in item[0]
+    )
+    assert query[1] == ("fbnumber", checked_at, checked_at, 20)
+
+
+def test_repository_force_selection_passes_no_cutoff() -> None:
+    cursor = RecordingCursor()
+    repository = PostgresRepository(
+        "postgresql://hidden",
+        connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+
+    assert repository.list_fbnumber_retry_candidates(
+        eligible_before=None,
+        limit=3,
+    ) == ()
+
+    query = next(
+        item for item in cursor.commands if "WITH latest AS" in item[0]
+    )
+    assert query[1] == ("fbnumber", None, None, 3)
+
+
+def test_repository_rejects_nonpositive_retry_limit_before_connecting() -> None:
+    def unexpected_connection(_database_url: str):
+        raise AssertionError("database connection should not be opened")
+
+    repository = PostgresRepository(
+        "postgresql://hidden",
+        connect_factory=unexpected_connection,
+    )
+
+    with pytest.raises(ValueError, match="limit must be positive"):
+        repository.list_fbnumber_retry_candidates(
+            eligible_before=None,
+            limit=0,
+        )

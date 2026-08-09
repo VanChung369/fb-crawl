@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,8 @@ from fb_data_pipeline.core.models import (
     PhoneSlot,
     ProfileData,
     ProviderResult,
+    ProviderStatus,
+    RetryCandidate,
 )
 from fb_data_pipeline.repositories.errors import (
     DatabaseError,
@@ -32,6 +35,9 @@ def _origin(evidence: PhoneEvidence) -> str:
     return "fb_crawl"
 
 
+FB_NUMBER_RETRY_LOCK_NAME = "fb-crawl:fbnumber-durable-retry-worker:v1"
+
+
 class PostgresRepository:
     def __init__(
         self,
@@ -48,6 +54,156 @@ class PostgresRepository:
         )
         self.connect_factory = connect_factory
         self.clock = clock
+
+    @contextmanager
+    def fbnumber_retry_lock(self) -> Iterator[bool]:
+        connection = None
+        cursor = None
+        acquired = False
+        try:
+            connection = self.connect_factory(self.database_url)
+            connection.autocommit = True
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT pg_try_advisory_lock(hashtextextended(%s, 0))",
+                (FB_NUMBER_RETRY_LOCK_NAME,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise DatabaseError("Database retry lock failed.")
+            acquired = bool(row[0])
+        except DatabaseError:
+            if cursor is not None:
+                cursor.close()
+            if connection is not None:
+                connection.close()
+            raise
+        except (psycopg.Error, OSError) as error:
+            if cursor is not None:
+                cursor.close()
+            if connection is not None:
+                connection.close()
+            raise DatabaseError("Database operation failed.") from error
+
+        try:
+            yield acquired
+        except BaseException:
+            try:
+                if acquired:
+                    cursor.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                        (FB_NUMBER_RETRY_LOCK_NAME,),
+                    )
+            except (psycopg.Error, OSError):
+                pass
+            finally:
+                cursor.close()
+                connection.close()
+            raise
+        else:
+            try:
+                if acquired:
+                    cursor.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                        (FB_NUMBER_RETRY_LOCK_NAME,),
+                    )
+            except (psycopg.Error, OSError) as error:
+                raise DatabaseError("Database operation failed.") from error
+            finally:
+                cursor.close()
+                connection.close()
+
+    def list_fbnumber_retry_candidates(
+        self,
+        *,
+        eligible_before: datetime | None,
+        limit: int,
+    ) -> tuple[RetryCandidate, ...]:
+        if limit <= 0:
+            raise ValueError("retry candidate limit must be positive")
+
+        try:
+            with self.connect_factory(self.database_url) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (f"{self.statement_timeout_ms}ms",),
+                    )
+                    cursor.execute(
+                        """
+                        WITH latest AS (
+                            SELECT DISTINCT ON (attempts.facebook_user_id)
+                                attempts.id AS attempt_id,
+                                attempts.facebook_user_id,
+                                attempts.status,
+                                attempts.checked_at,
+                                attempts.error_code
+                            FROM enrichment_attempts AS attempts
+                            WHERE attempts.provider = %s
+                            ORDER BY
+                                attempts.facebook_user_id,
+                                attempts.checked_at DESC,
+                                attempts.id DESC
+                        )
+                        SELECT
+                            users.id,
+                            users.facebook_uid,
+                            users.facebook_username,
+                            users.display_name,
+                            users.profile_url,
+                            latest.status,
+                            latest.checked_at,
+                            latest.error_code
+                        FROM latest
+                        JOIN facebook_users AS users
+                            ON users.id = latest.facebook_user_id
+                        WHERE latest.status IN ('failed', 'rate_limited')
+                          AND (
+                              NULLIF(btrim(users.facebook_uid), '') IS NOT NULL
+                              OR NULLIF(
+                                  btrim(users.facebook_username),
+                                  ''
+                              ) IS NOT NULL
+                          )
+                          AND (
+                              CAST(%s AS timestamptz) IS NULL
+                              OR latest.checked_at
+                                  <= CAST(%s AS timestamptz)
+                          )
+                        ORDER BY
+                            latest.checked_at ASC,
+                            latest.attempt_id ASC,
+                            users.id ASC
+                        LIMIT %s
+                        """,
+                        (
+                            "fbnumber",
+                            eligible_before,
+                            eligible_before,
+                            limit,
+                        ),
+                    )
+                    rows = cursor.fetchall()
+        except DatabaseError:
+            raise
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database operation failed.") from error
+
+        return tuple(
+            RetryCandidate(
+                user_id=int(row[0]),
+                identity=FacebookIdentity(
+                    uid=row[1],
+                    username=row[2],
+                    name=row[3],
+                    profile_url=row[4],
+                ),
+                status=ProviderStatus(str(row[5])),
+                checked_at=row[6],
+                error_code=row[7],
+            )
+            for row in rows
+        )
 
     def save_enriched_user(self, enriched: EnrichedUser) -> int:
         try:

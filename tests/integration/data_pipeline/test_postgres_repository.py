@@ -21,6 +21,7 @@ from fb_data_pipeline.repositories.postgres import PostgresRepository
 from fb_data_pipeline.services.ingestion import AuthenticatedIngestionService
 from fb_data_pipeline.services.persistence import PipelinePersistenceService
 from fb_data_pipeline.services.pipeline import EnrichedUser, EnrichmentPipeline
+from fb_data_pipeline.services.retry import FBNumberRetryService
 
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -81,6 +82,7 @@ def enriched(
     evidence_items: tuple[PhoneEvidence, ...] = (),
     status: ProviderStatus = ProviderStatus.FOUND,
     profile: ProfileData | None = None,
+    checked_at: datetime | None = None,
 ) -> EnrichedUser:
     provider_evidence = tuple(
         item for item in evidence_items if item.provider == "fbnumber"
@@ -95,7 +97,7 @@ def enriched(
             provider="fbnumber",
             status=status,
             evidence=provider_evidence,
-            checked_at=datetime(2026, 8, 9, tzinfo=UTC),
+            checked_at=checked_at or datetime(2026, 8, 9, tzinfo=UTC),
             error_code=("provider_failed" if status is ProviderStatus.FAILED else ""),
         ),
     )
@@ -459,3 +461,196 @@ def test_in_memory_crawl_enrichment_persists_authoritative_view() -> None:
                 "12 thang 8, 1990",
                 "Nam",
             )
+
+
+def test_latest_terminal_attempt_suppresses_older_retryable_attempt() -> None:
+    repository = PostgresRepository(TEST_DATABASE_URL)
+    identity = FacebookIdentity(uid="100", username="sample.user")
+    timestamp = datetime(2026, 8, 8, tzinfo=UTC)
+    repository.save_enriched_user(
+        enriched(
+            identity,
+            status=ProviderStatus.FAILED,
+            checked_at=timestamp,
+        )
+    )
+    repository.save_enriched_user(
+        enriched(
+            identity,
+            status=ProviderStatus.NOT_FOUND,
+            checked_at=timestamp,
+        )
+    )
+
+    assert repository.list_fbnumber_retry_candidates(
+        eligible_before=datetime(2026, 8, 9, tzinfo=UTC),
+        limit=20,
+    ) == ()
+
+
+def test_retry_candidate_selection_honors_cooldown_force_and_identity() -> None:
+    repository = PostgresRepository(TEST_DATABASE_URL)
+    checked_at = datetime(2026, 8, 9, 11, 0, tzinfo=UTC)
+    repository.save_enriched_user(
+        enriched(
+            FacebookIdentity(uid="100", username="sample.user"),
+            status=ProviderStatus.RATE_LIMITED,
+            checked_at=checked_at,
+        )
+    )
+    repository.save_enriched_user(
+        enriched(
+            FacebookIdentity(
+                profile_url="https://www.facebook.com/profile.only"
+            ),
+            status=ProviderStatus.FAILED,
+            checked_at=datetime(2026, 8, 7, tzinfo=UTC),
+        )
+    )
+
+    assert repository.list_fbnumber_retry_candidates(
+        eligible_before=datetime(2026, 8, 8, 12, 0, tzinfo=UTC),
+        limit=20,
+    ) == ()
+    forced = repository.list_fbnumber_retry_candidates(
+        eligible_before=None,
+        limit=20,
+    )
+    assert len(forced) == 1
+    assert forced[0].identity.uid == "100"
+    assert forced[0].status is ProviderStatus.RATE_LIMITED
+
+
+def test_fbnumber_retry_advisory_lock_serializes_workers() -> None:
+    first = PostgresRepository(TEST_DATABASE_URL)
+    second = PostgresRepository(TEST_DATABASE_URL)
+
+    with first.fbnumber_retry_lock() as first_acquired:
+        assert first_acquired is True
+        with second.fbnumber_retry_lock() as second_acquired:
+            assert second_acquired is False
+
+    with second.fbnumber_retry_lock() as acquired_after_release:
+        assert acquired_after_release is True
+
+
+def test_successful_retry_persists_phone_and_preserves_crawler_data() -> None:
+    earlier = datetime(2026, 8, 7, tzinfo=UTC)
+    now = datetime(2026, 8, 9, tzinfo=UTC)
+    identity = FacebookIdentity(uid="100", username="sample.user")
+    crawler = evidence(
+        "+84911111111",
+        source="profile_about",
+        captured_at=earlier,
+        confidence="profile_field",
+    )
+    repository = PostgresRepository(TEST_DATABASE_URL)
+    repository.save_enriched_user(
+        enriched(
+            identity,
+            evidence_items=(crawler,),
+            status=ProviderStatus.FAILED,
+            profile=ProfileData(
+                address="Ha Noi",
+                birth_date="1990",
+                gender="Nam",
+                observed_at=earlier,
+            ),
+            checked_at=earlier,
+        )
+    )
+
+    class StaticProvider:
+        def search(self, received: FacebookIdentity) -> ProviderResult:
+            assert received == identity
+            phone = evidence(
+                "+84922222222",
+                source="external:fbnumber",
+                captured_at=now,
+                confidence="provider_result",
+                provider="fbnumber",
+            )
+            return ProviderResult(
+                provider="fbnumber",
+                status=ProviderStatus.FOUND,
+                evidence=(phone,),
+                checked_at=now,
+            )
+
+    report = FBNumberRetryService(
+        repository,
+        EnrichmentPipeline(StaticProvider()),
+        PipelinePersistenceService(repository),
+        clock=lambda: now,
+    ).run()
+
+    assert report.selected == 1
+    assert report.persisted == 1
+    assert report.found == 1
+    assert report.retry_pending == 0
+    with psycopg.connect(TEST_DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT phone_1, phone_2, address, birth_date, gender
+                FROM facebook_user_phone_slots
+                """
+            )
+            assert cursor.fetchone() == (
+                "+84922222222",
+                "+84911111111",
+                "Ha Noi",
+                "1990",
+                "Nam",
+            )
+            cursor.execute(
+                """
+                SELECT status
+                FROM enrichment_attempts
+                ORDER BY checked_at DESC, id DESC
+                LIMIT 1
+                """
+            )
+            assert cursor.fetchone() == ("found",)
+
+
+def test_repeated_failure_starts_a_new_cooldown() -> None:
+    earlier = datetime(2026, 8, 7, tzinfo=UTC)
+    now = datetime(2026, 8, 9, tzinfo=UTC)
+    repository = PostgresRepository(TEST_DATABASE_URL)
+    repository.save_enriched_user(
+        enriched(
+            FacebookIdentity(uid="100", username="sample.user"),
+            status=ProviderStatus.FAILED,
+            checked_at=earlier,
+        )
+    )
+
+    class FailingProvider:
+        def search(self, _identity: FacebookIdentity) -> ProviderResult:
+            return ProviderResult(
+                provider="fbnumber",
+                status=ProviderStatus.FAILED,
+                checked_at=now,
+                error_code="provider_transport_error",
+            )
+
+    report = FBNumberRetryService(
+        repository,
+        EnrichmentPipeline(FailingProvider()),
+        PipelinePersistenceService(repository),
+        clock=lambda: now,
+    ).run()
+
+    assert report.failed == 1
+    assert report.retry_pending == 1
+    assert repository.list_fbnumber_retry_candidates(
+        eligible_before=now - timedelta(hours=24),
+        limit=20,
+    ) == ()
+    forced = repository.list_fbnumber_retry_candidates(
+        eligible_before=None,
+        limit=20,
+    )
+    assert len(forced) == 1
+    assert forced[0].checked_at == now

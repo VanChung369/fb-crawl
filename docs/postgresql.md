@@ -76,7 +76,46 @@ FROM facebook_user_phone_slots;
 ```
 
 Provider failure does not discard the Facebook user or crawler evidence. The
-failed attempt is stored so a later job can retry.
+failed attempt is stored so the durable retry worker can process it later.
+
+## Retry durable FBNumber failures
+
+Inspect eligible work without calling the provider or writing enrichment data:
+
+```powershell
+fb-crawl pipeline retry --dry-run
+```
+
+Run a bounded retry batch after the default 24-hour cooldown:
+
+```powershell
+$env:FB_NUMBER_API_TOKEN = "replace-with-secret"
+fb-crawl pipeline retry --limit 20 --cooldown-hours 24
+```
+
+Use `--force` to ignore only the cooldown:
+
+```powershell
+fb-crawl pipeline retry --force --limit 20
+```
+
+Candidate selection considers only the latest `fbnumber` attempt per user.
+Latest `failed` and `rate_limited` attempts are retryable; `found` and
+`not_found` are terminal. A candidate must have a UID or username. The oldest
+eligible failures run first, with attempt ID as the deterministic timestamp
+tie-breaker.
+
+One non-blocking PostgreSQL session advisory lock serializes this CLI worker per
+database. A second worker reports `worker_busy=true` and exits without calling
+FBNumber. The lock session uses autocommit, so provider HTTP calls do not run
+inside a database transaction. A successful or failed retry writes a new
+attempt and starts from that latest state on the next run.
+
+Dry-run requires only `DATABASE_URL`. An actual retry also requires the normal
+FBNumber configuration. Exit codes are `0` for completed, empty, dry, or busy
+runs; `1` when a new provider result is still failed/rate-limited; `2` for
+invalid CLI/configuration values; `5` for database failure; and `130` for an
+operator interruption.
 
 ## Application flow
 

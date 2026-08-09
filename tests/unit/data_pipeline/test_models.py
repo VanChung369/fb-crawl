@@ -1,4 +1,7 @@
+from datetime import UTC, datetime
+
 import fb_data_pipeline.core.models as pipeline_models
+import pytest
 
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
@@ -79,3 +82,46 @@ def test_missing_source_slot_is_none_without_losing_other_evidence() -> None:
 
     assert bundle.phone_1 is None
     assert bundle.phone_2 == "+84912345678"
+
+
+def test_retry_candidate_converts_to_empty_bundle() -> None:
+    checked_at = datetime(2026, 8, 8, tzinfo=UTC)
+    identity = FacebookIdentity(
+        uid="100",
+        username="sample.user",
+        name="Sample User",
+        profile_url="https://www.facebook.com/sample.user",
+    )
+
+    candidate = pipeline_models.RetryCandidate(
+        user_id=7,
+        identity=identity,
+        status=pipeline_models.ProviderStatus.FAILED,
+        checked_at=checked_at,
+        error_code=" provider_transport_error ",
+    )
+
+    assert candidate.to_bundle() == UserBundle(identity=identity)
+    assert candidate.user_id == 7
+    assert candidate.checked_at == checked_at
+    assert candidate.error_code == "provider_transport_error"
+
+
+@pytest.mark.parametrize(
+    ("user_id", "status"),
+    [
+        (0, pipeline_models.ProviderStatus.FAILED),
+        (1, pipeline_models.ProviderStatus.FOUND),
+    ],
+)
+def test_retry_candidate_rejects_invalid_selection_state(
+    user_id: int,
+    status: pipeline_models.ProviderStatus,
+) -> None:
+    with pytest.raises(ValueError):
+        pipeline_models.RetryCandidate(
+            user_id=user_id,
+            identity=FacebookIdentity(uid="100"),
+            status=status,
+            checked_at=datetime(2026, 8, 8, tzinfo=UTC),
+        )

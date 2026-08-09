@@ -151,6 +151,28 @@ class UserBundle:
 
 
 @dataclass(frozen=True, slots=True)
+class RetryCandidate:
+    user_id: int
+    identity: FacebookIdentity
+    status: ProviderStatus
+    checked_at: datetime
+    error_code: str = ""
+
+    def __post_init__(self) -> None:
+        if self.user_id <= 0:
+            raise ValueError("retry candidate user_id must be positive")
+        if self.status not in {
+            ProviderStatus.FAILED,
+            ProviderStatus.RATE_LIMITED,
+        }:
+            raise ValueError("retry candidate status must be retryable")
+        object.__setattr__(self, "error_code", _clean(self.error_code))
+
+    def to_bundle(self) -> UserBundle:
+        return UserBundle(identity=self.identity)
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderResult:
     provider: str
     status: ProviderStatus

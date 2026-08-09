@@ -161,6 +161,21 @@ message and inspect results remain compatibility output only. Cache, session,
 checkpoint, and existing output files are never deleted. See
 [docs/postgresql.md](docs/postgresql.md) for schema, tests, and security.
 
+Retry durable FBNumber failures from PostgreSQL without crawling Facebook
+again:
+
+```powershell
+fb-crawl pipeline retry --limit 20 --cooldown-hours 24
+fb-crawl pipeline retry --dry-run
+fb-crawl pipeline retry --force --limit 20
+```
+
+Only the latest `failed` or `rate_limited` FBNumber attempt is eligible.
+`found` and `not_found` are terminal. The default worker is bounded to 20 users,
+waits 24 hours after a retryable failure, and serializes runs per database.
+`--force` bypasses only the cooldown; `--dry-run` calls neither FBNumber nor the
+persistence writer.
+
 ## Merge crawl output
 
 Combine unified public/authenticated user CSV files and produce a quality gate

@@ -3,8 +3,10 @@
 The in-process pipeline now normalizes crawler results, calls the configured
 FBNumber provider, merges source-aware phone evidence, and can persist it to
 PostgreSQL through `PostgresRepository` and `PipelinePersistenceService`.
-`fb-crawl pipeline migrate` applies the packaged schema. Existing crawl commands
-are not yet automatically wired to persistence.
+`fb-crawl pipeline migrate` applies the packaged schema. Supported authenticated
+crawl commands opt into the in-memory provider/database flow with `--persist`.
+`fb-crawl pipeline retry` durably retries the latest failed or rate-limited
+FBNumber attempt with a bounded cooldown-aware worker.
 
 The local normalization/deduplication quality gate is now available through
 `fb-crawl data merge`, and `fb-crawl data plan` produces bounded follow-up
@@ -12,8 +14,8 @@ profile batches from its master output. Authenticated phone extraction also
 writes `*-phone-evidence.csv` with source URL, capture time, and confidence, so
 provider values can be merged without erasing Facebook-visible provenance.
 `fb-crawl data phone-merge` consolidates those files into a normalized,
-quality-checked evidence master. Automatic job orchestration and cleanup remain
-future work.
+quality-checked evidence master. General scheduled job orchestration, WebUI/API
+workers, and automatic compatibility-artifact cleanup remain future work.
 
 ## Intended pipeline
 
