@@ -301,6 +301,49 @@ def test_profile_root_extracts_phone_from_intro_and_visible_post_text() -> None:
         "facebook:profile_intro_text",
         "facebook:post_text",
     )
+    assert tuple(
+        (
+            item.value,
+            item.source,
+            item.source_url,
+            item.confidence,
+        )
+        for item in details.phone_evidence
+    ) == (
+        (
+            "0912 345 678",
+            "facebook:profile_intro_text",
+            "https://www.facebook.com/synthetic.user",
+            "strong_pattern",
+        ),
+        (
+            "+84 987 654 321",
+            "facebook:post_text",
+            "https://www.facebook.com/synthetic.user",
+            "strong_pattern",
+        ),
+    )
+
+
+def test_post_phone_evidence_uses_visible_post_permalink() -> None:
+    details = ProfileParser().parse(
+        """
+        <main>
+          <div role="article">
+            <a href="https://www.facebook.com/example/posts/123?ref=share">
+              2 hours
+            </a>
+            <div data-ad-preview="message">Hotline 0912 345 678</div>
+          </div>
+        </main>
+        """,
+        source_url="https://www.facebook.com/example",
+        requested_fields=(ProfileField.PHONE,),
+    )
+
+    assert details.phone_evidence[0].source_url == (
+        "https://www.facebook.com/example/posts/123"
+    )
 
 
 def test_directory_page_does_not_scan_unlabelled_global_numbers() -> None:

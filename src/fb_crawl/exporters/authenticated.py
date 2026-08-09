@@ -10,6 +10,7 @@ from fb_crawl.core.models import (
 )
 from fb_crawl.exporters.messages import write_messages
 from fb_crawl.exporters.inspect import write_inspect
+from fb_crawl.exporters.phone_evidence import write_phone_evidence
 from fb_crawl.exporters.users import ensure_user_format_available, write_users
 
 
@@ -22,6 +23,8 @@ def write_authenticated(
     path: Path,
     format_name: str,
 ) -> bool:
+    evidence_path = path.with_name(f"{path.stem}-phone-evidence.csv")
+
     if isinstance(result, AuthenticatedBatchResult):
         user_content = bool(
             result.user_result.records or result.user_result.issues
@@ -37,6 +40,10 @@ def write_authenticated(
         if user_content:
             written = write_users(
                 result.user_result, path, format_name
+            ) or written
+            written = write_phone_evidence(
+                result.user_result,
+                evidence_path,
             ) or written
 
         if message_content:
@@ -79,4 +86,5 @@ def write_authenticated(
     if is_messages:
         return write_messages(result, path, format_name)
 
-    return write_users(result, path, format_name)
+    written = write_users(result, path, format_name)
+    return write_phone_evidence(result, evidence_path) or written

@@ -134,12 +134,25 @@ def _common(
             type=float,
             default=3.0,
         )
+        parser.add_argument(
+            "--phone-post-steps",
+            type=int,
+            default=0,
+            help="Extra bounded timeline scrolls when phone is requested",
+        )
+        parser.add_argument(
+            "--phone-post-duration",
+            type=float,
+            help="Maximum extra phone timeline scan time per profile",
+        )
     else:
         parser.set_defaults(
             enrich_profiles=False,
             profile_fields=None,
             profile_limit=20,
             profile_delay=3.0,
+            phone_post_steps=0,
+            phone_post_duration=None,
             force=False,
         )
 
@@ -344,6 +357,24 @@ def request_from_authenticated_args(
     if profile_fields and not enrich_profiles:
         raise ValidationError("Profile fields require --enrich-profiles.")
 
+    phone_post_scan = bool(
+        args.phone_post_steps or args.phone_post_duration
+    )
+
+    if phone_post_scan and not enrich_profiles:
+        raise ValidationError(
+            "Phone post scanning requires --enrich-profiles."
+        )
+
+    if (
+        phone_post_scan
+        and profile_fields
+        and ProfileField.PHONE not in profile_fields
+    ):
+        raise ValidationError(
+            "Phone post scanning requires phone in --profile-fields."
+        )
+
     depth = getattr(args, "depth", 0)
     max_users = getattr(args, "max_users", 20)
 
@@ -378,6 +409,8 @@ def request_from_authenticated_args(
         profile_fields=profile_fields,
         profile_limit=args.profile_limit,
         profile_delay_seconds=args.profile_delay,
+        phone_post_steps=args.phone_post_steps,
+        phone_post_duration_seconds=args.phone_post_duration,
         resume=args.resume,
         incremental=args.incremental,
         checkpoint_path=str(checkpoint) if checkpoint is not None else None,
@@ -783,9 +816,13 @@ def execute_authenticated(
             uid_numeric = sum(
                 record.user_id.isdigit() for record in user_records
             )
+            phone_evidence = sum(
+                len(record.phone_evidence) for record in user_records
+            )
             summary += (
                 f" uid_numeric={uid_numeric}"
                 f" uid_unresolved={len(user_records) - uid_numeric}"
+                f" phone_evidence={phone_evidence}"
             )
 
         if result.uid_resolution is not None:

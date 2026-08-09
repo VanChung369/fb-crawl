@@ -153,6 +153,10 @@ def test_profile_enrichment_flags_build_typed_request() -> None:
             "7",
             "--profile-delay",
             "1.5",
+            "--phone-post-steps",
+            "5",
+            "--phone-post-duration",
+            "30",
         ]
     )
 
@@ -166,6 +170,8 @@ def test_profile_enrichment_flags_build_typed_request() -> None:
     )
     assert request.profile_limit == 7
     assert request.profile_delay_seconds == 1.5
+    assert request.phone_post_steps == 5
+    assert request.phone_post_duration_seconds == 30
 
 
 @pytest.mark.parametrize(
@@ -174,6 +180,15 @@ def test_profile_enrichment_flags_build_typed_request() -> None:
         ["--profile-fields", "phone"],
         ["--enrich-profiles", "--profile-fields", "unknown"],
         ["--enrich-profiles", "--profile-fields", "phone,"],
+        ["--phone-post-steps", "-1"],
+        ["--phone-post-duration", "0"],
+        [
+            "--enrich-profiles",
+            "--profile-fields",
+            "address",
+            "--phone-post-steps",
+            "1",
+        ],
     ],
 )
 def test_invalid_profile_fields_fail_before_runtime(arguments: list[str]) -> None:

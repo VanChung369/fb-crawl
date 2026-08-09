@@ -18,8 +18,8 @@ from fb_crawl.adapters.http.contact_parser import (
     extract_phone_numbers,
     extract_visible_phone_numbers,
 )
-from fb_crawl.core.models import ProfileDetails, ProfileField
-from fb_crawl.core.urls import FACEBOOK_HOSTS
+from fb_crawl.core.models import PhoneEvidence, ProfileDetails, ProfileField
+from fb_crawl.core.urls import FACEBOOK_HOSTS, normalize_comments_url
 
 
 PERSONAL_HEADINGS = frozenset(
@@ -369,6 +369,16 @@ def _is_profile_root(source_url: str) -> bool:
     return not parse_qs(parsed.query).get("sk", [""])[0]
 
 
+def _post_source_url(node, fallback: str) -> str:
+    for anchor in node.find_all("a", href=True):
+        normalized = normalize_comments_url(str(anchor.get("href") or ""))
+
+        if normalized is not None:
+            return normalized
+
+    return fallback
+
+
 class ProfileParser:
     def parse(
         self,
@@ -393,6 +403,7 @@ class ProfileParser:
 
         phones: dict[str, str] = {}
         phone_sources: list[str] = []
+        phone_evidence: dict[tuple[str, str, str], PhoneEvidence] = {}
         website: str | None = None
         address: str | None = None
         current_city: str | None = None
@@ -406,7 +417,13 @@ class ProfileParser:
         languages: tuple[str, ...] = ()
         relationship_status: str | None = None
 
-        def add_phones(values: list[str], source: str) -> None:
+        def add_phones(
+            values: list[str],
+            source: str,
+            *,
+            evidence_url: str = source_url,
+            confidence: str = "strong_pattern",
+        ) -> None:
             added = False
 
             for phone in values:
@@ -414,6 +431,16 @@ class ProfileParser:
 
                 if key:
                     phones.setdefault(key, phone)
+                    evidence_key = (key, source, evidence_url)
+                    phone_evidence.setdefault(
+                        evidence_key,
+                        PhoneEvidence(
+                            value=phone,
+                            source=source,
+                            source_url=evidence_url,
+                            confidence=confidence,
+                        ),
+                    )
                     added = True
 
             if added and source not in phone_sources:
@@ -426,6 +453,7 @@ class ProfileParser:
                     add_phones(
                         extract_phone_numbers(unquote(href[4:])),
                         "facebook:profile_contact",
+                        confidence="profile_field",
                     )
 
         if (
@@ -492,6 +520,7 @@ class ProfileParser:
                         add_phones(
                             extract_phone_numbers(text),
                             "facebook:profile_contact",
+                            confidence="profile_field",
                         )
 
                 if is_contact:
@@ -567,6 +596,7 @@ class ProfileParser:
                 add_phones(
                     extract_phone_numbers(value),
                     "facebook:profile_contact",
+                    confidence="profile_field",
                 )
 
             elif (
@@ -670,10 +700,12 @@ class ProfileParser:
 
                     current = current.parent
 
-            post_nodes = [
-                *soup.select('[role="article"]'),
-                *soup.select('[data-ad-preview="message"]'),
-            ]
+            post_nodes = list(soup.select('[role="article"]'))
+            post_nodes.extend(
+                node
+                for node in soup.select('[data-ad-preview="message"]')
+                if node.find_parent(attrs={"role": "article"}) is None
+            )
 
             for post in post_nodes:
                 related_to_intro = any(
@@ -689,6 +721,7 @@ class ProfileParser:
                 add_phones(
                     extract_visible_phone_numbers(_visible_lines(post)),
                     "facebook:post_text",
+                    evidence_url=_post_source_url(post, source_url),
                 )
 
         phone_values = tuple(phones.values())
@@ -696,6 +729,7 @@ class ProfileParser:
             name=name,
             phone_numbers=phone_values,
             phone_sources=tuple(phone_sources),
+            phone_evidence=tuple(phone_evidence.values()),
             website=website,
             address=address,
             current_city=current_city,

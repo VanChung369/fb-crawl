@@ -5,8 +5,10 @@ external phone APIs and does not connect to PostgreSQL.
 
 The local normalization/deduplication quality gate is now available through
 `fb-crawl data merge`, and `fb-crawl data plan` produces bounded follow-up
-profile batches from its master output. External providers and PostgreSQL
-remain future work.
+profile batches from its master output. Authenticated phone extraction also
+writes `*-phone-evidence.csv` with source URL, capture time, and confidence, so
+future provider values can be merged without erasing Facebook-visible
+provenance. External providers and PostgreSQL remain future work.
 
 ## Intended pipeline
 

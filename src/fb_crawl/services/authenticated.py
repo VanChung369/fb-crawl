@@ -90,6 +90,7 @@ class ProfileEnricherPort(Protocol):
         browser,
         record: UserRecord,
         fields: tuple[ProfileField, ...],
+        **kwargs,
     ) -> ProfileDetails: ...
 
 
@@ -278,6 +279,9 @@ def _merge_record(
         phone_sources=tuple(
             dict.fromkeys((*first.phone_sources, *later.phone_sources))
         ),
+        phone_evidence=tuple(
+            dict.fromkeys((*first.phone_evidence, *later.phone_evidence))
+        ),
         website=first.website or later.website,
         address=first.address or later.address,
         current_city=first.current_city or later.current_city,
@@ -432,6 +436,22 @@ def _merge_details(
         ),
         phone_sources=tuple(
             dict.fromkeys((*record.phone_sources, *details.phone_sources))
+        ),
+        phone_evidence=tuple(
+            dict.fromkeys(
+                (
+                    *record.phone_evidence,
+                    *(
+                        replace(
+                            evidence,
+                            captured_at=(
+                                evidence.captured_at or captured_at
+                            ),
+                        )
+                        for evidence in details.phone_evidence
+                    ),
+                )
+            )
         ),
         website=record.website or details.website,
         address=record.address or details.address,
@@ -1038,10 +1058,27 @@ class AuthenticatedService:
                 attempted += 1
 
                 try:
+                    enrichment_kwargs = {}
+
+                    if (
+                        request.phone_post_steps
+                        or request.phone_post_duration_seconds
+                    ):
+                        enrichment_kwargs = {
+                            "phone_post_steps": request.phone_post_steps,
+                            "phone_post_duration_seconds": (
+                                request.phone_post_duration_seconds
+                            ),
+                            "phone_post_delay_seconds": (
+                                request.profile_delay_seconds
+                            ),
+                        }
+
                     details = self._profile_enricher.enrich(
                         browser,
                         record,
                         fields,
+                        **enrichment_kwargs,
                     )
 
                 except SessionError:

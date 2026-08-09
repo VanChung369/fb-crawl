@@ -15,6 +15,7 @@ from fb_crawl.core.models import (
     EnrichmentStats,
     InspectRecord,
     MessageRecord,
+    PhoneEvidence,
     RetryStats,
     ScrapeIssue,
     ScrapeMode,
@@ -55,9 +56,14 @@ def _tuple_values(data: dict, *keys: str) -> dict:
 
 
 def _user_from_json(data: dict) -> UserRecord:
+    normalized = dict(data)
+    normalized["phone_evidence"] = tuple(
+        PhoneEvidence(**item)
+        for item in normalized.get("phone_evidence", ())
+    )
     return UserRecord(
         **_tuple_values(
-            data,
+            normalized,
             "phone_numbers",
             "phone_sources",
             "languages",
@@ -171,6 +177,10 @@ def _request_options(request: ScrapeRequest) -> dict:
         "profile_fields": [field.value for field in request.profile_fields],
         "profile_limit": request.profile_limit,
         "profile_delay_seconds": request.profile_delay_seconds,
+        "phone_post_steps": request.phone_post_steps,
+        "phone_post_duration_seconds": (
+            request.phone_post_duration_seconds
+        ),
         "force_uid_refresh": request.force_uid_refresh,
     }
 

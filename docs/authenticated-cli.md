@@ -44,7 +44,9 @@ fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
   --enrich-profiles `
   --profile-fields phone,address,current_city,hometown,birth_date `
   --profile-limit 20 `
-  --profile-delay 3
+  --profile-delay 3 `
+  --phone-post-steps 5 `
+  --phone-post-duration 30
 ```
 
 When `--profile-fields` is omitted, all documented enrichment fields are
@@ -90,9 +92,17 @@ a genuinely absent visible value from a route/render failure. Sources remain
 additive so a future external provider can append evidence without overwriting
 Facebook-visible evidence.
 
-Timeline phone scanning is bounded to content already rendered for the target
-profile. It does not infer hidden values, open inaccessible posts, or attach a
-post author's number to commenters and reaction users.
+Timeline phone scanning always checks the initially rendered target profile.
+Set `--phone-post-steps N` for at most `N` extra scrolls,
+`--phone-post-duration SECONDS` for a per-profile time limit, or both so the
+first reached limit stops the scan. Extra scrolling also stops when page height
+does not increase. The existing `--profile-delay` value is reused between these
+scrolls; `Ctrl+C` remains a manual stop signal. These options require
+`--enrich-profiles` and `phone` in `--profile-fields` when that list is explicit.
+
+The scan only reads visible target-profile content. It does not infer hidden
+values, open inaccessible posts, or attach a post author's number to commenters
+and reaction users.
 
 ## Direct profiles and visible social lists
 
@@ -368,6 +378,8 @@ parser version. It never writes DOM text, raw HTML, screenshots, or cookies.
 - `--profile-limit` defaults to `20` and must be greater than zero.
 - `--profile-delay` defaults to `3.0` seconds, must be zero or greater, and also
   spaces automatic numeric-UID resolution requests.
+- `--phone-post-steps` defaults to `0` extra profile-timeline scrolls.
+- `--phone-post-duration` is an optional positive per-profile timeline budget.
 - `--resume` continues a matching checkpoint and skips completed targets.
 - `--incremental` emits only identities not already known by the checkpoint.
 - `--checkpoint` overrides the default JSON path and requires one of the two
@@ -391,6 +403,18 @@ runtime/output/messages.csv
 runtime/output/inspect.csv
 runtime/output/batch.csv
 ```
+
+When authenticated user records contain phone evidence, the exporter also
+writes a CSV beside the requested primary output. For example, `profile.json`
+produces `profile-phone-evidence.csv`. Its columns are:
+
+```text
+user_id,profile_url,phone_number,source,source_url,captured_at,confidence
+```
+
+Evidence is deduplicated by user, normalized phone digits, source, and source
+URL. Phone numbers and Facebook identifiers remain text values; the evidence
+CSV is UTF-8 with BOM and is replaced atomically.
 
 CSV and XLSX columns are:
 

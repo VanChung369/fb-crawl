@@ -431,3 +431,138 @@ def test_profile_enricher_marks_unrendered_section_unavailable() -> None:
     ).enrich(browser, record(), (ProfileField.WORKPLACE,))
 
     assert dict(details.field_status)["workplace"] == "section_unavailable"
+
+
+class ScrollingBrowser(Browser):
+    def __init__(self, personal: str, timeline_pages: list[str], heights: list[int]):
+        timeline = "https://www.facebook.com/synthetic.user"
+        super().__init__({routes()[0]: personal, timeline: timeline_pages[0]})
+        self.timeline_pages = timeline_pages
+        self.heights = heights
+        self.page_index = 0
+        self.scroll_calls = 0
+
+    def execute_script(self, script: str, *args):
+        if "scrollTo" in script:
+            self.scroll_calls += 1
+            self.page_index = min(
+                self.page_index + 1,
+                len(self.timeline_pages) - 1,
+            )
+            self.page_source = self.timeline_pages[self.page_index]
+            return None
+
+        if "scrollHeight" in script:
+            return self.heights[min(self.page_index, len(self.heights) - 1)]
+
+        return True
+
+
+def test_phone_timeline_scrolling_collects_each_loaded_post_with_evidence() -> None:
+    personal, _ = routes()
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        [
+            "<main><h1>Synthetic User</h1></main>",
+            """
+            <main><div role="article">
+              <a href="/synthetic.user/posts/1">Post 1</a>
+              <div data-ad-preview="message">Call 0912 345 678</div>
+            </div></main>
+            """,
+            """
+            <main><div role="article">
+              <a href="/synthetic.user/posts/2">Post 2</a>
+              <div data-ad-preview="message">Call 0987 654 321</div>
+            </div></main>
+            """,
+        ],
+        [100, 200, 300],
+    )
+
+    details = ProfileEnricher(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda start, end: 0,
+    ).enrich(
+        browser,
+        record(),
+        (ProfileField.PHONE,),
+        phone_post_steps=2,
+        phone_post_delay_seconds=0,
+    )
+
+    assert browser.get_calls == [
+        personal,
+        "https://www.facebook.com/synthetic.user",
+    ]
+    assert browser.scroll_calls == 2
+    assert details.phone_numbers == ("0912 345 678", "0987 654 321")
+    assert [item.source_url for item in details.phone_evidence] == [
+        "https://www.facebook.com/synthetic.user/posts/1",
+        "https://www.facebook.com/synthetic.user/posts/2",
+    ]
+
+
+def test_phone_timeline_scrolling_stops_when_height_is_stable() -> None:
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        ["<main></main>", "<main></main>"],
+        [100, 100],
+    )
+
+    ProfileEnricher(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda start, end: 0,
+    ).enrich(
+        browser,
+        record(),
+        (ProfileField.PHONE,),
+        phone_post_steps=5,
+        phone_post_delay_seconds=0,
+    )
+
+    assert browser.scroll_calls == 1
+
+
+def test_phone_timeline_scrolling_accepts_a_duration_only_budget() -> None:
+    clock = iter((0.0, 0.0, 31.0))
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        [
+            "<main></main>",
+            """
+            <main><div role="article">
+              <a href="/synthetic.user/posts/1">Post 1</a>
+              <div data-ad-preview="message">Call 0912 345 678</div>
+            </div></main>
+            """,
+        ],
+        [100, 200],
+    )
+
+    details = ProfileEnricher(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda start, end: 0,
+        monotonic_func=lambda: next(clock),
+    ).enrich(
+        browser,
+        record(),
+        (ProfileField.PHONE,),
+        phone_post_duration_seconds=30,
+        phone_post_delay_seconds=0,
+    )
+
+    assert browser.scroll_calls == 1
+    assert details.phone_numbers == ("0912 345 678",)

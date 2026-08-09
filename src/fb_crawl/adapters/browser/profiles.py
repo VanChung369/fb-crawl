@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import random
 import re
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from urllib.parse import parse_qs, urlparse
@@ -11,6 +13,7 @@ from fb_crawl.adapters.browser.driver import (
     wait_for_document_ready,
     wait_for_profile_content,
 )
+from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
 from fb_crawl.adapters.browser.profile_parser import ProfileParser
 from fb_crawl.adapters.browser.session import is_authenticated
 from fb_crawl.config import BrowserSettings
@@ -43,6 +46,9 @@ def _merge_details(first: ProfileDetails, later: ProfileDetails) -> ProfileDetai
         name=first.name or later.name,
         phone_numbers=_ordered_union(first.phone_numbers, later.phone_numbers),
         phone_sources=_ordered_union(first.phone_sources, later.phone_sources),
+        phone_evidence=tuple(
+            dict.fromkeys((*first.phone_evidence, *later.phone_evidence))
+        ),
         website=first.website or later.website,
         address=first.address or later.address,
         current_city=first.current_city or later.current_city,
@@ -179,18 +185,28 @@ class ProfileEnricher:
             [object, float, str],
             bool | None,
         ] = wait_for_profile_content,
+        sleep_func: Callable[[float], None] = time.sleep,
+        jitter_func: Callable[[float, float], float] = random.uniform,
+        monotonic_func: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._parser = parser or ProfileParser()
         self._authenticated = authenticated_func
         self._ready = ready_func
         self._content_ready = content_ready_func
+        self._sleep = sleep_func
+        self._jitter = jitter_func
+        self._monotonic = monotonic_func
 
     def enrich(
         self,
         browser,
         record: UserRecord,
         fields: tuple[ProfileField, ...],
+        *,
+        phone_post_steps: int = 0,
+        phone_post_duration_seconds: float | None = None,
+        phone_post_delay_seconds: float = 2.0,
     ) -> ProfileDetails:
         routes = profile_enrichment_urls(
             record.profile_url,
@@ -320,6 +336,64 @@ class ProfileEnricher:
                     requested_fields=(ProfileField.PHONE,),
                 )
                 details = _merge_details(details, timeline_details)
+
+                scan_more_posts = bool(
+                    phone_post_steps or phone_post_duration_seconds
+                )
+
+                if scan_more_posts:
+                    previous_height = int(
+                        browser.execute_script(
+                            "return document.body.scrollHeight"
+                        )
+                    )
+                    attempts = 0
+                    budget = CrawlBudget(
+                        steps=(phone_post_steps or None),
+                        max_duration_seconds=(
+                            phone_post_duration_seconds
+                        ),
+                        monotonic_func=self._monotonic,
+                    )
+
+                    while budget.allows(attempts):
+                        browser.execute_script(
+                            "window.scrollTo(0, document.body.scrollHeight)"
+                        )
+                        attempts += 1
+                        jitter_limit = min(
+                            phone_post_delay_seconds * 0.15,
+                            0.5,
+                        )
+                        delay = phone_post_delay_seconds + self._jitter(
+                            0.0, jitter_limit
+                        )
+
+                        if delay:
+                            self._sleep(budget.wait_timeout(delay))
+
+                        if not self._authenticated(browser):
+                            raise SessionError(
+                                "The authenticated Facebook session "
+                                "is no longer valid."
+                            )
+
+                        loaded_details = self._parser.parse(
+                            str(browser.page_source),
+                            source_url=route_profile_url,
+                            requested_fields=(ProfileField.PHONE,),
+                        )
+                        details = _merge_details(details, loaded_details)
+                        current_height = int(
+                            browser.execute_script(
+                                "return document.body.scrollHeight"
+                            )
+                        )
+
+                        if current_height <= previous_height:
+                            break
+
+                        previous_height = current_height
 
             except (SessionError, RateLimitError):
                 raise

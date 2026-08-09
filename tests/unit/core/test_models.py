@@ -7,6 +7,7 @@ from fb_crawl.core.models import (
     ContactRecord,
     EnrichmentStats,
     PageRecord,
+    PhoneEvidence,
     ProfileDetails,
     ProfileField,
     PublicAction,
@@ -150,6 +151,37 @@ def test_profile_enrichment_contracts_are_typed_and_immutable() -> None:
         details.birth_year = 1991  # type: ignore[misc]
 
 
+def test_phone_evidence_and_timeline_budget_are_typed() -> None:
+    evidence = PhoneEvidence(
+        value="0912 345 678",
+        source="facebook:post_text",
+        source_url="https://www.facebook.com/example/posts/1",
+        captured_at="2026-08-09T00:00:00+00:00",
+        confidence="strong_pattern",
+    )
+    record = UserRecord(
+        user_id="1",
+        name="Example",
+        profile_url="https://www.facebook.com/example",
+        source="profile",
+        source_url="https://www.facebook.com/example",
+        phone_evidence=(evidence,),
+    )
+    request = ScrapeRequest(
+        mode=ScrapeMode.AUTHENTICATED,
+        action=AuthenticatedAction.PROFILE,
+        targets=("https://www.facebook.com/example",),
+        enrich_profiles=True,
+        profile_fields=(ProfileField.PHONE,),
+        phone_post_steps=5,
+        phone_post_duration_seconds=30,
+    )
+
+    assert record.phone_evidence == (evidence,)
+    assert request.phone_post_steps == 5
+    assert request.phone_post_duration_seconds == 30
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -161,6 +193,14 @@ def test_profile_enrichment_contracts_are_typed_and_immutable() -> None:
             "profile_fields": (ProfileField.PHONE, ProfileField.PHONE),
         },
         {"enrich_profiles": True, "profile_fields": ("phone",)},
+        {"phone_post_steps": -1},
+        {"phone_post_duration_seconds": 0},
+        {"phone_post_steps": 1},
+        {
+            "enrich_profiles": True,
+            "profile_fields": (ProfileField.ADDRESS,),
+            "phone_post_steps": 1,
+        },
     ],
 )
 def test_request_rejects_invalid_profile_enrichment_options(overrides) -> None:

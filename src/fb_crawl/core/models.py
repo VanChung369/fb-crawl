@@ -85,6 +85,8 @@ class ScrapeRequest:
     profile_fields: tuple[ProfileField, ...] = ()
     profile_limit: int = 20
     profile_delay_seconds: float = 3.0
+    phone_post_steps: int = 0
+    phone_post_duration_seconds: float | None = None
     resume: bool = False
     incremental: bool = False
     checkpoint_path: str | None = None
@@ -123,6 +125,37 @@ class ScrapeRequest:
                 "profile_delay_seconds must be greater than or equal to 0"
             )
 
+        if self.phone_post_steps < 0:
+            raise ValueError(
+                "phone_post_steps must be greater than or equal to 0"
+            )
+
+        if (
+            self.phone_post_duration_seconds is not None
+            and self.phone_post_duration_seconds <= 0
+        ):
+            raise ValueError(
+                "phone_post_duration_seconds must be greater than 0"
+            )
+
+        phone_post_scan = bool(
+            self.phone_post_steps or self.phone_post_duration_seconds
+        )
+
+        if phone_post_scan and not self.enrich_profiles:
+            raise ValueError(
+                "phone post scanning requires enrich_profiles"
+            )
+
+        if (
+            phone_post_scan
+            and self.profile_fields
+            and ProfileField.PHONE not in self.profile_fields
+        ):
+            raise ValueError(
+                "phone post scanning requires the phone profile field"
+            )
+
         if self.profile_fields and not self.enrich_profiles:
             raise ValueError("profile_fields require enrich_profiles")
 
@@ -152,6 +185,15 @@ class ContactRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class PhoneEvidence:
+    value: str
+    source: str
+    source_url: str
+    captured_at: str | None = None
+    confidence: str = "strong_pattern"
+
+
+@dataclass(frozen=True, slots=True)
 class PageRecord:
     canonical_url: str
     page_name: str | None = None
@@ -170,6 +212,7 @@ class ProfileDetails:
     name: str | None = None
     phone_numbers: tuple[str, ...] = ()
     phone_sources: tuple[str, ...] = ()
+    phone_evidence: tuple[PhoneEvidence, ...] = ()
     website: str | None = None
     address: str | None = None
     current_city: str | None = None
@@ -197,6 +240,7 @@ class UserRecord:
     username: str | None = None
     phone_numbers: tuple[str, ...] = ()
     phone_sources: tuple[str, ...] = ()
+    phone_evidence: tuple[PhoneEvidence, ...] = ()
     website: str | None = None
     address: str | None = None
     current_city: str | None = None

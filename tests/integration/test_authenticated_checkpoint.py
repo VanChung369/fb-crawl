@@ -6,6 +6,7 @@ import pytest
 from fb_crawl.core.exceptions import SessionError, ValidationError
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    PhoneEvidence,
     ScrapeMode,
     ScrapeIssue,
     ScrapeRequest,
@@ -120,6 +121,35 @@ def test_incremental_emits_only_new_identities(tmp_path: Path) -> None:
     ).run(request(checkpoint, target, incremental=True), object())
 
     assert [item.user_id for item in incremental.records] == ["200"]
+
+
+def test_resume_reconstructs_nested_phone_evidence(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "phone-evidence.json"
+    target = "https://www.facebook.com/groups/100"
+    enriched = replace(
+        record("100", target),
+        phone_evidence=(
+            PhoneEvidence(
+                value="0912 345 678",
+                source="facebook:post_text",
+                source_url="https://www.facebook.com/example/posts/1",
+                captured_at="2026-08-09T01:02:03+00:00",
+            ),
+        ),
+    )
+    CheckpointingService(IncrementalService((enriched,))).run(
+        request(checkpoint, target),
+        object(),
+    )
+    resumed_base = PerTargetService()
+
+    resumed = CheckpointingService(resumed_base).run(
+        request(checkpoint, target),
+        object(),
+    )
+
+    assert resumed_base.calls == []
+    assert resumed.records[0].phone_evidence == enriched.phone_evidence
 
 
 def test_checkpoint_target_mismatch_fails_validation(tmp_path: Path) -> None:

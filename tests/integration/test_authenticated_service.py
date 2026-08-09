@@ -9,6 +9,7 @@ from fb_crawl.core.models import (
     AuthenticatedAction,
     InspectRecord,
     MessageRecord,
+    PhoneEvidence,
     ProfileDetails,
     ProfileField,
     ScrapeMode,
@@ -358,6 +359,16 @@ class ProfileEnricher:
         return outcome
 
 
+class BudgetProfileEnricher(ProfileEnricher):
+    def __init__(self, outcomes: dict[str, ProfileDetails | Exception]) -> None:
+        super().__init__(outcomes)
+        self.budgets: list[dict[str, object]] = []
+
+    def enrich(self, browser, record: UserRecord, fields, **kwargs):
+        self.budgets.append(kwargs)
+        return super().enrich(browser, record, fields)
+
+
 class UidResolver:
     def __init__(self, outcomes: dict[str, str | Exception]) -> None:
         self.outcomes = outcomes
@@ -591,6 +602,17 @@ def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
             "100": ProfileDetails(
                 phone_numbers=("+1 202-555-0147",),
                 phone_sources=("facebook:profile_contact",),
+                phone_evidence=(
+                    PhoneEvidence(
+                        value="+1 202-555-0147",
+                        source="facebook:profile_contact",
+                        source_url=(
+                            "https://www.facebook.com/synthetic.user"
+                            "/directory_links"
+                        ),
+                        confidence="profile_field",
+                    ),
+                ),
                 canonical_profile_url=(
                     "https://www.facebook.com/synthetic.user"
                 ),
@@ -628,6 +650,10 @@ def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
         "https://www.facebook.com/synthetic.user"
     )
     assert result.records[0].phone_numbers == ("+1 202-555-0147",)
+    assert len(result.records[0].phone_evidence) == 1
+    assert result.records[0].phone_evidence[0].captured_at == (
+        result.records[0].last_enriched_at
+    )
     assert result.records[0].current_city == "Synthetic City"
     assert result.records[0].birth_year == 1990
     assert result.enrichment is not None
@@ -635,6 +661,40 @@ def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
     assert result.enrichment.succeeded == 1
     assert result.enrichment.phone_found == 1
     assert result.enrichment.birth_year_found == 1
+
+
+def test_service_forwards_phone_post_budget_only_when_enabled() -> None:
+    target = "https://www.facebook.com/acme/posts/1"
+    profiles = BudgetProfileEnricher({"100": ProfileDetails()})
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({target: "100:Example"}),
+        Parser(),
+        profiles,
+        sleep_func=lambda seconds: None,
+    )
+
+    service.run(
+        request(
+            AuthenticatedAction.COMMENTS,
+            target,
+            enrich_profiles=True,
+            profile_fields=(ProfileField.PHONE,),
+            profile_delay_seconds=0,
+            phone_post_steps=3,
+            phone_post_duration_seconds=20,
+        ),
+        object(),
+    )
+
+    assert profiles.budgets == [
+        {
+            "phone_post_steps": 3,
+            "phone_post_duration_seconds": 20,
+            "phone_post_delay_seconds": 0,
+        }
+    ]
 
 
 def test_enrichment_limit_delay_and_empty_success_are_bounded() -> None:

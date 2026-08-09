@@ -84,8 +84,15 @@ the authenticated account:
 fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
   --enrich-profiles `
   --profile-fields phone,current_city,birth_date `
-  --profile-limit 20
+  --profile-limit 20 `
+  --phone-post-steps 5
 ```
+
+When `phone` is requested, the initially rendered profile intro and post text
+are scanned automatically. `--phone-post-steps` and `--phone-post-duration`
+optionally load more visible posts with a hard per-profile budget. Each found
+number keeps its source URL, timestamp, and confidence in a sibling
+`*-phone-evidence.csv` file.
 
 Long runs can use an atomic runtime checkpoint:
 
