@@ -42,6 +42,11 @@ Then reuse the validated session explicitly:
 ```powershell
 fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID --headless
 fb-crawl authenticated comments https://www.facebook.com/PAGE/posts/POST_ID --headless
+fb-crawl authenticated profile https://www.facebook.com/USERNAME --headless
+fb-crawl authenticated friends https://www.facebook.com/USERNAME --headless
+fb-crawl authenticated followers https://www.facebook.com/USERNAME --headless
+fb-crawl authenticated reactions https://www.facebook.com/PAGE/posts/POST_ID --headless
+fb-crawl authenticated messages https://www.facebook.com/messages/t/THREAD_ID --headless
 fb-crawl authenticated batch --input runtime/targets.txt --headless
 ```
 
@@ -67,7 +72,7 @@ See [docs/authenticated-cli.md](docs/authenticated-cli.md) for supported URLs, s
 
 ## Privacy and safety
 
-Generated data is written under Git-ignored `runtime/`. Public mode does not use cookies or login credentials. The project does not bypass access controls, CAPTCHA, checkpoints, or two-factor authentication.
+Generated data is written under Git-ignored `runtime/`. Public mode does not use cookies or login credentials. Authenticated collectors only read content visible to the authorized account; hidden profile fields and inaccessible lists are not inferred or bypassed. The project does not bypass access controls, CAPTCHA, checkpoints, or two-factor authentication. Message exports contain sensitive conversation text and should use an appropriate retention/deletion policy.
 
 ## Development checks
 

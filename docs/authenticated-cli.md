@@ -76,6 +76,70 @@ continues to reject Facebook-owned domains.
 street/business `address` remain distinct. The crawler never guesses one from
 another.
 
+## Direct profiles and visible social lists
+
+The `profile` command accepts vanity and numeric profile URLs and automatically
+enables profile enrichment. It does not require the profile to be discovered
+from a group or comment first:
+
+```powershell
+fb-crawl authenticated profile https://www.facebook.com/USERNAME `
+  --profile-fields phone,website,address,current_city,hometown,birth_date `
+  --headless
+```
+
+Friends and followers use the same normalized profile forms. Only rows rendered
+for the authenticated account are collected; an empty or privacy-restricted
+list remains empty and is never reconstructed from other sources.
+
+```powershell
+fb-crawl authenticated friends https://www.facebook.com/USERNAME --steps 10 --headless
+fb-crawl authenticated followers https://www.facebook.com/profile.php?id=USER_ID --steps 10 --headless
+```
+
+Use `--enrich-profiles` with either list when the discovered users should also
+receive bounded profile enrichment. `--profile-limit` still controls the number
+of profiles visited.
+
+## Visible post reactions
+
+`reactions` accepts the same supported post, video, reel, photo, and permalink
+forms as `comments`. It opens the visible reactions dialog without adding or
+changing a reaction, scrolls it up to `--steps`, and exports the visible users.
+
+```powershell
+fb-crawl authenticated reactions https://www.facebook.com/PAGE/posts/POST_ID `
+  --steps 10 --headless
+```
+
+The command returns a target issue when Facebook does not expose an actionable
+reactions dialog to the current account.
+
+## Visible conversation messages
+
+`messages` requires one or more explicit conversation URLs. The inbox root is
+rejected: the CLI never enumerates every conversation implicitly. It scrolls
+upward a bounded number of times and exports visible text, sender information,
+and timestamps when those values are present in the rendered page.
+
+```powershell
+fb-crawl authenticated messages `
+  https://www.facebook.com/messages/t/THREAD_ID `
+  --steps 10 --output runtime/output/messages.csv --headless
+```
+
+Message output uses its own schema:
+
+```text
+message_id,sender_name,sender_profile_url,text,sent_at,thread_url,source,error_code,error_message
+```
+
+When Facebook does not expose a stable message ID in the rendered DOM, the CLI
+creates a deterministic capture ID from the visible row. It is a local export
+identifier, not a Facebook API identifier. Attachments without visible text are
+represented only when Facebook provides an accessible visible label. Profile
+enrichment options are not accepted by `messages`.
+
 ## Batch
 
 Create a UTF-8 file with one supported URL per line. Blank lines and lines beginning with `#` are ignored.
@@ -122,6 +186,11 @@ Default output files are:
 ```text
 runtime/output/members.csv
 runtime/output/comments.csv
+runtime/output/profile.csv
+runtime/output/friends.csv
+runtime/output/followers.csv
+runtime/output/reactions.csv
+runtime/output/messages.csv
 runtime/output/batch.csv
 ```
 
@@ -131,10 +200,11 @@ CSV and XLSX columns are:
 user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,phone_numbers,phone_sources,profile_url,source,source_url,error_code,error_message
 ```
 
-Authenticated member/comment records populate the common identity and source
-fields. Page-specific and phone fields remain empty when they are not
-available. Public output uses the exact same schema and populates page-specific
-fields when found.
+Authenticated profile/member/comment/friend/follower/reaction records populate
+the common identity and source fields. Page-specific and phone fields remain
+empty when they are not available. Public output uses the exact same schema and
+populates page-specific fields when found. Messages use the separate
+conversation schema documented above.
 
 JSON contains `records`, `issues`, `stats`, and optional `enrichment` coverage.
 
@@ -160,7 +230,7 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - Missing XLSX extra: run `python -m pip install -e ".[xlsx]"`; the command will not fall back to another format.
 - Invalid or expired session: rerun visibly with `--no-headless` to create a new validated session.
 - Checkpoint or two-factor prompt: complete it manually in the visible browser; the tool never bypasses it.
-- Empty output: increase `--steps` within a reasonable bound and confirm the account can see the requested members or comments in Firefox.
+- Empty output: increase `--steps` within a reasonable bound and confirm the account can see the requested list, dialog, or conversation in Firefox.
 - Empty enrichment fields: confirm the field is visible on the profile's About
   pages to the same account. Missing/hidden fields are not errors and are never
   guessed.
@@ -168,4 +238,8 @@ Existing output is preserved when both records and issues are empty. Every non-e
   `--profile-delay`; reduce `--profile-limit` for a shorter run.
 - Treat exported birthday and location values as personal data and apply an
   appropriate retention/deletion policy.
+- Treat message exports as highly sensitive. Keep them under `runtime/`, limit
+  access, and delete them when they are no longer required.
+- Hidden fields or privacy-restricted friends/followers/messages cannot be
+  collected. The CLI records only what the same account can render manually.
 - Selector failure after a Facebook UI change: retain the safe error message and CLI version, but do not include page HTML or session data.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from urllib.parse import parse_qs, urlparse
@@ -29,6 +30,7 @@ def _ordered_union(first: tuple[str, ...], later: tuple[str, ...]) -> tuple[str,
 def _merge_details(first: ProfileDetails, later: ProfileDetails) -> ProfileDetails:
     return replace(
         first,
+        name=first.name or later.name,
         phone_numbers=_ordered_union(first.phone_numbers, later.phone_numbers),
         phone_sources=_ordered_union(first.phone_sources, later.phone_sources),
         website=first.website or later.website,
@@ -54,6 +56,21 @@ def _profile_identity(profile_url: str) -> str:
         return parse_qs(parsed.query).get("id", [""])[0]
 
     return parts[0]
+
+
+def _browser_profile_name(browser) -> str | None:
+    title = " ".join(str(getattr(browser, "title", "") or "").split())
+    title = re.sub(r"^\(\d+\)\s*", "", title)
+
+    for suffix in (" | Facebook", " - Facebook"):
+        if title.casefold().endswith(suffix.casefold()):
+            title = title[: -len(suffix)].strip()
+            break
+
+    if not title or title.casefold() == "facebook" or len(title) > 200:
+        return None
+
+    return title
 
 
 def _resolved_profile_url(
@@ -211,6 +228,12 @@ class ProfileEnricher:
                     source_url=route,
                     requested_fields=fields,
                 )
+
+                if parsed.name is None:
+                    parsed = replace(
+                        parsed,
+                        name=_browser_profile_name(browser),
+                    )
 
             except Exception:
                 parse_failures += 1

@@ -7,6 +7,7 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    MessageRecord,
     ProfileDetails,
     ProfileField,
     ScrapeMode,
@@ -557,3 +558,156 @@ def test_profile_session_loss_stops_later_profiles() -> None:
         )
 
     assert [item[0] for item in profiles.calls] == ["100"]
+
+
+def test_direct_profile_is_automatically_enriched() -> None:
+    profiles = ProfileEnricher(
+        {
+            "synthetic.user": ProfileDetails(
+                name="Synthetic User",
+                current_city="Synthetic City",
+                birth_year=1990,
+            )
+        }
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        profiles,
+        sleep_func=lambda seconds: None,
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.PROFILE,
+            "https://m.facebook.com/synthetic.user?ref=share",
+        ),
+        object(),
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0].user_id == "synthetic.user"
+    assert result.records[0].name == "Synthetic User"
+    assert result.records[0].current_city == "Synthetic City"
+    assert result.records[0].source == "profile"
+    assert profiles.calls[0][0] == "synthetic.user"
+    assert result.enrichment is not None
+    assert result.enrichment.succeeded == 1
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_url"),
+    [
+        (
+            AuthenticatedAction.FRIENDS,
+            "https://www.facebook.com/synthetic.user/friends",
+        ),
+        (
+            AuthenticatedAction.FOLLOWERS,
+            "https://www.facebook.com/synthetic.user/followers",
+        ),
+    ],
+)
+def test_relationship_actions_collect_visible_users(
+    action: AuthenticatedAction,
+    expected_url: str,
+) -> None:
+    relationship = Collector({expected_url: "200:Visible User"})
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        relationships=relationship,
+        relationship_parser=Parser(),
+    )
+
+    result = service.run(
+        request(action, "https://facebook.com/synthetic.user"),
+        object(),
+    )
+
+    assert [record.user_id for record in result.records] == ["200"]
+    assert result.records[0].source == action.value
+    assert relationship.calls == [expected_url]
+
+
+def test_reactions_action_collects_visible_users() -> None:
+    target = "https://www.facebook.com/acme/posts/1"
+    reactions = Collector({target: "201:Reacted User"})
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        reactions=reactions,
+        relationship_parser=Parser(),
+    )
+
+    result = service.run(
+        request(AuthenticatedAction.REACTIONS, f"{target}?ref=share"),
+        object(),
+    )
+
+    assert result.records[0].user_id == "201"
+    assert result.records[0].source == "reactions"
+
+
+class MessagesParser:
+    def parse(self, html: str, *, source_url: str):
+        return (
+            MessageRecord(
+                message_id="mid.1",
+                sender_name="Synthetic Sender",
+                sender_profile_url="https://www.facebook.com/synthetic.sender",
+                text=html,
+                sent_at="2026-08-08T10:00:00+07:00",
+                thread_url=source_url,
+            ),
+        )
+
+
+def test_messages_action_collects_one_explicit_visible_thread() -> None:
+    target = "https://www.facebook.com/messages/t/123"
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        messages=Collector({target: "Visible message"}),
+        message_parser=MessagesParser(),
+    )
+
+    result = service.run(
+        request(AuthenticatedAction.MESSAGES, f"{target}?ref=bookmark"),
+        object(),
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0].text == "Visible message"
+    assert result.records[0].thread_url == target
+
+
+def test_messages_rejects_inbox_without_starting_session() -> None:
+    session = Session()
+    service = AuthenticatedService(
+        session,
+        Collector({}),
+        Collector({}),
+        Parser(),
+        messages=Collector({}),
+        message_parser=MessagesParser(),
+    )
+
+    with pytest.raises(ValidationError, match="explicit supported conversation"):
+        service.run(
+            request(
+                AuthenticatedAction.MESSAGES,
+                "https://www.facebook.com/messages",
+            ),
+            object(),
+        )
+
+    assert session.ensure_calls == 0

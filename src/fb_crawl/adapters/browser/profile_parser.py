@@ -337,6 +337,17 @@ class ProfileParser:
         soup = BeautifulSoup(html, "html.parser")
         requested = _requested(requested_fields)
 
+        heading = soup.select_one("main h1") or soup.find("h1")
+        name = _visible_text(heading) if heading is not None else None
+
+        if not name:
+            open_graph_title = soup.find("meta", attrs={"property": "og:title"})
+            name = (
+                str(open_graph_title.get("content") or "").strip()
+                if open_graph_title is not None
+                else None
+            ) or None
+
         phones: dict[str, str] = {}
         website: str | None = None
         address: str | None = None
@@ -482,6 +493,7 @@ class ProfileParser:
 
         phone_values = tuple(phones.values())
         return ProfileDetails(
+            name=name,
             phone_numbers=phone_values,
             phone_sources=("facebook:profile_contact",) if phone_values else (),
             website=website,

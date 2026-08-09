@@ -4,6 +4,10 @@ from fb_crawl.core.urls import (
     classify_authenticated_url,
     normalize_comments_url,
     normalize_members_url,
+    normalize_messages_url,
+    normalize_profile_collection_url,
+    normalize_reactions_url,
+    profile_identity_url,
     profile_directory_urls,
 )
 
@@ -192,3 +196,101 @@ def test_profile_directory_urls_reject_unsupported_or_mismatched_identity(
     user_id: str,
 ) -> None:
     assert profile_directory_urls(profile_url, user_id) == ()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "https://m.facebook.com/synthetic.user?ref=share",
+            ("synthetic.user", "https://www.facebook.com/synthetic.user"),
+        ),
+        (
+            "https://www.facebook.com/profile.php?id=123&ref=share",
+            ("123", "https://www.facebook.com/profile.php?id=123"),
+        ),
+    ],
+)
+def test_profile_identity_url_accepts_vanity_and_numeric_profiles(
+    raw: str,
+    expected: tuple[str, str],
+) -> None:
+    assert profile_identity_url(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "collection", "expected"),
+    [
+        (
+            "https://www.facebook.com/synthetic.user",
+            "friends",
+            "https://www.facebook.com/synthetic.user/friends",
+        ),
+        (
+            "https://www.facebook.com/synthetic.user/followers?ref=share",
+            "followers",
+            "https://www.facebook.com/synthetic.user/followers",
+        ),
+        (
+            "https://www.facebook.com/profile.php?id=123",
+            "followers",
+            "https://www.facebook.com/profile.php?id=123&sk=followers",
+        ),
+    ],
+)
+def test_profile_collection_urls_are_normalized(
+    raw: str,
+    collection: str,
+    expected: str,
+) -> None:
+    assert normalize_profile_collection_url(raw, collection) == expected
+
+
+def test_profile_collection_rejects_mismatched_route() -> None:
+    assert (
+        normalize_profile_collection_url(
+            "https://www.facebook.com/synthetic.user/friends",
+            "followers",
+        )
+        is None
+    )
+
+
+def test_reactions_reuse_supported_post_normalization() -> None:
+    assert normalize_reactions_url("https://facebook.com/acme/posts/2?ref=x") == (
+        "https://www.facebook.com/acme/posts/2"
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "https://www.facebook.com/messages/t/123?ref=bookmark",
+            "https://www.facebook.com/messages/t/123",
+        ),
+        (
+            "https://m.facebook.com/messages/t/thread.name/",
+            "https://www.facebook.com/messages/t/thread.name",
+        ),
+        (
+            "https://www.messenger.com/t/123?ref=bookmark",
+            "https://www.facebook.com/messages/t/123",
+        ),
+    ],
+)
+def test_messages_url_requires_an_explicit_thread(raw: str, expected: str) -> None:
+    assert normalize_messages_url(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://www.facebook.com/messages",
+        "https://www.facebook.com/messages/t",
+        "https://example.test/messages/t/123",
+        "https://www.facebook.com/checkpoint/",
+    ],
+)
+def test_messages_url_rejects_inbox_and_external_targets(raw: str) -> None:
+    assert normalize_messages_url(raw) is None

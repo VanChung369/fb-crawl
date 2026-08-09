@@ -21,6 +21,7 @@ class Browser:
         self.get_calls: list[str] = []
         self.current_url = "https://www.facebook.com/"
         self.page_source = ""
+        self.title = "Facebook"
 
     def get(self, url: str) -> None:
         self.get_calls.append(url)
@@ -138,6 +139,23 @@ def test_failed_optional_links_route_keeps_personal_details() -> None:
 
     assert details.address == "123 Synthetic Street"
     assert browser.get_calls == [personal, links]
+
+
+def test_profile_enricher_uses_sanitized_browser_title_for_missing_name() -> None:
+    personal, _ = routes()
+    browser = Browser({personal: "personal"})
+    browser.title = "(2) Synthetic User | Facebook"
+    parser = Parser({personal: ProfileDetails(current_city="Synthetic City")})
+
+    details = ProfileEnricher(
+        BrowserSettings(),
+        parser,  # type: ignore[arg-type]
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+    ).enrich(browser, record(), (ProfileField.CURRENT_CITY,))
+
+    assert details.name == "Synthetic User"
 
 
 def test_website_only_skips_personal_route() -> None:

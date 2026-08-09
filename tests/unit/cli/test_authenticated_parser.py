@@ -116,3 +116,69 @@ def test_invalid_profile_fields_fail_before_runtime(arguments: list[str]) -> Non
 
     with pytest.raises((ValidationError, ValueError)):
         request_from_authenticated_args(args)
+
+
+def test_direct_profile_implicitly_enables_enrichment() -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "profile",
+            "https://www.facebook.com/synthetic.user",
+            "--profile-fields",
+            "phone,current_city,birth_date",
+        ]
+    )
+
+    request = request_from_authenticated_args(args)
+
+    assert request.action is AuthenticatedAction.PROFILE
+    assert request.enrich_profiles is True
+    assert request.profile_fields == (
+        ProfileField.PHONE,
+        ProfileField.CURRENT_CITY,
+        ProfileField.BIRTH_DATE,
+    )
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        AuthenticatedAction.FRIENDS,
+        AuthenticatedAction.FOLLOWERS,
+        AuthenticatedAction.REACTIONS,
+        AuthenticatedAction.MESSAGES,
+    ],
+)
+def test_new_authenticated_actions_build_typed_requests(
+    action: AuthenticatedAction,
+) -> None:
+    target = (
+        "https://www.facebook.com/messages/t/123"
+        if action is AuthenticatedAction.MESSAGES
+        else "https://www.facebook.com/acme/posts/1"
+        if action is AuthenticatedAction.REACTIONS
+        else "https://www.facebook.com/synthetic.user"
+    )
+    args = build_parser().parse_args(
+        ["authenticated", action.value, target, "--steps", "3"]
+    )
+
+    request = request_from_authenticated_args(args)
+
+    assert request.action is action
+    assert request.targets == (target,)
+    assert request.steps == 3
+
+
+def test_messages_help_does_not_offer_profile_enrichment_options() -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "authenticated",
+                "messages",
+                "https://www.facebook.com/messages/t/123",
+                "--enrich-profiles",
+            ]
+        )

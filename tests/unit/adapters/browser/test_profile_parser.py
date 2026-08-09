@@ -73,6 +73,17 @@ def test_valid_empty_about_page_is_successful_empty_details() -> None:
     ) == ProfileDetails()
 
 
+def test_profile_name_is_read_from_main_heading() -> None:
+    details = ProfileParser().parse(
+        "<main><h1>Synthetic User</h1><h2>About</h2></main>",
+        source_url=(
+            "https://www.facebook.com/synthetic.user/directory_personal_details"
+        ),
+    )
+
+    assert details.name == "Synthetic User"
+
+
 def test_directory_link_and_address_sections_are_parsed_conservatively() -> None:
     html = """
     <h2 id="links">Liên kết</h2>

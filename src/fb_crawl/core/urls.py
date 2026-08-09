@@ -22,6 +22,11 @@ FACEBOOK_HOSTS = {
     "web.facebook.com",
 }
 
+MESSENGER_HOSTS = {
+    "messenger.com",
+    "www.messenger.com",
+}
+
 AUTHENTICATED_ID = re.compile(r"[A-Za-z0-9._-]+")
 
 
@@ -385,6 +390,104 @@ def normalize_comments_url(
         return "https://www.facebook.com/photo.php?" + urlencode(values)
 
     return None
+
+
+def profile_identity_url(
+    value: str | None,
+) -> tuple[str, str] | None:
+    """Return the stable profile identity and normalized profile URL."""
+    normalized = normalize_facebook_url(value)
+
+    if normalized is None:
+        return None
+
+    parsed = urlparse(normalized)
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if len(parts) != 1:
+        return None
+
+    if parts[0].casefold() == "profile.php":
+        profile_id = parse_qs(parsed.query).get("id", [""])[0]
+        return (profile_id, normalized) if profile_id.isdigit() else None
+
+    return parts[0], normalized
+
+
+def normalize_profile_collection_url(
+    value: str | None,
+    collection: str,
+) -> str | None:
+    """Normalize a profile or profile collection URL to friends/followers."""
+    if collection not in {"friends", "followers"}:
+        raise ValueError("Unsupported profile collection.")
+
+    parsed = _facebook_parts(value)
+
+    if parsed is None:
+        return None
+
+    parts, query = parsed
+
+    if len(parts) == 2 and parts[1].casefold() in {"friends", "followers"}:
+        if parts[1].casefold() != collection:
+            return None
+
+        identity = profile_identity_url(f"https://www.facebook.com/{parts[0]}")
+    elif len(parts) == 1 and parts[0].casefold() == "profile.php":
+        profile_id = query.get("id", [""])[0]
+        section = query.get("sk", [collection])[0].casefold()
+
+        if not profile_id.isdigit() or section != collection:
+            return None
+
+        return (
+            "https://www.facebook.com/profile.php?"
+            + urlencode((("id", profile_id), ("sk", collection)))
+        )
+    else:
+        identity = profile_identity_url(value)
+
+    if identity is None:
+        return None
+
+    _, profile_url = identity
+    return f"{profile_url}/{collection}"
+
+
+def normalize_reactions_url(value: str | None) -> str | None:
+    """Reactions are opened from the same supported post URLs as comments."""
+    return normalize_comments_url(value)
+
+
+def normalize_messages_url(value: str | None) -> str | None:
+    if not value:
+        return None
+
+    parsed = urlparse(_absolute_candidate(value, None))
+    host = parsed.netloc.casefold().split(":")[0]
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if host in FACEBOOK_HOSTS:
+        valid_shape = (
+            len(parts) == 3
+            and parts[0].casefold() == "messages"
+            and parts[1] == "t"
+        )
+    elif host in MESSENGER_HOSTS:
+        valid_shape = len(parts) == 2 and parts[0] == "t"
+    else:
+        return None
+
+    if not valid_shape:
+        return None
+
+    thread_id = parts[-1]
+
+    if not _valid_authenticated_id(thread_id):
+        return None
+
+    return f"https://www.facebook.com/messages/t/{thread_id}"
 
 
 def profile_directory_urls(

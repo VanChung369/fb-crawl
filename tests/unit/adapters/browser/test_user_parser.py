@@ -44,3 +44,20 @@ def test_parser_keeps_valid_identity_when_name_is_unavailable() -> None:
     assert [(record.user_id, record.name) for record in records] == [
         ("203", None),
     ]
+
+
+def test_relationship_parser_accepts_plain_visible_profile_links() -> None:
+    records = UserParser(allow_plain_profile_links=True).parse(
+        """
+        <main>
+          <a href="/synthetic.friend">Synthetic Friend</a>
+          <a href="/messages">Messages</a>
+        </main>
+        """,
+        source="friends",
+        source_url="https://www.facebook.com/synthetic.user/friends",
+    )
+
+    assert [(record.user_id, record.name) for record in records] == [
+        ("synthetic.friend", "Synthetic Friend")
+    ]

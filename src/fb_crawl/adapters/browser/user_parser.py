@@ -53,6 +53,8 @@ def _is_action_label(
 
 def _identity(
     anchor,
+    *,
+    allow_plain_profile_links: bool = False,
 ) -> tuple[str, str] | None:
     href = str(anchor.get("href") or "").replace("\\/", "/")
 
@@ -88,7 +90,10 @@ def _identity(
 
     elif (
         len(parts) == 1
-        and PROFILE_LINK_CLASS in anchor.get("class", [])
+        and (
+            allow_plain_profile_links
+            or PROFILE_LINK_CLASS in anchor.get("class", [])
+        )
         and parts[0].lower() not in FACEBOOK_INTERNAL_PATHS
     ):
         user_id = parts[0]
@@ -109,6 +114,9 @@ def _identity(
 
 
 class UserParser:
+    def __init__(self, *, allow_plain_profile_links: bool = False) -> None:
+        self._allow_plain_profile_links = allow_plain_profile_links
+
     def parse(
         self,
         html: str,
@@ -128,7 +136,10 @@ class UserParser:
             "a",
             href=True,
         ):
-            identity = _identity(anchor)
+            identity = _identity(
+                anchor,
+                allow_plain_profile_links=self._allow_plain_profile_links,
+            )
 
             name = _name(anchor)
 

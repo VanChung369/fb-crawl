@@ -23,6 +23,11 @@ class PublicAction(StrEnum):
 class AuthenticatedAction(StrEnum):
     MEMBERS = "members"
     COMMENTS = "comments"
+    PROFILE = "profile"
+    FRIENDS = "friends"
+    FOLLOWERS = "followers"
+    REACTIONS = "reactions"
+    MESSAGES = "messages"
     BATCH = "batch"
 
 
@@ -121,6 +126,7 @@ class PageRecord:
 
 @dataclass(frozen=True, slots=True)
 class ProfileDetails:
+    name: str | None = None
     phone_numbers: tuple[str, ...] = ()
     phone_sources: tuple[str, ...] = ()
     website: str | None = None
@@ -147,6 +153,17 @@ class UserRecord:
     hometown: str | None = None
     birth_date: str | None = None
     birth_year: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MessageRecord:
+    message_id: str
+    sender_name: str | None
+    sender_profile_url: str | None
+    text: str
+    sent_at: str | None
+    thread_url: str
+    source: str = "messages"
 
 
 @dataclass(frozen=True, slots=True)

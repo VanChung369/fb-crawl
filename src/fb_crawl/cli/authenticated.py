@@ -25,12 +25,19 @@ from fb_crawl.core.models import (
 DEFAULT_OUTPUTS = {
     AuthenticatedAction.MEMBERS: "members",
     AuthenticatedAction.COMMENTS: "comments",
+    AuthenticatedAction.PROFILE: "profile",
+    AuthenticatedAction.FRIENDS: "friends",
+    AuthenticatedAction.FOLLOWERS: "followers",
+    AuthenticatedAction.REACTIONS: "reactions",
+    AuthenticatedAction.MESSAGES: "messages",
     AuthenticatedAction.BATCH: "batch",
 }
 
 
 def _common(
     parser: argparse.ArgumentParser,
+    *,
+    profile_options: bool = True,
 ) -> None:
     parser.add_argument(
         "--steps",
@@ -69,27 +76,35 @@ def _common(
         choices=("csv", "json", "txt", "xlsx"),
         default="csv",
     )
-    parser.add_argument(
-        "--enrich-profiles",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--profile-fields",
-        help=(
-            "Comma-separated: phone,website,address,current_city,"
-            "hometown,birth_date"
-        ),
-    )
-    parser.add_argument(
-        "--profile-limit",
-        type=int,
-        default=20,
-    )
-    parser.add_argument(
-        "--profile-delay",
-        type=float,
-        default=3.0,
-    )
+    if profile_options:
+        parser.add_argument(
+            "--enrich-profiles",
+            action="store_true",
+        )
+        parser.add_argument(
+            "--profile-fields",
+            help=(
+                "Comma-separated: phone,website,address,current_city,"
+                "hometown,birth_date"
+            ),
+        )
+        parser.add_argument(
+            "--profile-limit",
+            type=int,
+            default=20,
+        )
+        parser.add_argument(
+            "--profile-delay",
+            type=float,
+            default=3.0,
+        )
+    else:
+        parser.set_defaults(
+            enrich_profiles=False,
+            profile_fields=None,
+            profile_limit=20,
+            profile_delay=3.0,
+        )
 
 
 def add_authenticated_parser(
@@ -124,6 +139,41 @@ def add_authenticated_parser(
         nargs="+",
     )
     _common(comments)
+
+    profile = actions.add_parser(
+        "profile",
+        help="Collect visible details from one or more profiles",
+    )
+    profile.add_argument("urls", nargs="+")
+    _common(profile)
+
+    friends = actions.add_parser(
+        "friends",
+        help="Collect a profile's visible friends",
+    )
+    friends.add_argument("urls", nargs="+")
+    _common(friends)
+
+    followers = actions.add_parser(
+        "followers",
+        help="Collect a profile's visible followers",
+    )
+    followers.add_argument("urls", nargs="+")
+    _common(followers)
+
+    reactions = actions.add_parser(
+        "reactions",
+        help="Collect users from a post's visible reactions dialog",
+    )
+    reactions.add_argument("urls", nargs="+")
+    _common(reactions)
+
+    messages = actions.add_parser(
+        "messages",
+        help="Collect visible text from explicit conversation URLs",
+    )
+    messages.add_argument("urls", nargs="+")
+    _common(messages, profile_options=False)
 
     batch = actions.add_parser(
         "batch",
@@ -192,7 +242,18 @@ def request_from_authenticated_args(
 
     profile_fields = _profile_fields(args.profile_fields)
 
-    if profile_fields and not args.enrich_profiles:
+    enrich_profiles = (
+        args.enrich_profiles or action is AuthenticatedAction.PROFILE
+    )
+
+    if action is AuthenticatedAction.MESSAGES and (
+        enrich_profiles or profile_fields
+    ):
+        raise ValidationError(
+            "Profile enrichment options are not supported by messages."
+        )
+
+    if profile_fields and not enrich_profiles:
         raise ValidationError("Profile fields require --enrich-profiles.")
 
     return ScrapeRequest(
@@ -201,7 +262,7 @@ def request_from_authenticated_args(
         targets=targets,
         steps=args.steps,
         delay_seconds=args.delay,
-        enrich_profiles=args.enrich_profiles,
+        enrich_profiles=enrich_profiles,
         profile_fields=profile_fields,
         profile_limit=args.profile_limit,
         profile_delay_seconds=args.profile_delay,
@@ -255,8 +316,20 @@ def _load_runtime() -> AuthenticatedRuntime:
         from fb_crawl.adapters.browser.members import (
             MembersCollector,
         )
+        from fb_crawl.adapters.browser.message_parser import (
+            MessageParser,
+        )
+        from fb_crawl.adapters.browser.messages import (
+            MessagesCollector,
+        )
         from fb_crawl.adapters.browser.profile_parser import (
             ProfileParser,
+        )
+        from fb_crawl.adapters.browser.reactions import (
+            ReactionsCollector,
+        )
+        from fb_crawl.adapters.browser.relationships import (
+            RelationshipCollector,
         )
         from fb_crawl.adapters.browser.profiles import (
             ProfileEnricher,
@@ -267,9 +340,9 @@ def _load_runtime() -> AuthenticatedRuntime:
         from fb_crawl.adapters.browser.user_parser import (
             UserParser,
         )
-        from fb_crawl.exporters.users import (
-            ensure_user_format_available,
-            write_users,
+        from fb_crawl.exporters.authenticated import (
+            ensure_authenticated_format_available,
+            write_authenticated,
         )
         from fb_crawl.services.authenticated import (
             AuthenticatedService,
@@ -304,13 +377,18 @@ def _load_runtime() -> AuthenticatedRuntime:
             CommentsCollector(settings),
             UserParser(),
             ProfileEnricher(settings, ProfileParser()),
+            relationships=RelationshipCollector(settings),
+            reactions=ReactionsCollector(settings),
+            relationship_parser=UserParser(allow_plain_profile_links=True),
+            messages=MessagesCollector(settings),
+            message_parser=MessageParser(),
         )
 
     return AuthenticatedRuntime(
         create_browser=create_firefox_driver,
         create_service=create_service,
-        ensure_format=ensure_user_format_available,
-        write_result=write_users,
+        ensure_format=ensure_authenticated_format_available,
+        write_result=write_authenticated,
     )
 
 
