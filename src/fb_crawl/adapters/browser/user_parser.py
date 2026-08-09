@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from dataclasses import replace
 from urllib.parse import (
     parse_qs,
     urljoin,
@@ -34,21 +36,65 @@ ACTION_LABELS = frozenset(
 )
 
 
+def _name_candidates(anchor) -> tuple[str, ...]:
+    candidates = [
+        " ".join(anchor.stripped_strings).strip(),
+        str(anchor.get("aria-label") or "").strip(),
+    ]
+    candidates.extend(
+        str(image.get("alt") or "").strip()
+        for image in anchor.find_all("img")
+    )
+    return tuple(dict.fromkeys(item for item in candidates if item))
+
+
 def _name(anchor) -> str | None:
-    visible = " ".join(anchor.stripped_strings).strip()
-
-    if visible:
-        return visible
-
-    aria_label = str(anchor.get("aria-label") or "").strip()
-
-    return aria_label or None
+    candidates = _name_candidates(anchor)
+    return candidates[0] if candidates else None
 
 
 def _is_action_label(
     name: str | None,
 ) -> bool:
     return name is not None and name.casefold() in ACTION_LABELS
+
+
+def _ascii_fold(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(
+        character
+        for character in normalized
+        if not unicodedata.combining(character)
+    )
+
+
+SOCIAL_CONTEXT_LABEL = re.compile(
+    r"^(?:\d[\d\s.,]*[kmbt]?)\s+(?:"
+    r"friends?|followers?|following|mutual friends?|"
+    r"ban be|nguoi ban|nguoi theo doi|ban chung"
+    r")$",
+    re.IGNORECASE,
+)
+
+
+def _is_social_context_label(name: str | None) -> bool:
+    if name is None:
+        return False
+
+    folded = " ".join(_ascii_fold(name).split())
+    return bool(SOCIAL_CONTEXT_LABEL.fullmatch(folded))
+
+
+def _profile_name(anchor) -> str | None:
+    return next(
+        (
+            candidate
+            for candidate in _name_candidates(anchor)
+            if not _is_action_label(candidate)
+            and not _is_social_context_label(candidate)
+        ),
+        None,
+    )
 
 
 def _identity(
@@ -130,7 +176,7 @@ class UserParser:
         )
 
         records: list[UserRecord] = []
-        seen: set[str] = set()
+        positions: dict[str, int] = {}
 
         for anchor in soup.find_all(
             "a",
@@ -141,17 +187,23 @@ class UserParser:
                 allow_plain_profile_links=self._allow_plain_profile_links,
             )
 
-            name = _name(anchor)
+            raw_name = _name(anchor)
 
-            if identity is None or _is_action_label(name):
+            if identity is None or _is_action_label(raw_name):
                 continue
 
             user_id, profile_url = identity
+            name = _profile_name(anchor)
 
-            if user_id in seen:
+            if user_id in positions:
+                index = positions[user_id]
+
+                if records[index].name is None and name is not None:
+                    records[index] = replace(records[index], name=name)
+
                 continue
 
-            seen.add(user_id)
+            positions[user_id] = len(records)
 
             records.append(
                 UserRecord(

@@ -65,3 +65,36 @@ def test_relationship_parser_accepts_plain_visible_profile_links() -> None:
         ("synthetic.friend", "Synthetic Friend")
     ]
     assert records[0].username == "synthetic.friend"
+
+
+def test_parser_replaces_friend_count_label_with_later_profile_name() -> None:
+    records = UserParser(allow_plain_profile_links=True).parse(
+        """
+        <main>
+          <a href="/profile.php?id=61573323749006">174 friends</a>
+          <a href="/profile.php?id=61573323749006">Hiếu Văn</a>
+        </main>
+        """,
+        source="friends",
+        source_url="https://www.facebook.com/synthetic.user/friends",
+    )
+
+    assert len(records) == 1
+    assert records[0].user_id == "61573323749006"
+    assert records[0].name == "Hiếu Văn"
+
+
+def test_parser_uses_image_alt_when_visible_text_is_social_context() -> None:
+    records = UserParser(allow_plain_profile_links=True).parse(
+        """
+        <a href="/profile.php?id=61573323749006">
+          174 friends
+          <img alt="Hiếu Văn">
+        </a>
+        """,
+        source="friends",
+        source_url="https://www.facebook.com/synthetic.user/friends",
+    )
+
+    assert len(records) == 1
+    assert records[0].name == "Hiếu Văn"
