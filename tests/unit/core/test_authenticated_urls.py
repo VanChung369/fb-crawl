@@ -1,6 +1,7 @@
 import pytest
 
 from fb_crawl.core.urls import (
+    classify_authenticated_batch_target,
     classify_authenticated_url,
     normalize_comments_url,
     normalize_members_url,
@@ -9,9 +10,10 @@ from fb_crawl.core.urls import (
     normalize_reactions_url,
     profile_identity_url,
     profile_directory_urls,
+    profile_enrichment_urls,
 )
 
-from fb_crawl.core.models import AuthenticatedAction
+from fb_crawl.core.models import AuthenticatedAction, ProfileField
 
 
 @pytest.mark.parametrize(
@@ -114,6 +116,11 @@ def test_batch_classifier_returns_action_and_normalized_url() -> None:
         "https://www.facebook.com/acme/posts/2",
     )
 
+    assert classify_authenticated_url("https://facebook.com/example") == (
+        AuthenticatedAction.PROFILE,
+        "https://www.facebook.com/example",
+    )
+
 
 @pytest.mark.parametrize(
     "raw",
@@ -121,7 +128,6 @@ def test_batch_classifier_returns_action_and_normalized_url() -> None:
         "https://www.facebook.com/places/Ha-Noi/123",
         "https://www.facebook.com/login",
         "https://www.facebook.com/checkpoint/",
-        "https://www.facebook.com/example",
         "https://example.test/groups/1",
     ],
 )
@@ -294,3 +300,72 @@ def test_messages_url_requires_an_explicit_thread(raw: str, expected: str) -> No
 )
 def test_messages_url_rejects_inbox_and_external_targets(raw: str) -> None:
     assert normalize_messages_url(raw) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_action", "expected_url"),
+    [
+        (
+            "profile:https://facebook.com/synthetic.user",
+            AuthenticatedAction.PROFILE,
+            "https://www.facebook.com/synthetic.user",
+        ),
+        (
+            "friends:https://facebook.com/synthetic.user",
+            AuthenticatedAction.FRIENDS,
+            "https://www.facebook.com/synthetic.user/friends",
+        ),
+        (
+            "engagement:https://facebook.com/acme/posts/2",
+            AuthenticatedAction.ENGAGEMENT,
+            "https://www.facebook.com/acme/posts/2",
+        ),
+        (
+            "messages:https://www.messenger.com/t/123",
+            AuthenticatedAction.MESSAGES,
+            "https://www.facebook.com/messages/t/123",
+        ),
+        (
+            "inspect:https://facebook.com/synthetic.user",
+            AuthenticatedAction.INSPECT,
+            "https://www.facebook.com/synthetic.user",
+        ),
+    ],
+)
+def test_typed_batch_targets_preserve_the_requested_action(
+    raw: str,
+    expected_action: AuthenticatedAction,
+    expected_url: str,
+) -> None:
+    assert classify_authenticated_batch_target(raw) == (
+        expected_action,
+        expected_url,
+    )
+
+
+def test_typed_batch_rejects_invalid_target_for_action() -> None:
+    assert (
+        classify_authenticated_batch_target(
+            "messages:https://www.facebook.com/synthetic.user"
+        )
+        is None
+    )
+
+
+def test_profile_enrichment_urls_add_work_only_when_requested() -> None:
+    assert profile_enrichment_urls(
+        "https://www.facebook.com/synthetic.user",
+        "synthetic.user",
+        (ProfileField.WORKPLACE, ProfileField.EDUCATION, ProfileField.WEBSITE),
+    ) == (
+        "https://www.facebook.com/synthetic.user/directory_work",
+        "https://www.facebook.com/synthetic.user/directory_links",
+    )
+
+    assert profile_enrichment_urls(
+        "https://www.facebook.com/profile.php?id=123",
+        "123",
+        (ProfileField.WORKPLACE,),
+    ) == (
+        "https://www.facebook.com/profile.php?id=123&sk=directory_work",
+    )

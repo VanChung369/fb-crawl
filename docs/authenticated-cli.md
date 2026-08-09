@@ -49,12 +49,13 @@ fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
 
 When `--profile-fields` is omitted, all documented enrichment fields are
 requested. Supported values are `phone`, `website`, `address`, `current_city`,
-`hometown`, and `birth_date`. `birth_year` is derived from a visible valid
-birthday/year value.
+`hometown`, `birth_date`, `bio`, `workplace`, `education`, `gender`,
+`languages`, and `relationship_status`. `birth_year` is derived from a visible
+valid birthday/year value.
 
 Each selected unique user is visited at most once after global deduplication.
-The browser opens at most two normalized directory routes per profile:
-`directory_personal_details` and `directory_links`.
+The browser opens only the normalized routes needed by the requested fields:
+`directory_personal_details`, `directory_work`, and `directory_links`.
 For numeric `profile.php?id=...` identities it uses equivalent bounded `sk=`
 routes, then switches to Facebook's canonical vanity URL when a redirect,
 canonical link, or Open Graph URL exposes it. A failed profile preserves the
@@ -75,6 +76,13 @@ continues to reject Facebook-owned domains.
 `current_city` (for example, a visible "Lives in" value), `hometown`, and a
 street/business `address` remain distinct. The crawler never guesses one from
 another.
+
+Flat outputs include `field_status`, `field_sources`, `first_seen`, `last_seen`,
+and `last_enriched_at`. Field status values are `found`, `not_visible`,
+`section_unavailable`, `navigation_failed`, and `not_requested`. This separates
+a genuinely absent visible value from a route/render failure. Sources remain
+additive so a future external provider can append evidence without overwriting
+Facebook-visible evidence.
 
 ## Direct profiles and visible social lists
 
@@ -115,6 +123,20 @@ fb-crawl authenticated reactions https://www.facebook.com/PAGE/posts/POST_ID `
 The command returns a target issue when Facebook does not expose an actionable
 reactions dialog to the current account.
 
+## Combined post engagement
+
+`engagement` performs the comments and reactions passes for each supported post
+and globally deduplicates the resulting users:
+
+```powershell
+fb-crawl authenticated engagement https://www.facebook.com/PAGE/posts/POST_ID `
+  --steps 10 --enrich-profiles --headless
+```
+
+User rows expose `commented`, `reacted`, `reaction_types`, and
+`interaction_count`. A reaction type is populated only when Facebook renders a
+clear accessible label for that user row; unknown types remain empty.
+
 ## Visible conversation messages
 
 `messages` requires one or more explicit conversation URLs. The inbox root is
@@ -131,8 +153,10 @@ fb-crawl authenticated messages `
 Message output uses its own schema:
 
 ```text
-message_id,sender_name,sender_profile_url,text,sent_at,thread_url,source,error_code,error_message
+message_id,sender_name,sender_profile_url,text,sent_at,thread_url,source,first_seen,last_seen,error_code,error_message
 ```
+
+Message output also includes `first_seen` and `last_seen` timestamps.
 
 When Facebook does not expose a stable message ID in the rendered DOM, the CLI
 creates a deterministic capture ID from the visible row. It is a local export
@@ -160,6 +184,54 @@ fb-crawl authenticated batch --input runtime/targets.txt --headless --output run
 
 Invalid targets and bounded navigation or parser failures become issue rows while other targets continue. Session loss stops the entire run.
 
+Batch also accepts explicit action prefixes:
+
+```text
+members:https://www.facebook.com/groups/GROUP_ID
+comments:https://www.facebook.com/PAGE/posts/POST_ID
+profile:https://www.facebook.com/USERNAME
+friends:https://www.facebook.com/USERNAME
+followers:https://www.facebook.com/USERNAME
+reactions:https://www.facebook.com/PAGE/posts/POST_ID
+engagement:https://www.facebook.com/PAGE/posts/POST_ID
+messages:https://www.facebook.com/messages/t/THREAD_ID
+inspect:https://www.facebook.com/USERNAME
+```
+
+Untyped legacy group/post lines keep their previous behavior. A mixed batch
+writes user rows to the requested output and message/diagnostic rows to sibling
+files such as `batch-messages.csv` and `batch-inspect.csv`.
+
+## Resume and incremental collection
+
+All authenticated commands accept mutually exclusive `--resume` and
+`--incremental` modes. The default checkpoint is
+`runtime/checkpoints/ACTION.json`; override it with `--checkpoint`.
+
+```powershell
+fb-crawl authenticated members GROUP_URL --resume --headless
+fb-crawl authenticated members GROUP_URL --incremental --headless
+```
+
+Checkpoints are atomic JSON and contain normalized records, known identities,
+completed targets, and safe issues. They never contain cookie/session content,
+passwords, full HTML, or screenshots. Resume is target-level because Facebook
+does not provide a stable private infinite-scroll cursor. A checkpoint is
+rejected if its action or normalized target set differs from the command.
+
+## Safe diagnostics
+
+Use `inspect` after a Facebook UI change or unexpected empty output:
+
+```powershell
+fb-crawl authenticated inspect PROFILE_OR_TARGET_URL `
+  --format json --output runtime/output/inspect.json --headless
+```
+
+It returns only booleans/counts for document readiness, main/dialog presence,
+visible profile links, message rows, profile-field labels, session validity, and
+parser version. It never writes DOM text, raw HTML, screenshots, or cookies.
+
 ## Options and environment
 
 - `--steps` defaults to `5` and must be greater than zero.
@@ -176,6 +248,10 @@ Invalid targets and bounded navigation or parser failures become issue rows whil
 - `--profile-fields` selects a comma-separated subset of enrichment fields.
 - `--profile-limit` defaults to `20` and must be greater than zero.
 - `--profile-delay` defaults to `3.0` seconds and must be zero or greater.
+- `--resume` continues a matching checkpoint and skips completed targets.
+- `--incremental` emits only identities not already known by the checkpoint.
+- `--checkpoint` overrides the default JSON path and requires one of the two
+  checkpoint modes.
 
 A repository-local session path must stay under `runtime/`. An absolute external path may be used for a managed secret mount.
 
@@ -190,14 +266,16 @@ runtime/output/profile.csv
 runtime/output/friends.csv
 runtime/output/followers.csv
 runtime/output/reactions.csv
+runtime/output/engagement.csv
 runtime/output/messages.csv
+runtime/output/inspect.csv
 runtime/output/batch.csv
 ```
 
 CSV and XLSX columns are:
 
 ```text
-user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,phone_numbers,phone_sources,profile_url,source,source_url,error_code,error_message
+user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,bio,workplace,education,gender,languages,relationship_status,phone_numbers,phone_sources,field_status,field_sources,first_seen,last_seen,last_enriched_at,commented,reacted,reaction_types,interaction_count,profile_url,source,source_url,error_code,error_message
 ```
 
 Authenticated profile/member/comment/friend/follower/reaction records populate

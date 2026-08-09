@@ -40,6 +40,14 @@ PROFILE_SECTION_LABELS = {
         "so dien thoai",
         "thong tin lien he",
     ),
+    "directory_work": (
+        "college",
+        "cong viec",
+        "education",
+        "hoc van",
+        "school",
+        "work",
+    ),
 }
 
 PROFILE_CONTENT_READY_SCRIPT = r"""

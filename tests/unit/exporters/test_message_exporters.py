@@ -2,7 +2,14 @@ import csv
 import json
 from pathlib import Path
 
-from fb_crawl.core.models import MessageRecord, ScrapeResult, ScrapeStats
+from fb_crawl.core.models import (
+    AuthenticatedBatchResult,
+    InspectRecord,
+    MessageRecord,
+    ScrapeResult,
+    ScrapeStats,
+    UserRecord,
+)
 from fb_crawl.exporters.messages import MESSAGE_FIELDS, write_messages
 from fb_crawl.exporters.authenticated import write_authenticated
 
@@ -52,3 +59,36 @@ def test_authenticated_writer_dispatches_message_records(tmp_path: Path) -> None
 
     header = output.read_text(encoding="utf-8-sig").splitlines()[0]
     assert header == ",".join(MESSAGE_FIELDS)
+
+
+def test_mixed_batch_splits_user_and_message_outputs(tmp_path: Path) -> None:
+    user_result = ScrapeResult(
+        records=(
+            UserRecord(
+                user_id="synthetic.user",
+                name="Synthetic User",
+                profile_url="https://www.facebook.com/synthetic.user",
+                source="profile",
+                source_url="https://www.facebook.com/synthetic.user",
+            ),
+        ),
+        issues=(),
+        stats=ScrapeStats(requested=1, discovered=1, succeeded=1, failed=0),
+    )
+    empty_inspect = ScrapeResult[InspectRecord](
+        records=(),
+        issues=(),
+        stats=ScrapeStats(requested=0, discovered=0, succeeded=0, failed=0),
+    )
+    batch = AuthenticatedBatchResult(
+        user_result=user_result,
+        message_result=result(),
+        inspect_result=empty_inspect,
+        stats=ScrapeStats(requested=2, discovered=2, succeeded=2, failed=0),
+        issues=(),
+    )
+    output = tmp_path / "batch.csv"
+
+    assert write_authenticated(batch, output, "csv") is True
+    assert output.exists()
+    assert (tmp_path / "batch-messages.csv").exists()

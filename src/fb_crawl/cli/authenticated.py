@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import getpass
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
 from fb_crawl.config import (
     BrowserSettings,
     load_browser_settings,
+    validate_checkpoint_path,
 )
 from fb_crawl.core.exceptions import (
     ConfigurationError,
@@ -29,7 +30,9 @@ DEFAULT_OUTPUTS = {
     AuthenticatedAction.FRIENDS: "friends",
     AuthenticatedAction.FOLLOWERS: "followers",
     AuthenticatedAction.REACTIONS: "reactions",
+    AuthenticatedAction.ENGAGEMENT: "engagement",
     AuthenticatedAction.MESSAGES: "messages",
+    AuthenticatedAction.INSPECT: "inspect",
     AuthenticatedAction.BATCH: "batch",
 }
 
@@ -76,6 +79,22 @@ def _common(
         choices=("csv", "json", "txt", "xlsx"),
         default="csv",
     )
+    checkpoint_mode = parser.add_mutually_exclusive_group()
+    checkpoint_mode.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume completed targets from an atomic runtime checkpoint",
+    )
+    checkpoint_mode.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Emit only identities not already known in the checkpoint",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        help="Checkpoint JSON path; defaults under runtime/checkpoints",
+    )
     if profile_options:
         parser.add_argument(
             "--enrich-profiles",
@@ -85,7 +104,8 @@ def _common(
             "--profile-fields",
             help=(
                 "Comma-separated: phone,website,address,current_city,"
-                "hometown,birth_date"
+                "hometown,birth_date,bio,workplace,education,gender,"
+                "languages,relationship_status"
             ),
         )
         parser.add_argument(
@@ -168,12 +188,26 @@ def add_authenticated_parser(
     reactions.add_argument("urls", nargs="+")
     _common(reactions)
 
+    engagement = actions.add_parser(
+        "engagement",
+        help="Collect visible commenters and reacting users together",
+    )
+    engagement.add_argument("urls", nargs="+")
+    _common(engagement)
+
     messages = actions.add_parser(
         "messages",
         help="Collect visible text from explicit conversation URLs",
     )
     messages.add_argument("urls", nargs="+")
     _common(messages, profile_options=False)
+
+    inspect = actions.add_parser(
+        "inspect",
+        help="Emit sanitized browser and selector diagnostics",
+    )
+    inspect.add_argument("urls", nargs="+")
+    _common(inspect, profile_options=False)
 
     batch = actions.add_parser(
         "batch",
@@ -256,6 +290,18 @@ def request_from_authenticated_args(
     if profile_fields and not enrich_profiles:
         raise ValidationError("Profile fields require --enrich-profiles.")
 
+    if args.checkpoint is not None and not (args.resume or args.incremental):
+        raise ValidationError(
+            "--checkpoint requires --resume or --incremental."
+        )
+
+    checkpoint = (
+        args.checkpoint
+        or Path("runtime/checkpoints") / f"{action.value}.json"
+        if args.resume or args.incremental
+        else None
+    )
+
     return ScrapeRequest(
         mode=ScrapeMode.AUTHENTICATED,
         action=action,
@@ -266,6 +312,9 @@ def request_from_authenticated_args(
         profile_fields=profile_fields,
         profile_limit=args.profile_limit,
         profile_delay_seconds=args.profile_delay,
+        resume=args.resume,
+        incremental=args.incremental,
+        checkpoint_path=str(checkpoint) if checkpoint is not None else None,
     )
 
 
@@ -316,6 +365,9 @@ def _load_runtime() -> AuthenticatedRuntime:
         from fb_crawl.adapters.browser.members import (
             MembersCollector,
         )
+        from fb_crawl.adapters.browser.inspect import (
+            BrowserInspector,
+        )
         from fb_crawl.adapters.browser.message_parser import (
             MessageParser,
         )
@@ -327,6 +379,9 @@ def _load_runtime() -> AuthenticatedRuntime:
         )
         from fb_crawl.adapters.browser.reactions import (
             ReactionsCollector,
+        )
+        from fb_crawl.adapters.browser.reaction_parser import (
+            ReactionParser,
         )
         from fb_crawl.adapters.browser.relationships import (
             RelationshipCollector,
@@ -346,6 +401,9 @@ def _load_runtime() -> AuthenticatedRuntime:
         )
         from fb_crawl.services.authenticated import (
             AuthenticatedService,
+        )
+        from fb_crawl.services.checkpoint import (
+            CheckpointingService,
         )
 
     except ModuleNotFoundError as error:
@@ -367,7 +425,7 @@ def _load_runtime() -> AuthenticatedRuntime:
         settings,
         credentials_provider,
     ):
-        return AuthenticatedService(
+        service = AuthenticatedService(
             SessionManager(
                 SessionStore(settings.session_path),
                 settings,
@@ -380,9 +438,12 @@ def _load_runtime() -> AuthenticatedRuntime:
             relationships=RelationshipCollector(settings),
             reactions=ReactionsCollector(settings),
             relationship_parser=UserParser(allow_plain_profile_links=True),
+            reaction_parser=ReactionParser(),
             messages=MessagesCollector(settings),
             message_parser=MessageParser(),
+            inspector=BrowserInspector(settings),
         )
+        return CheckpointingService(service)
 
     return AuthenticatedRuntime(
         create_browser=create_firefox_driver,
@@ -403,6 +464,16 @@ def execute_authenticated(
     args: argparse.Namespace,
 ) -> int:
     request = request_from_authenticated_args(args)
+
+    if request.checkpoint_path is not None:
+        checkpoint_path = validate_checkpoint_path(
+            Path(request.checkpoint_path),
+            repository_root=Path.cwd(),
+        )
+        request = replace(
+            request,
+            checkpoint_path=str(checkpoint_path),
+        )
 
     settings = load_browser_settings(
         headless=args.headless,

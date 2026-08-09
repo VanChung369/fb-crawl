@@ -106,6 +106,35 @@ def validate_session_path(
     return resolved
 
 
+def validate_checkpoint_path(
+    path: Path,
+    *,
+    repository_root: Path,
+) -> Path:
+    resolved = Path(path)
+
+    if not resolved.is_absolute():
+        resolved = repository_root / resolved
+
+    resolved = resolved.resolve()
+    repository = repository_root.resolve()
+    runtime = (repository / "runtime").resolve()
+
+    try:
+        resolved.relative_to(repository)
+    except ValueError:
+        return resolved
+
+    try:
+        resolved.relative_to(runtime)
+    except ValueError as error:
+        raise ConfigurationError(
+            "A repository-local checkpoint path must stay under runtime/."
+        ) from error
+
+    return resolved
+
+
 def load_settings(
     env: Mapping[str, str] | None = None,
     *,

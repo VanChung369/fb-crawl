@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Protocol
 
 from urllib.parse import (
@@ -18,7 +19,10 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    AuthenticatedBatchResult,
     EnrichmentStats,
+    FieldStatus,
+    InspectRecord,
     MessageRecord,
     ProfileDetails,
     ProfileField,
@@ -30,7 +34,8 @@ from fb_crawl.core.models import (
     UserRecord,
 )
 from fb_crawl.core.urls import (
-    classify_authenticated_url,
+    classify_authenticated_batch_target,
+    classify_inspect_target,
     normalize_comments_url,
     normalize_members_url,
     normalize_messages_url,
@@ -89,6 +94,10 @@ class MessageParserPort(Protocol):
         *,
         source_url: str,
     ) -> tuple[MessageRecord, ...]: ...
+
+
+class InspectorPort(Protocol):
+    def inspect(self, browser, url: str) -> InspectRecord: ...
 
 
 PreparedTarget = tuple[
@@ -187,11 +196,16 @@ def _prepared_targets(
 
             prepared.append((action, normalized))
 
-        elif action is AuthenticatedAction.REACTIONS:
+        elif action in {
+            AuthenticatedAction.REACTIONS,
+            AuthenticatedAction.ENGAGEMENT,
+        }:
             normalized = normalize_reactions_url(raw)
 
             if normalized is None:
-                raise ValidationError("An unsupported reactions target was provided.")
+                raise ValidationError(
+                    f"An unsupported {action.value} target was provided."
+                )
 
             prepared.append((action, normalized))
 
@@ -205,8 +219,16 @@ def _prepared_targets(
 
             prepared.append((action, normalized))
 
+        elif action is AuthenticatedAction.INSPECT:
+            classified = classify_inspect_target(raw)
+
+            if classified is None:
+                raise ValidationError("An unsupported inspect target was provided.")
+
+            prepared.append((action, classified[1]))
+
         else:
-            classified = classify_authenticated_url(raw)
+            classified = classify_authenticated_batch_target(raw)
 
             if classified is None:
                 issues.append(
@@ -245,10 +267,144 @@ def _merge_record(
         hometown=first.hometown or later.hometown,
         birth_date=first.birth_date or later.birth_date,
         birth_year=first.birth_year or later.birth_year,
+        bio=first.bio or later.bio,
+        workplace=first.workplace or later.workplace,
+        education=first.education or later.education,
+        gender=first.gender or later.gender,
+        languages=tuple(dict.fromkeys((*first.languages, *later.languages))),
+        relationship_status=(
+            first.relationship_status or later.relationship_status
+        ),
+        field_status=tuple(
+            {
+                **dict(first.field_status),
+                **dict(later.field_status),
+            }.items()
+        ),
+        field_sources=tuple(
+            {
+                **dict(first.field_sources),
+                **dict(later.field_sources),
+            }.items()
+        ),
+        first_seen=first.first_seen or later.first_seen,
+        last_seen=later.last_seen or first.last_seen,
+        last_enriched_at=(later.last_enriched_at or first.last_enriched_at),
+        commented=first.commented or later.commented,
+        reacted=first.reacted or later.reacted,
+        reaction_types=tuple(
+            dict.fromkeys((*first.reaction_types, *later.reaction_types))
+        ),
+        interaction_count=first.interaction_count + later.interaction_count,
     )
 
 
-def _merge_details(record: UserRecord, details: ProfileDetails) -> UserRecord:
+def _profile_field_value(details: ProfileDetails, field: ProfileField):
+    return {
+        ProfileField.PHONE: details.phone_numbers,
+        ProfileField.WEBSITE: details.website,
+        ProfileField.ADDRESS: details.address,
+        ProfileField.CURRENT_CITY: details.current_city,
+        ProfileField.HOMETOWN: details.hometown,
+        ProfileField.BIRTH_DATE: details.birth_date or details.birth_year,
+        ProfileField.BIO: details.bio,
+        ProfileField.WORKPLACE: details.workplace,
+        ProfileField.EDUCATION: details.education,
+        ProfileField.GENDER: details.gender,
+        ProfileField.LANGUAGES: details.languages,
+        ProfileField.RELATIONSHIP_STATUS: details.relationship_status,
+    }[field]
+
+
+def _default_field_status() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (field.value, FieldStatus.NOT_REQUESTED.value) for field in ProfileField
+    )
+
+
+def _details_status(
+    details: ProfileDetails,
+    fields: tuple[ProfileField, ...],
+) -> tuple[tuple[str, str], ...]:
+    if details.field_status:
+        return details.field_status
+
+    requested = frozenset(fields) if fields else frozenset(ProfileField)
+    return tuple(
+        (
+            field.value,
+            (
+                FieldStatus.NOT_REQUESTED.value
+                if field not in requested
+                else FieldStatus.FOUND.value
+                if _profile_field_value(details, field)
+                else FieldStatus.NOT_VISIBLE.value
+            ),
+        )
+        for field in ProfileField
+    )
+
+
+def _details_sources(
+    details: ProfileDetails,
+    fields: tuple[ProfileField, ...],
+) -> tuple[tuple[str, str], ...]:
+    if details.field_sources:
+        return details.field_sources
+
+    requested = frozenset(fields) if fields else frozenset(ProfileField)
+    return tuple(
+        (
+            field.value,
+            (
+                ";".join(details.phone_sources)
+                if field is ProfileField.PHONE and details.phone_sources
+                else "facebook:profile_visible"
+            ),
+        )
+        for field in ProfileField
+        if field in requested and _profile_field_value(details, field)
+    )
+
+
+def _seen_record(record: UserRecord, captured_at: str) -> UserRecord:
+    return replace(
+        record,
+        field_status=record.field_status or _default_field_status(),
+        first_seen=record.first_seen or captured_at,
+        last_seen=captured_at,
+    )
+
+
+def _failed_enrichment_record(
+    record: UserRecord,
+    fields: tuple[ProfileField, ...],
+    status: FieldStatus,
+    captured_at: str,
+) -> UserRecord:
+    requested = frozenset(fields) if fields else frozenset(ProfileField)
+    statuses = tuple(
+        (
+            field.value,
+            status.value
+            if field in requested
+            else FieldStatus.NOT_REQUESTED.value,
+        )
+        for field in ProfileField
+    )
+    return replace(
+        record,
+        field_status=statuses,
+        last_enriched_at=captured_at,
+    )
+
+
+def _merge_details(
+    record: UserRecord,
+    details: ProfileDetails,
+    fields: tuple[ProfileField, ...],
+    captured_at: str,
+) -> UserRecord:
     return replace(
         record,
         name=record.name or details.name,
@@ -265,7 +421,29 @@ def _merge_details(record: UserRecord, details: ProfileDetails) -> UserRecord:
         hometown=record.hometown or details.hometown,
         birth_date=record.birth_date or details.birth_date,
         birth_year=record.birth_year or details.birth_year,
+        bio=record.bio or details.bio,
+        workplace=record.workplace or details.workplace,
+        education=record.education or details.education,
+        gender=record.gender or details.gender,
+        languages=tuple(
+            dict.fromkeys((*record.languages, *details.languages))
+        ),
+        relationship_status=(
+            record.relationship_status or details.relationship_status
+        ),
+        field_status=_details_status(details, fields),
+        field_sources=tuple(
+            {
+                **dict(record.field_sources),
+                **dict(_details_sources(details, fields)),
+            }.items()
+        ),
+        last_enriched_at=captured_at,
     )
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class AuthenticatedService:
@@ -280,8 +458,10 @@ class AuthenticatedService:
         relationships: CollectionPort | None = None,
         reactions: CollectionPort | None = None,
         relationship_parser: UserParserPort | None = None,
+        reaction_parser: UserParserPort | None = None,
         messages: CollectionPort | None = None,
         message_parser: MessageParserPort | None = None,
+        inspector: InspectorPort | None = None,
         sleep_func: Callable[[float], None] = time.sleep,
     ) -> None:
         self._session = session
@@ -292,8 +472,10 @@ class AuthenticatedService:
         self._relationships = relationships
         self._reactions = reactions
         self._relationship_parser = relationship_parser
+        self._reaction_parser = reaction_parser or relationship_parser
         self._messages = messages
         self._message_parser = message_parser
+        self._inspector = inspector
         self._sleep = sleep_func
 
     def validate(
@@ -316,8 +498,11 @@ class AuthenticatedService:
         } and (self._relationships is None or self._relationship_parser is None):
             raise ValidationError("Relationship collection runtime is unavailable.")
 
-        if action is AuthenticatedAction.REACTIONS and (
-            self._reactions is None or self._relationship_parser is None
+        if action in {
+            AuthenticatedAction.REACTIONS,
+            AuthenticatedAction.ENGAGEMENT,
+        } and (
+            self._reactions is None or self._reaction_parser is None
         ):
             raise ValidationError("Reactions collection runtime is unavailable.")
 
@@ -326,11 +511,19 @@ class AuthenticatedService:
         ):
             raise ValidationError("Messages collection runtime is unavailable.")
 
+        if action is AuthenticatedAction.INSPECT and self._inspector is None:
+            raise ValidationError("Inspection runtime is unavailable.")
+
     def run(
         self,
         request: ScrapeRequest,
         browser,
-    ) -> ScrapeResult[UserRecord] | ScrapeResult[MessageRecord]:
+    ) -> (
+        ScrapeResult[UserRecord]
+        | ScrapeResult[MessageRecord]
+        | ScrapeResult[InspectRecord]
+        | AuthenticatedBatchResult
+    ):
         prepared, issues = _prepared_targets(request)
 
         action_requested = AuthenticatedAction(request.action)
@@ -341,6 +534,14 @@ class AuthenticatedService:
 
         if needs_enrichment and self._profile_enricher is None:
             raise ValidationError("Profile enrichment runtime is unavailable.")
+
+        if action_requested is AuthenticatedAction.BATCH:
+            return self._run_batch(request, browser, prepared, issues)
+
+        if action_requested is AuthenticatedAction.INSPECT:
+            if self._inspector is None:
+                raise ValidationError("Inspection runtime is unavailable.")
+            return self._run_inspect(request, browser, prepared, issues)
 
         if action_requested is AuthenticatedAction.MESSAGES:
             if self._messages is None or self._message_parser is None:
@@ -370,95 +571,129 @@ class AuthenticatedService:
                     profile_url=profile_url,
                     source=action.value,
                     source_url=url,
+                    first_seen=_utc_now(),
+                    last_seen=_utc_now(),
+                    field_status=_default_field_status(),
                 )
                 discovered += 1
                 continue
 
-            if action is AuthenticatedAction.MEMBERS:
-                collector = self._members
-                parser = self._parser
+            if action is AuthenticatedAction.ENGAGEMENT:
+                jobs = (
+                    (
+                        AuthenticatedAction.COMMENTS,
+                        self._comments,
+                        self._parser,
+                    ),
+                    (
+                        AuthenticatedAction.REACTIONS,
+                        self._reactions,
+                        self._reaction_parser,
+                    ),
+                )
+            elif action is AuthenticatedAction.MEMBERS:
+                jobs = ((action, self._members, self._parser),)
             elif action is AuthenticatedAction.COMMENTS:
-                collector = self._comments
-                parser = self._parser
+                jobs = ((action, self._comments, self._parser),)
             elif action in {
                 AuthenticatedAction.FRIENDS,
                 AuthenticatedAction.FOLLOWERS,
             }:
-                collector = self._relationships
-                parser = self._relationship_parser
+                jobs = ((action, self._relationships, self._relationship_parser),)
             else:
-                collector = self._reactions
-                parser = self._relationship_parser
+                jobs = ((action, self._reactions, self._reaction_parser),)
 
-            if collector is None or parser is None:
-                raise ValidationError(
-                    f"{action.value.capitalize()} collection runtime is unavailable."
-                )
-
-            try:
-                html, _ = collector.collect(
-                    browser,
-                    url,
-                    steps=request.steps,
-                    delay_seconds=(request.delay_seconds),
-                )
+            for collection_action, collector, parser in jobs:
+                if collector is None or parser is None:
+                    raise ValidationError(
+                        f"{collection_action.value.capitalize()} collection "
+                        "runtime is unavailable."
+                    )
 
                 try:
-                    parsed = parser.parse(
-                        html,
-                        source=action.value,
-                        source_url=url,
+                    html, _ = collector.collect(
+                        browser,
+                        url,
+                        steps=request.steps,
+                        delay_seconds=(request.delay_seconds),
                     )
 
-                except BrowserParseError:
+                    try:
+                        parsed = parser.parse(
+                            html,
+                            source=action.value,
+                            source_url=url,
+                        )
+
+                    except BrowserParseError:
+                        raise
+
+                    except Exception as error:
+                        raise BrowserParseError(
+                            "Authenticated user parsing failed.",
+                            target=url,
+                        ) from error
+
+                    discovered += len(parsed)
+                    captured_at = _utc_now()
+                    for record in parsed:
+                        if collection_action is AuthenticatedAction.COMMENTS:
+                            record = replace(
+                                record,
+                                commented=True,
+                                interaction_count=max(
+                                    1, record.interaction_count
+                                ),
+                            )
+                        elif collection_action is AuthenticatedAction.REACTIONS:
+                            record = replace(
+                                record,
+                                reacted=True,
+                                interaction_count=max(
+                                    1, record.interaction_count
+                                ),
+                            )
+
+                        record = _seen_record(record, captured_at)
+                        if action in {
+                            AuthenticatedAction.FRIENDS,
+                            AuthenticatedAction.FOLLOWERS,
+                        }:
+                            owner = profile_identity_url(url)
+                            if owner is not None and (
+                                record.user_id.casefold() == owner[0].casefold()
+                            ):
+                                continue
+
+                        existing = records_by_id.get(record.user_id)
+
+                        records_by_id[record.user_id] = (
+                            record
+                            if existing is None
+                            else _merge_record(existing, record)
+                        )
+
+                except SessionError:
                     raise
 
-                except Exception as error:
-                    raise BrowserParseError(
-                        "Authenticated user " "parsing failed.",
-                        target=url,
-                    ) from error
-
-                discovered += len(parsed)
-                for record in parsed:
-                    if action in {
-                        AuthenticatedAction.FRIENDS,
-                        AuthenticatedAction.FOLLOWERS,
-                    }:
-                        owner = profile_identity_url(url)
-                        if owner is not None and (
-                            record.user_id.casefold() == owner[0].casefold()
-                        ):
-                            continue
-
-                    existing = records_by_id.get(record.user_id)
-
-                    records_by_id[record.user_id] = (
-                        record
-                        if existing is None
-                        else _merge_record(
-                            existing,
-                            record,
+                except (
+                    BrowserNavigationError,
+                    BrowserParseError,
+                ) as error:
+                    issue_action = (
+                        f"engagement_{collection_action.value}"
+                        if action is AuthenticatedAction.ENGAGEMENT
+                        else action.value
+                    )
+                    issues.append(
+                        ScrapeIssue(
+                            code=error.code,
+                            message=error.safe_message,
+                            target=(error.target or url),
+                            mode=(ScrapeMode.AUTHENTICATED),
+                            action=issue_action,
                         )
                     )
-
-            except SessionError:
-                # Session loss is a fatal error for the entire batch, so we re-raise it to indicate that the session is no longer valid and cannot be trusted.
-                raise
-
-            except (
-                BrowserNavigationError,
-                BrowserParseError,
-            ) as error:
-                issues.append(
-                    ScrapeIssue(
-                        code=error.code,
-                        message=error.safe_message,
-                        target=(error.target or url),
-                        mode=(ScrapeMode.AUTHENTICATED),
-                        action=action.value,
-                    )
-                )
 
         enrichment: EnrichmentStats | None = None
 
@@ -493,6 +728,17 @@ class AuthenticatedService:
                     BrowserParseError,
                 ) as error:
                     enrichment_failed += 1
+                    failure_status = (
+                        FieldStatus.NAVIGATION_FAILED
+                        if isinstance(error, BrowserNavigationError)
+                        else FieldStatus.SECTION_UNAVAILABLE
+                    )
+                    records_by_id[user_id] = _failed_enrichment_record(
+                        record,
+                        fields,
+                        failure_status,
+                        _utc_now(),
+                    )
                     issues.append(
                         ScrapeIssue(
                             code=error.code,
@@ -505,6 +751,12 @@ class AuthenticatedService:
 
                 except Exception:
                     enrichment_failed += 1
+                    records_by_id[user_id] = _failed_enrichment_record(
+                        record,
+                        fields,
+                        FieldStatus.SECTION_UNAVAILABLE,
+                        _utc_now(),
+                    )
                     safe_error = BrowserParseError(
                         "Authenticated profile parsing failed.",
                         target=record.profile_url,
@@ -520,7 +772,12 @@ class AuthenticatedService:
                     )
 
                 else:
-                    records_by_id[user_id] = _merge_details(record, details)
+                    records_by_id[user_id] = _merge_details(
+                        record,
+                        details,
+                        fields,
+                        _utc_now(),
+                    )
                     enrichment_succeeded += 1
                     phone_found += bool(details.phone_numbers)
                     address_found += bool(details.address)
@@ -557,6 +814,207 @@ class AuthenticatedService:
             enrichment=enrichment,
         )
 
+    def _run_batch(
+        self,
+        request: ScrapeRequest,
+        browser,
+        prepared: list[PreparedTarget],
+        initial_issues: list[ScrapeIssue],
+    ) -> AuthenticatedBatchResult:
+        grouped: dict[AuthenticatedAction, list[str]] = {}
+        for action, target in prepared:
+            grouped.setdefault(action, []).append(target)
+
+        user_records: dict[str, UserRecord] = {}
+        message_records: dict[str, MessageRecord] = {}
+        inspect_records: dict[str, InspectRecord] = {}
+        user_issues = list(initial_issues)
+        message_issues: list[ScrapeIssue] = []
+        inspect_issues: list[ScrapeIssue] = []
+        discovered = 0
+        enrichment_values: list[EnrichmentStats] = []
+
+        for action, targets in grouped.items():
+            message_action = action is AuthenticatedAction.MESSAGES
+            inspect_action = action is AuthenticatedAction.INSPECT
+            subrequest = replace(
+                request,
+                action=action,
+                targets=tuple(targets),
+                enrich_profiles=(
+                    False
+                    if message_action or inspect_action
+                    else request.enrich_profiles
+                ),
+                profile_fields=(
+                    ()
+                    if message_action or inspect_action
+                    else request.profile_fields
+                ),
+                resume=False,
+                incremental=False,
+                checkpoint_path=None,
+            )
+            result = self.run(subrequest, browser)
+            discovered += result.stats.discovered
+
+            if inspect_action:
+                for record in result.records:
+                    inspect_records[record.target_url] = record
+                inspect_issues.extend(result.issues)
+            elif message_action:
+                for record in result.records:
+                    existing = message_records.get(record.message_id)
+                    message_records[record.message_id] = (
+                        record
+                        if existing is None
+                        else replace(
+                            existing,
+                            sender_name=(
+                                existing.sender_name or record.sender_name
+                            ),
+                            sender_profile_url=(
+                                existing.sender_profile_url
+                                or record.sender_profile_url
+                            ),
+                            first_seen=(
+                                existing.first_seen or record.first_seen
+                            ),
+                            last_seen=(record.last_seen or existing.last_seen),
+                        )
+                    )
+                message_issues.extend(result.issues)
+            else:
+                for record in result.records:
+                    existing = user_records.get(record.user_id)
+                    user_records[record.user_id] = (
+                        record
+                        if existing is None
+                        else _merge_record(existing, record)
+                    )
+                user_issues.extend(result.issues)
+                if result.enrichment is not None:
+                    enrichment_values.append(result.enrichment)
+
+        enrichment = (
+            EnrichmentStats(
+                selected=sum(item.selected for item in enrichment_values),
+                attempted=sum(item.attempted for item in enrichment_values),
+                succeeded=sum(item.succeeded for item in enrichment_values),
+                failed=sum(item.failed for item in enrichment_values),
+                phone_found=sum(item.phone_found for item in enrichment_values),
+                address_found=sum(
+                    item.address_found for item in enrichment_values
+                ),
+                current_city_found=sum(
+                    item.current_city_found for item in enrichment_values
+                ),
+                hometown_found=sum(
+                    item.hometown_found for item in enrichment_values
+                ),
+                birth_year_found=sum(
+                    item.birth_year_found for item in enrichment_values
+                ),
+            )
+            if enrichment_values
+            else None
+        )
+        all_issues = (*user_issues, *message_issues, *inspect_issues)
+        user_result = ScrapeResult(
+            records=tuple(user_records.values()),
+            issues=tuple(user_issues),
+            stats=ScrapeStats(
+                requested=sum(
+                    len(targets)
+                    for action, targets in grouped.items()
+                    if action is not AuthenticatedAction.MESSAGES
+                    and action is not AuthenticatedAction.INSPECT
+                ),
+                discovered=discovered,
+                succeeded=len(user_records),
+                failed=len(user_issues),
+            ),
+            enrichment=enrichment,
+        )
+        message_result = ScrapeResult(
+            records=tuple(message_records.values()),
+            issues=tuple(message_issues),
+            stats=ScrapeStats(
+                requested=len(grouped.get(AuthenticatedAction.MESSAGES, ())),
+                discovered=len(message_records),
+                succeeded=len(message_records),
+                failed=len(message_issues),
+            ),
+        )
+        inspect_result = ScrapeResult(
+            records=tuple(inspect_records.values()),
+            issues=tuple(inspect_issues),
+            stats=ScrapeStats(
+                requested=len(grouped.get(AuthenticatedAction.INSPECT, ())),
+                discovered=len(inspect_records),
+                succeeded=len(inspect_records),
+                failed=len(inspect_issues),
+            ),
+        )
+        return AuthenticatedBatchResult(
+            user_result=user_result,
+            message_result=message_result,
+            inspect_result=inspect_result,
+            stats=ScrapeStats(
+                requested=len(request.targets),
+                discovered=discovered,
+                succeeded=(
+                    len(user_records)
+                    + len(message_records)
+                    + len(inspect_records)
+                ),
+                failed=len(all_issues),
+            ),
+            issues=tuple(all_issues),
+            enrichment=enrichment,
+        )
+
+    def _run_inspect(
+        self,
+        request: ScrapeRequest,
+        browser,
+        prepared: list[PreparedTarget],
+        issues: list[ScrapeIssue],
+    ) -> ScrapeResult[InspectRecord]:
+        if prepared:
+            self._session.ensure_authenticated(browser)
+
+        records: dict[str, InspectRecord] = {}
+
+        for action, url in prepared:
+            self._session.assert_authenticated(browser)
+            try:
+                record = self._inspector.inspect(browser, url)
+                records[url] = record
+            except SessionError:
+                raise
+            except BrowserNavigationError as error:
+                issues.append(
+                    ScrapeIssue(
+                        code=error.code,
+                        message=error.safe_message,
+                        target=error.target or url,
+                        mode=ScrapeMode.AUTHENTICATED,
+                        action=action.value,
+                    )
+                )
+
+        return ScrapeResult(
+            records=tuple(records.values()),
+            issues=tuple(issues),
+            stats=ScrapeStats(
+                requested=len(request.targets),
+                discovered=len(records),
+                succeeded=len(records),
+                failed=len(issues),
+            ),
+        )
+
     def _run_messages(
         self,
         request: ScrapeRequest,
@@ -591,7 +1049,13 @@ class AuthenticatedService:
                     ) from error
 
                 discovered += len(parsed)
+                captured_at = _utc_now()
                 for record in parsed:
+                    record = replace(
+                        record,
+                        first_seen=record.first_seen or captured_at,
+                        last_seen=captured_at,
+                    )
                     records_by_id.setdefault(record.message_id, record)
 
             except SessionError:

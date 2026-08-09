@@ -27,7 +27,9 @@ class AuthenticatedAction(StrEnum):
     FRIENDS = "friends"
     FOLLOWERS = "followers"
     REACTIONS = "reactions"
+    ENGAGEMENT = "engagement"
     MESSAGES = "messages"
+    INSPECT = "inspect"
     BATCH = "batch"
 
 
@@ -38,6 +40,20 @@ class ProfileField(StrEnum):
     CURRENT_CITY = "current_city"
     HOMETOWN = "hometown"
     BIRTH_DATE = "birth_date"
+    BIO = "bio"
+    WORKPLACE = "workplace"
+    EDUCATION = "education"
+    GENDER = "gender"
+    LANGUAGES = "languages"
+    RELATIONSHIP_STATUS = "relationship_status"
+
+
+class FieldStatus(StrEnum):
+    FOUND = "found"
+    NOT_VISIBLE = "not_visible"
+    SECTION_UNAVAILABLE = "section_unavailable"
+    NAVIGATION_FAILED = "navigation_failed"
+    NOT_REQUESTED = "not_requested"
 
 
 class TargetKind(StrEnum):
@@ -68,6 +84,9 @@ class ScrapeRequest:
     profile_fields: tuple[ProfileField, ...] = ()
     profile_limit: int = 20
     profile_delay_seconds: float = 3.0
+    resume: bool = False
+    incremental: bool = False
+    checkpoint_path: str | None = None
 
     def __post_init__(self) -> None:
         if self.limit <= 0:
@@ -102,6 +121,9 @@ class ScrapeRequest:
         if len(set(self.profile_fields)) != len(self.profile_fields):
             raise ValueError("profile_fields must not contain duplicates")
 
+        if self.resume and self.incremental:
+            raise ValueError("resume and incremental cannot be used together")
+
 
 @dataclass(frozen=True, slots=True)
 class ContactRecord:
@@ -135,6 +157,14 @@ class ProfileDetails:
     hometown: str | None = None
     birth_date: str | None = None
     birth_year: int | None = None
+    bio: str | None = None
+    workplace: str | None = None
+    education: str | None = None
+    gender: str | None = None
+    languages: tuple[str, ...] = ()
+    relationship_status: str | None = None
+    field_status: tuple[tuple[str, str], ...] = ()
+    field_sources: tuple[tuple[str, str], ...] = ()
     canonical_profile_url: str | None = None
 
 
@@ -153,6 +183,21 @@ class UserRecord:
     hometown: str | None = None
     birth_date: str | None = None
     birth_year: int | None = None
+    bio: str | None = None
+    workplace: str | None = None
+    education: str | None = None
+    gender: str | None = None
+    languages: tuple[str, ...] = ()
+    relationship_status: str | None = None
+    field_status: tuple[tuple[str, str], ...] = ()
+    field_sources: tuple[tuple[str, str], ...] = ()
+    first_seen: str | None = None
+    last_seen: str | None = None
+    last_enriched_at: str | None = None
+    commented: bool = False
+    reacted: bool = False
+    reaction_types: tuple[str, ...] = ()
+    interaction_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +209,22 @@ class MessageRecord:
     sent_at: str | None
     thread_url: str
     source: str = "messages"
+    first_seen: str | None = None
+    last_seen: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InspectRecord:
+    target_url: str
+    target_action: str
+    session_valid: bool
+    document_ready: bool
+    main_found: bool
+    dialog_count: int
+    visible_profile_links: int
+    message_rows: int
+    profile_field_labels: int
+    parser_version: str = "1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +264,28 @@ class ScrapeResult(Generic[RecordT]):
     issues: tuple[ScrapeIssue, ...]
     stats: ScrapeStats
     enrichment: EnrichmentStats | None = None
+
+    @property
+    def has_failures(self) -> bool:
+        return self.stats.failed > 0 or bool(self.issues)
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedBatchResult:
+    user_result: ScrapeResult[UserRecord]
+    message_result: ScrapeResult[MessageRecord]
+    inspect_result: ScrapeResult[InspectRecord]
+    stats: ScrapeStats
+    issues: tuple[ScrapeIssue, ...]
+    enrichment: EnrichmentStats | None = None
+
+    @property
+    def records(self) -> tuple[UserRecord | MessageRecord | InspectRecord, ...]:
+        return (
+            *self.user_result.records,
+            *self.message_result.records,
+            *self.inspect_result.records,
+        )
 
     @property
     def has_failures(self) -> bool:

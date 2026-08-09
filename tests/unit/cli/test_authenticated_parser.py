@@ -146,7 +146,9 @@ def test_direct_profile_implicitly_enables_enrichment() -> None:
         AuthenticatedAction.FRIENDS,
         AuthenticatedAction.FOLLOWERS,
         AuthenticatedAction.REACTIONS,
+        AuthenticatedAction.ENGAGEMENT,
         AuthenticatedAction.MESSAGES,
+        AuthenticatedAction.INSPECT,
     ],
 )
 def test_new_authenticated_actions_build_typed_requests(
@@ -155,8 +157,13 @@ def test_new_authenticated_actions_build_typed_requests(
     target = (
         "https://www.facebook.com/messages/t/123"
         if action is AuthenticatedAction.MESSAGES
+        else "https://www.facebook.com/synthetic.user"
+        if action is AuthenticatedAction.INSPECT
         else "https://www.facebook.com/acme/posts/1"
-        if action is AuthenticatedAction.REACTIONS
+        if action in {
+            AuthenticatedAction.REACTIONS,
+            AuthenticatedAction.ENGAGEMENT,
+        }
         else "https://www.facebook.com/synthetic.user"
     )
     args = build_parser().parse_args(
@@ -182,3 +189,35 @@ def test_messages_help_does_not_offer_profile_enrichment_options() -> None:
                 "--enrich-profiles",
             ]
         )
+
+
+@pytest.mark.parametrize("flag", ["--resume", "--incremental"])
+def test_checkpoint_modes_get_a_runtime_default_path(flag: str) -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            flag,
+        ]
+    )
+    request = request_from_authenticated_args(args)
+
+    assert request.checkpoint_path == "runtime\\checkpoints\\members.json"
+    assert request.resume is (flag == "--resume")
+    assert request.incremental is (flag == "--incremental")
+
+
+def test_checkpoint_path_requires_a_checkpoint_mode() -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--checkpoint",
+            "runtime/checkpoints/custom.json",
+        ]
+    )
+
+    with pytest.raises(ValidationError, match="requires"):
+        request_from_authenticated_args(args)

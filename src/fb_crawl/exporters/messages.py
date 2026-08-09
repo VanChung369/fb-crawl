@@ -18,6 +18,8 @@ MESSAGE_FIELDS = (
     "sent_at",
     "thread_url",
     "source",
+    "first_seen",
+    "last_seen",
     "error_code",
     "error_message",
 )
@@ -34,6 +36,8 @@ def message_record_row(record: MessageRecord) -> dict[str, str]:
         "sent_at": record.sent_at or "",
         "thread_url": record.thread_url,
         "source": record.source,
+        "first_seen": record.first_seen or "",
+        "last_seen": record.last_seen or "",
         "error_code": "",
         "error_message": "",
     }
@@ -48,6 +52,8 @@ def message_issue_row(issue: ScrapeIssue) -> dict[str, str]:
         "sent_at": "",
         "thread_url": issue.target or "",
         "source": issue.action,
+        "first_seen": "",
+        "last_seen": "",
         "error_code": issue.code,
         "error_message": issue.message,
     }

@@ -176,29 +176,12 @@ def test_user_xlsx_uses_the_same_schema(tmp_path: Path) -> None:
 
     rows = list(load_workbook(path).active.values)
 
-    assert rows[0] == (
-        "user_id",
-        "name",
-        "username",
-        "page_name",
-        "category",
-        "website",
-        "address",
-        "current_city",
-        "hometown",
-        "birth_date",
-        "birth_year",
-        "phone_numbers",
-        "phone_sources",
-        "profile_url",
-        "source",
-        "source_url",
-        "error_code",
-        "error_message",
-    )
+    assert rows[0] == UNIFIED_FIELDS
     assert rows[1][0] == "synthetic.user"
     assert rows[1][2] == "synthetic.user"
-    assert rows[2][16] == "authenticated_navigation_failed"
+    assert rows[2][UNIFIED_FIELDS.index("error_code")] == (
+        "authenticated_navigation_failed"
+    )
 
 
 def test_xlsx_missing_dependency_does_not_change_format(

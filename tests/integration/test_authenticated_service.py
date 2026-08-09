@@ -7,6 +7,7 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    InspectRecord,
     MessageRecord,
     ProfileDetails,
     ProfileField,
@@ -655,6 +656,30 @@ def test_reactions_action_collects_visible_users() -> None:
     assert result.records[0].source == "reactions"
 
 
+def test_engagement_merges_comment_and_reaction_flags() -> None:
+    target = "https://www.facebook.com/acme/posts/1"
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({target: "201:Engaged User"}),
+        Parser(),
+        reactions=Collector({target: "201:Engaged User"}),
+        reaction_parser=Parser(),
+    )
+
+    result = service.run(
+        request(AuthenticatedAction.ENGAGEMENT, target),
+        object(),
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0].source == "engagement"
+    assert result.records[0].commented is True
+    assert result.records[0].reacted is True
+    assert result.records[0].interaction_count == 2
+    assert result.stats.discovered == 2
+
+
 class MessagesParser:
     def parse(self, html: str, *, source_url: str):
         return (
@@ -711,3 +736,71 @@ def test_messages_rejects_inbox_without_starting_session() -> None:
         )
 
     assert session.ensure_calls == 0
+
+
+def test_universal_batch_splits_user_and_message_results() -> None:
+    friend_target = "https://www.facebook.com/synthetic.user/friends"
+    message_target = "https://www.facebook.com/messages/t/123"
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        relationships=Collector({friend_target: "200:Visible Friend"}),
+        relationship_parser=Parser(),
+        messages=Collector({message_target: "Visible message"}),
+        message_parser=MessagesParser(),
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.BATCH,
+            "friends:https://www.facebook.com/synthetic.user",
+            "messages:https://www.messenger.com/t/123",
+        ),
+        object(),
+    )
+
+    assert [record.user_id for record in result.user_result.records] == ["200"]
+    assert [record.message_id for record in result.message_result.records] == [
+        "mid.1"
+    ]
+    assert result.stats.requested == 2
+    assert result.stats.succeeded == 2
+
+
+class Inspector:
+    def inspect(self, browser, url: str) -> InspectRecord:
+        return InspectRecord(
+            target_url=url,
+            target_action="profile",
+            session_valid=True,
+            document_ready=True,
+            main_found=True,
+            dialog_count=0,
+            visible_profile_links=5,
+            message_rows=0,
+            profile_field_labels=2,
+        )
+
+
+def test_inspect_action_returns_sanitized_diagnostics() -> None:
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        inspector=Inspector(),
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.INSPECT,
+            "https://www.facebook.com/synthetic.user",
+        ),
+        object(),
+    )
+
+    assert result.records[0].target_action == "profile"
+    assert result.records[0].visible_profile_links == 5
+    assert result.stats.failed == 0

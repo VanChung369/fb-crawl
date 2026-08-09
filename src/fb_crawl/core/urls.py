@@ -11,6 +11,7 @@ from urllib.parse import (
 
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    ProfileField,
     TargetKind,
 )
 
@@ -535,6 +536,66 @@ def profile_directory_urls(
     )
 
 
+PROFILE_FIELD_SECTIONS = {
+    ProfileField.PHONE: "directory_personal_details",
+    ProfileField.ADDRESS: "directory_personal_details",
+    ProfileField.CURRENT_CITY: "directory_personal_details",
+    ProfileField.HOMETOWN: "directory_personal_details",
+    ProfileField.BIRTH_DATE: "directory_personal_details",
+    ProfileField.BIO: "directory_personal_details",
+    ProfileField.GENDER: "directory_personal_details",
+    ProfileField.LANGUAGES: "directory_personal_details",
+    ProfileField.RELATIONSHIP_STATUS: "directory_personal_details",
+    ProfileField.WORKPLACE: "directory_work",
+    ProfileField.EDUCATION: "directory_work",
+    ProfileField.WEBSITE: "directory_links",
+}
+
+
+def profile_enrichment_urls(
+    profile_url: str | None,
+    user_id: str,
+    fields: tuple[ProfileField, ...],
+) -> tuple[str, ...]:
+    parsed = _facebook_parts(profile_url)
+
+    if parsed is None or not _valid_authenticated_id(user_id):
+        return ()
+
+    parts, query = parsed
+    requested = fields or tuple(ProfileField)
+    sections = tuple(
+        dict.fromkeys(PROFILE_FIELD_SECTIONS[field] for field in requested)
+    )
+
+    if len(parts) != 1:
+        return ()
+
+    first = parts[0]
+    lowered = first.casefold()
+
+    if lowered == "profile.php":
+        profile_id = query.get("id", [""])[0]
+
+        if not profile_id.isdigit() or profile_id != user_id:
+            return ()
+
+        base = "https://www.facebook.com/profile.php"
+        return tuple(
+            f"{base}?{urlencode((('id', profile_id), ('sk', section)))}"
+            for section in sections
+        )
+
+    if lowered in FACEBOOK_INTERNAL_PATHS or first.casefold() != user_id.casefold():
+        return ()
+
+    if not _valid_authenticated_id(first):
+        return ()
+
+    base = f"https://www.facebook.com/{first}"
+    return tuple(f"{base}/{section}" for section in sections)
+
+
 def profile_about_urls(
     profile_url: str | None,
     user_id: str,
@@ -562,4 +623,88 @@ def classify_authenticated_url(
             comments,
         )
 
+    messages = normalize_messages_url(value)
+
+    if messages is not None:
+        return (AuthenticatedAction.MESSAGES, messages)
+
+    parsed = _facebook_parts(value)
+
+    if parsed is not None:
+        parts, query = parsed
+        section = query.get("sk", [""])[0].casefold()
+
+        if (
+            len(parts) == 2
+            and parts[1].casefold() in {"friends", "followers"}
+        ) or section in {"friends", "followers"}:
+            collection = parts[1].casefold() if len(parts) == 2 else section
+            normalized = normalize_profile_collection_url(value, collection)
+            if normalized is not None:
+                return AuthenticatedAction(collection), normalized
+
+    profile = profile_identity_url(value)
+
+    if profile is not None:
+        return AuthenticatedAction.PROFILE, profile[1]
+
     return None
+
+
+def classify_authenticated_batch_target(
+    value: str | None,
+) -> tuple[AuthenticatedAction, str] | None:
+    if not value:
+        return None
+
+    prefix, separator, raw_target = value.partition(":")
+    typed_actions = {
+        action.value: action
+        for action in AuthenticatedAction
+        if action is not AuthenticatedAction.BATCH
+    }
+
+    if not separator or prefix.casefold() not in typed_actions:
+        return classify_authenticated_url(value)
+
+    action = typed_actions[prefix.casefold()]
+    target = raw_target.strip()
+
+    if action is AuthenticatedAction.INSPECT:
+        classified = classify_authenticated_url(target)
+        normalized = classified[1] if classified is not None else None
+    elif action is AuthenticatedAction.MEMBERS:
+        normalized = normalize_members_url(target)
+    elif action is AuthenticatedAction.COMMENTS:
+        normalized = normalize_comments_url(target)
+    elif action is AuthenticatedAction.PROFILE:
+        identity = profile_identity_url(target)
+        normalized = identity[1] if identity is not None else None
+    elif action in {
+        AuthenticatedAction.FRIENDS,
+        AuthenticatedAction.FOLLOWERS,
+    }:
+        normalized = normalize_profile_collection_url(target, action.value)
+    elif action in {
+        AuthenticatedAction.REACTIONS,
+        AuthenticatedAction.ENGAGEMENT,
+    }:
+        normalized = normalize_reactions_url(target)
+    else:
+        normalized = normalize_messages_url(target)
+
+    return (action, normalized) if normalized is not None else None
+
+
+def classify_inspect_target(
+    value: str | None,
+) -> tuple[AuthenticatedAction, str] | None:
+    if not value:
+        return None
+
+    typed = classify_authenticated_batch_target(value)
+    if typed is not None and typed[0] is AuthenticatedAction.INSPECT:
+        classified = classify_authenticated_url(typed[1])
+        return classified
+
+    return classify_authenticated_url(value)

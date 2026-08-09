@@ -12,9 +12,12 @@ from fb_crawl.core.exceptions import (
 
 from fb_crawl.core.models import (
     AuthenticatedAction,
+    AuthenticatedBatchResult,
     ContactKind,
     ContactRecord,
     EnrichmentStats,
+    FieldStatus,
+    InspectRecord,
     MessageRecord,
     PageRecord,
     ProfileDetails,
@@ -31,16 +34,19 @@ from fb_crawl.core.models import (
 
 __all__ = [
     "AuthenticatedAction",
+    "AuthenticatedBatchResult",
     "BrowserNavigationError",
     "BrowserParseError",
     "ConfigurationError",
     "ContactKind",
     "ContactRecord",
     "EnrichmentStats",
+    "FieldStatus",
     "ExportError",
     "FbCrawlError",
     "FetchError",
     "MessageRecord",
+    "InspectRecord",
     "PageRecord",
     "ParseError",
     "PublicAction",

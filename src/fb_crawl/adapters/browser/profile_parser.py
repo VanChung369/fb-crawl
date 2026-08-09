@@ -101,6 +101,18 @@ WEBSITE_LABELS = frozenset(
         "websites",
     }
 )
+BIO_LABELS = frozenset({"bio", "details about", "gioi thieu", "tieu su"})
+WORKPLACE_LABELS = frozenset(
+    {"cong viec", "noi lam viec", "work", "workplace", "works at"}
+)
+EDUCATION_LABELS = frozenset(
+    {"college", "education", "high school", "hoc van", "school", "studied at"}
+)
+GENDER_LABELS = frozenset({"gender", "gioi tinh"})
+LANGUAGE_LABELS = frozenset({"languages", "ngon ngu"})
+RELATIONSHIP_LABELS = frozenset(
+    {"relationship", "relationship status", "tinh trang moi quan he"}
+)
 FIELD_LABELS = frozenset().union(
     CURRENT_CITY_LABELS,
     HOMETOWN_LABELS,
@@ -108,6 +120,12 @@ FIELD_LABELS = frozenset().union(
     PHONE_LABELS,
     ADDRESS_LABELS,
     WEBSITE_LABELS,
+    BIO_LABELS,
+    WORKPLACE_LABELS,
+    EDUCATION_LABELS,
+    GENDER_LABELS,
+    LANGUAGE_LABELS,
+    RELATIONSHIP_LABELS,
 )
 
 CURRENT_CITY_PREFIXES = (
@@ -355,6 +373,12 @@ class ProfileParser:
         hometown: str | None = None
         birth_date: str | None = None
         birth_year: int | None = None
+        bio: str | None = None
+        workplace: str | None = None
+        education: str | None = None
+        gender: str | None = None
+        languages: tuple[str, ...] = ()
+        relationship_status: str | None = None
 
         if ProfileField.PHONE in requested:
             for anchor in soup.find_all("a", href=True):
@@ -391,8 +415,20 @@ class ProfileParser:
             is_link = section in LINK_HEADINGS
             is_address = section in ADDRESS_HEADINGS
             is_phone = section in PHONE_HEADINGS
+            is_work = section in WORKPLACE_LABELS
+            is_education = section in EDUCATION_LABELS
 
-            if not any((is_personal, is_contact, is_link, is_address, is_phone)):
+            if not any(
+                (
+                    is_personal,
+                    is_contact,
+                    is_link,
+                    is_address,
+                    is_phone,
+                    is_work,
+                    is_education,
+                )
+            ):
                 continue
 
             items = container.find_all(attrs={"role": "listitem"})
@@ -435,6 +471,20 @@ class ProfileParser:
                         website = _external_website(str(anchor.get("href") or ""))
                         if website is not None:
                             break
+
+                if (
+                    is_work
+                    and ProfileField.WORKPLACE in requested
+                    and workplace is None
+                ):
+                    workplace = text or None
+
+                if (
+                    is_education
+                    and ProfileField.EDUCATION in requested
+                    and education is None
+                ):
+                    education = text or None
 
         for text_node in soup.find_all(string=True):
             label = _fold(str(text_node))
@@ -491,6 +541,50 @@ class ProfileParser:
                     if website is not None:
                         break
 
+            elif (
+                label in BIO_LABELS
+                and ProfileField.BIO in requested
+                and bio is None
+            ):
+                bio = value
+
+            elif (
+                label in WORKPLACE_LABELS
+                and ProfileField.WORKPLACE in requested
+                and workplace is None
+            ):
+                workplace = value
+
+            elif (
+                label in EDUCATION_LABELS
+                and ProfileField.EDUCATION in requested
+                and education is None
+            ):
+                education = value
+
+            elif (
+                label in GENDER_LABELS
+                and ProfileField.GENDER in requested
+                and gender is None
+            ):
+                gender = value
+
+            elif label in LANGUAGE_LABELS and ProfileField.LANGUAGES in requested:
+                languages = tuple(
+                    dict.fromkeys(
+                        item.strip()
+                        for item in re.split(r"[,;]", value)
+                        if item.strip()
+                    )
+                )
+
+            elif (
+                label in RELATIONSHIP_LABELS
+                and ProfileField.RELATIONSHIP_STATUS in requested
+                and relationship_status is None
+            ):
+                relationship_status = value
+
         phone_values = tuple(phones.values())
         return ProfileDetails(
             name=name,
@@ -502,4 +596,10 @@ class ProfileParser:
             hometown=hometown,
             birth_date=birth_date,
             birth_year=birth_year,
+            bio=bio,
+            workplace=workplace,
+            education=education,
+            gender=gender,
+            languages=languages,
+            relationship_status=relationship_status,
         )

@@ -46,7 +46,9 @@ fb-crawl authenticated profile https://www.facebook.com/USERNAME --headless
 fb-crawl authenticated friends https://www.facebook.com/USERNAME --headless
 fb-crawl authenticated followers https://www.facebook.com/USERNAME --headless
 fb-crawl authenticated reactions https://www.facebook.com/PAGE/posts/POST_ID --headless
+fb-crawl authenticated engagement https://www.facebook.com/PAGE/posts/POST_ID --headless
 fb-crawl authenticated messages https://www.facebook.com/messages/t/THREAD_ID --headless
+fb-crawl authenticated inspect https://www.facebook.com/USERNAME --format json --headless
 fb-crawl authenticated batch --input runtime/targets.txt --headless
 ```
 
@@ -60,7 +62,25 @@ fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
   --profile-limit 20
 ```
 
+Long runs can use an atomic runtime checkpoint:
+
+```powershell
+fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
+  --resume --headless
+
+fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
+  --incremental --headless
+```
+
+`--resume` continues unfinished targets and returns the combined checkpointed
+result. `--incremental` re-runs targets and emits only newly observed
+identities.
+
 See [docs/authenticated-cli.md](docs/authenticated-cli.md) for supported URLs, session handling, formats, exit codes, and security guidance.
+
+The future external-enrichment/PostgreSQL direction is documented in
+[docs/future-data-pipeline.md](docs/future-data-pipeline.md). It is not active in
+the current CLI.
 
 ## Exit codes
 

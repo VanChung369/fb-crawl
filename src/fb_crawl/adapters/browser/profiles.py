@@ -19,8 +19,17 @@ from fb_crawl.core.exceptions import (
     BrowserParseError,
     SessionError,
 )
-from fb_crawl.core.models import ProfileDetails, ProfileField, UserRecord
-from fb_crawl.core.urls import normalize_facebook_url, profile_directory_urls
+from fb_crawl.core.models import (
+    FieldStatus,
+    ProfileDetails,
+    ProfileField,
+    UserRecord,
+)
+from fb_crawl.core.urls import (
+    PROFILE_FIELD_SECTIONS,
+    normalize_facebook_url,
+    profile_enrichment_urls,
+)
 
 
 def _ordered_union(first: tuple[str, ...], later: tuple[str, ...]) -> tuple[str, ...]:
@@ -39,6 +48,14 @@ def _merge_details(first: ProfileDetails, later: ProfileDetails) -> ProfileDetai
         hometown=first.hometown or later.hometown,
         birth_date=first.birth_date or later.birth_date,
         birth_year=first.birth_year or later.birth_year,
+        bio=first.bio or later.bio,
+        workplace=first.workplace or later.workplace,
+        education=first.education or later.education,
+        gender=first.gender or later.gender,
+        languages=_ordered_union(first.languages, later.languages),
+        relationship_status=(
+            first.relationship_status or later.relationship_status
+        ),
         canonical_profile_url=(
             first.canonical_profile_url or later.canonical_profile_url
         ),
@@ -71,6 +88,34 @@ def _browser_profile_name(browser) -> str | None:
         return None
 
     return title
+
+
+def _route_section(route: str) -> str:
+    parsed = urlparse(route)
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if len(parts) == 1 and parts[0].casefold() == "profile.php":
+        return parse_qs(parsed.query).get("sk", [""])[0].casefold()
+
+    return parts[-1].casefold() if parts else ""
+
+
+def _field_value(details: ProfileDetails, field: ProfileField):
+    values = {
+        ProfileField.PHONE: details.phone_numbers,
+        ProfileField.WEBSITE: details.website,
+        ProfileField.ADDRESS: details.address,
+        ProfileField.CURRENT_CITY: details.current_city,
+        ProfileField.HOMETOWN: details.hometown,
+        ProfileField.BIRTH_DATE: details.birth_date or details.birth_year,
+        ProfileField.BIO: details.bio,
+        ProfileField.WORKPLACE: details.workplace,
+        ProfileField.EDUCATION: details.education,
+        ProfileField.GENDER: details.gender,
+        ProfileField.LANGUAGES: details.languages,
+        ProfileField.RELATIONSHIP_STATUS: details.relationship_status,
+    }
+    return values[field]
 
 
 def _resolved_profile_url(
@@ -146,7 +191,11 @@ class ProfileEnricher:
         record: UserRecord,
         fields: tuple[ProfileField, ...],
     ) -> ProfileDetails:
-        routes = profile_directory_urls(record.profile_url, record.user_id)
+        routes = profile_enrichment_urls(
+            record.profile_url,
+            record.user_id,
+            fields,
+        )
 
         if not routes:
             raise BrowserNavigationError(
@@ -160,28 +209,29 @@ class ProfileEnricher:
         parse_failures = 0
         critical_navigation_failure = False
         critical_parse_failure = False
+        unavailable_sections: set[str] = set()
+        failed_sections: set[str] = set()
 
-        requested = frozenset(fields) if fields else frozenset(ProfileField)
-        personal_requested = bool(requested - {ProfileField.WEBSITE})
-        route_indexes = (
-            *((0,) if personal_requested else ()),
-            *((1,) if ProfileField.WEBSITE in requested else ()),
-        )
+        requested = tuple(fields) if fields else tuple(ProfileField)
+        requested_set = frozenset(requested)
 
         route_profile_url = record.profile_url
         route_identity = record.user_id
 
-        for route_index in route_indexes:
-            current_routes = profile_directory_urls(
+        for route_index, _ in enumerate(routes):
+            current_routes = profile_enrichment_urls(
                 route_profile_url,
                 route_identity,
+                fields,
             )
 
             if len(current_routes) != len(routes):
                 navigation_failures += 1
+                failed_sections.add(_route_section(routes[route_index]))
                 continue
 
             route = current_routes[route_index]
+            section = _route_section(route)
 
             try:
                 browser.get(route)
@@ -192,17 +242,21 @@ class ProfileEnricher:
                         "The authenticated Facebook session is no longer valid."
                     )
 
-                self._content_ready(
+                content_ready = self._content_ready(
                     browser,
                     self._settings.browser_timeout_seconds,
                     route,
                 )
+
+                if content_ready is False:
+                    unavailable_sections.add(section)
 
             except SessionError:
                 raise
 
             except Exception:
                 navigation_failures += 1
+                failed_sections.add(section)
                 critical_navigation_failure |= route_index == 0
                 continue
 
@@ -237,6 +291,7 @@ class ProfileEnricher:
 
             except Exception:
                 parse_failures += 1
+                unavailable_sections.add(section)
                 critical_parse_failure |= route_index == 0
                 continue
 
@@ -256,7 +311,33 @@ class ProfileEnricher:
             )
 
         if succeeded:
-            return details
+            statuses: list[tuple[str, str]] = []
+            sources: list[tuple[str, str]] = []
+
+            for field in ProfileField:
+                section = PROFILE_FIELD_SECTIONS[field]
+
+                if field not in requested_set:
+                    status = FieldStatus.NOT_REQUESTED
+                elif _field_value(details, field):
+                    status = FieldStatus.FOUND
+                    sources.append(
+                        (field.value, f"facebook:{section}")
+                    )
+                elif section in failed_sections:
+                    status = FieldStatus.NAVIGATION_FAILED
+                elif section in unavailable_sections:
+                    status = FieldStatus.SECTION_UNAVAILABLE
+                else:
+                    status = FieldStatus.NOT_VISIBLE
+
+                statuses.append((field.value, status.value))
+
+            return replace(
+                details,
+                field_status=tuple(statuses),
+                field_sources=tuple(sources),
+            )
 
         if parse_failures:
             raise BrowserParseError(

@@ -5,6 +5,7 @@ import pytest
 from fb_crawl.config import (
     load_browser_settings,
     load_settings,
+    validate_checkpoint_path,
     validate_session_path,
 )
 from fb_crawl.core.exceptions import ConfigurationError
@@ -87,3 +88,17 @@ def test_repo_local_session_must_stay_under_runtime(
         )
         == external.resolve()
     )
+
+
+def test_repo_local_checkpoint_must_stay_under_runtime(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="checkpoint path"):
+        validate_checkpoint_path(
+            tmp_path / "checkpoint.json",
+            repository_root=tmp_path,
+        )
+
+    expected = (tmp_path / "runtime/checkpoints/members.json").resolve()
+    assert validate_checkpoint_path(
+        Path("runtime/checkpoints/members.json"),
+        repository_root=tmp_path,
+    ) == expected

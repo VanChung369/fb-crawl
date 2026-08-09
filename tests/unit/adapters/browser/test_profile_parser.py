@@ -60,10 +60,14 @@ def test_work_and_education_years_do_not_become_birth_year() -> None:
     </div>
     """
 
-    assert ProfileParser().parse(
+    details = ProfileParser().parse(
         html,
         source_url="https://www.facebook.com/synthetic.user/about",
-    ) == ProfileDetails()
+    )
+
+    assert details.birth_date is None
+    assert details.birth_year is None
+    assert details.workplace == "January 2, 2022 - Present"
 
 
 def test_valid_empty_about_page_is_successful_empty_details() -> None:
@@ -235,3 +239,35 @@ def test_english_birth_values_are_conservative(
 
     assert details.birth_date == expected_date
     assert details.birth_year == expected_year
+
+
+def test_enrichment_v2_parses_visible_labelled_fields() -> None:
+    html = """
+    <main>
+      <div><span>Builder and photographer</span><span>Bio</span></div>
+      <div><span>Example Company</span><span>Workplace</span></div>
+      <div><span>Example University</span><span>Education</span></div>
+      <div><span>Male</span><span>Gender</span></div>
+      <div><span>Vietnamese, English</span><span>Languages</span></div>
+      <div><span>Single</span><span>Relationship status</span></div>
+    </main>
+    """
+    details = ProfileParser().parse(
+        html,
+        source_url="https://www.facebook.com/synthetic.user/directory_work",
+        requested_fields=(
+            ProfileField.BIO,
+            ProfileField.WORKPLACE,
+            ProfileField.EDUCATION,
+            ProfileField.GENDER,
+            ProfileField.LANGUAGES,
+            ProfileField.RELATIONSHIP_STATUS,
+        ),
+    )
+
+    assert details.bio == "Builder and photographer"
+    assert details.workplace == "Example Company"
+    assert details.education == "Example University"
+    assert details.gender == "Male"
+    assert details.languages == ("Vietnamese", "English")
+    assert details.relationship_status == "Single"
