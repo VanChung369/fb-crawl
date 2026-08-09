@@ -58,6 +58,8 @@ def test_data_plan_cli_writes_batch_compatible_targets_and_report(
             "phone,address",
             "--cooldown-days",
             "30",
+            "--failure-cooldown-days",
+            "2",
             "--limit",
             "10",
             "--output",
@@ -75,6 +77,7 @@ def test_data_plan_cli_writes_batch_compatible_targets_and_report(
     assert payload["selected"] == 1
     assert payload["skipped_complete"] == 1
     assert payload["profile_fields"] == ["phone", "address"]
+    assert payload["failure_cooldown_days"] == 2
     assert "selected=1" in capsys.readouterr().out
 
     batch_args = build_parser().parse_args(

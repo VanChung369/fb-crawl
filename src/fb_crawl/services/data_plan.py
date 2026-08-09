@@ -24,12 +24,23 @@ MISSING_FIELD_COLUMNS = {
     "languages": ("languages",),
     "relationship_status": ("relationship_status",),
 }
+RETRY_FIELD_STATUSES = frozenset(
+    {
+        "navigation_failed",
+        "section_unavailable",
+    }
+)
+TERMINAL_FIELD_STATUSES = frozenset({"found", "not_visible"})
+FIELD_STATUS_ALIASES = {
+    "birth_year": ProfileField.BIRTH_DATE.value,
+}
 
 
 @dataclass(frozen=True, slots=True)
 class PlanCandidate:
     target_url: str
     missing_fields: tuple[str, ...]
+    retry_fields: tuple[str, ...]
     reasons: tuple[str, ...]
     repair_identity: bool
     last_enriched_at: str | None
@@ -41,13 +52,17 @@ class DataPlanReport:
     requested_fields: tuple[str, ...]
     profile_fields: tuple[str, ...]
     cooldown_days: int
+    failure_cooldown_days: int
     force: bool
     eligible: int
     selected: int
     limited: int
     repair_candidates: int
+    retry_candidates: int
+    selected_retry_candidates: int
     skipped_complete: int
     skipped_recent: int
+    skipped_recent_failure: int
     skipped_invalid_profile: int
     duplicates_collapsed: int
     field_counts: Mapping[str, int]
@@ -105,6 +120,55 @@ def _profile_fields(requested_fields: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
+def _field_statuses(row: Mapping[str, str]) -> Mapping[str, tuple[str, ...]]:
+    result: dict[str, list[str]] = {}
+
+    for item in str(row.get("field_status") or "").split(";"):
+        field, separator, status = item.partition("=")
+
+        if not separator:
+            continue
+
+        normalized_field = _clean(field).casefold()
+        normalized_status = _clean(status).casefold()
+
+        if normalized_field and normalized_status:
+            result.setdefault(normalized_field, []).append(normalized_status)
+
+    return {
+        field: tuple(dict.fromkeys(statuses))
+        for field, statuses in result.items()
+    }
+
+
+def _retry_policy(
+    row: Mapping[str, str],
+    missing_fields: Sequence[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    statuses = _field_statuses(row)
+    retry_fields: list[str] = []
+    reasons: list[str] = []
+
+    for field in missing_fields:
+        status_field = FIELD_STATUS_ALIASES.get(field, field)
+        field_statuses = statuses.get(status_field, ())
+
+        if TERMINAL_FIELD_STATUSES.intersection(field_statuses):
+            continue
+
+        for status in field_statuses:
+            if status not in RETRY_FIELD_STATUSES:
+                continue
+
+            retry_fields.append(field)
+            reasons.append(f"retry:{field}={status}")
+
+    return (
+        tuple(dict.fromkeys(retry_fields)),
+        tuple(dict.fromkeys(reasons)),
+    )
+
+
 def _merge_candidates(
     first: PlanCandidate,
     later: PlanCandidate,
@@ -112,18 +176,50 @@ def _merge_candidates(
     first_time = _timestamp(first.last_enriched_at)
     later_time = _timestamp(later.last_enriched_at)
     latest = first
+    merge_retry = False
 
     if later_time is not None and (
         first_time is None or later_time > first_time
     ):
         latest = later
+    elif first_time == later_time:
+        merge_retry = True
+
+    non_retry_reasons = tuple(
+        dict.fromkeys(
+            reason
+            for reason in (*first.reasons, *later.reasons)
+            if not reason.startswith("retry:")
+        )
+    )
+    retry_fields = (
+        tuple(dict.fromkeys((*first.retry_fields, *later.retry_fields)))
+        if merge_retry
+        else latest.retry_fields
+    )
+    retry_reasons = (
+        tuple(
+            dict.fromkeys(
+                reason
+                for reason in (*first.reasons, *later.reasons)
+                if reason.startswith("retry:")
+            )
+        )
+        if merge_retry
+        else tuple(
+            reason
+            for reason in latest.reasons
+            if reason.startswith("retry:")
+        )
+    )
 
     return replace(
         first,
         missing_fields=tuple(
             dict.fromkeys((*first.missing_fields, *later.missing_fields))
         ),
-        reasons=tuple(dict.fromkeys((*first.reasons, *later.reasons))),
+        retry_fields=retry_fields,
+        reasons=(*non_retry_reasons, *retry_reasons),
         repair_identity=first.repair_identity or later.repair_identity,
         last_enriched_at=latest.last_enriched_at,
     )
@@ -137,6 +233,7 @@ class DataPlanService:
         missing_fields: Sequence[str],
         limit: int,
         cooldown_days: int,
+        failure_cooldown_days: int = 1,
         force: bool = False,
         include_repair: bool = True,
         now: datetime | None = None,
@@ -162,10 +259,18 @@ class DataPlanService:
         if cooldown_days < 0:
             raise ValueError("data plan cooldown days must be at least 0")
 
+        if failure_cooldown_days < 0:
+            raise ValueError(
+                "data plan failure cooldown days must be at least 0"
+            )
+
         current_time = (now or datetime.now(timezone.utc)).astimezone(
             timezone.utc
         )
         cutoff = current_time - timedelta(days=cooldown_days)
+        failure_cutoff = current_time - timedelta(
+            days=failure_cooldown_days
+        )
         candidates_by_url: dict[str, PlanCandidate] = {}
         order: dict[str, int] = {}
         skipped_complete = 0
@@ -181,6 +286,7 @@ class DataPlanService:
 
             _, normalized_url = identity
             missing = _missing(row, requested_fields)
+            retry_fields, retry_reasons = _retry_policy(row, missing)
             missing_user_id = not _clean(row.get("user_id")).isdigit()
             suspicious_name = is_suspicious_profile_name(
                 _clean(row.get("name"))
@@ -202,9 +308,11 @@ class DataPlanService:
                 reasons.append("identity:suspicious_name")
 
             reasons.extend(f"missing:{field}" for field in missing)
+            reasons.extend(retry_reasons)
             candidate = PlanCandidate(
                 target_url=normalized_url,
                 missing_fields=missing,
+                retry_fields=retry_fields,
                 reasons=tuple(reasons),
                 repair_identity=repair,
                 last_enriched_at=(
@@ -224,16 +332,24 @@ class DataPlanService:
 
         eligible: list[PlanCandidate] = []
         skipped_recent = 0
+        skipped_recent_failure = 0
 
         for candidate in candidates_by_url.values():
             enriched_at = _timestamp(candidate.last_enriched_at)
+            candidate_cutoff = (
+                failure_cutoff if candidate.retry_fields else cutoff
+            )
 
             if (
                 not force
                 and enriched_at is not None
-                and enriched_at >= cutoff
+                and enriched_at >= candidate_cutoff
             ):
                 skipped_recent += 1
+
+                if candidate.retry_fields:
+                    skipped_recent_failure += 1
+
                 continue
 
             eligible.append(candidate)
@@ -241,6 +357,7 @@ class DataPlanService:
         eligible.sort(
             key=lambda candidate: (
                 not candidate.repair_identity,
+                not bool(candidate.retry_fields),
                 -len(candidate.missing_fields),
                 _timestamp(candidate.last_enriched_at)
                 or datetime.min.replace(tzinfo=timezone.utc),
@@ -260,6 +377,7 @@ class DataPlanService:
             requested_fields=requested_fields,
             profile_fields=_profile_fields(requested_fields),
             cooldown_days=cooldown_days,
+            failure_cooldown_days=failure_cooldown_days,
             force=force,
             eligible=len(eligible),
             selected=len(selected),
@@ -268,8 +386,16 @@ class DataPlanService:
                 candidate.repair_identity
                 for candidate in candidates_by_url.values()
             ),
+            retry_candidates=sum(
+                bool(candidate.retry_fields)
+                for candidate in candidates_by_url.values()
+            ),
+            selected_retry_candidates=sum(
+                bool(candidate.retry_fields) for candidate in selected
+            ),
             skipped_complete=skipped_complete,
             skipped_recent=skipped_recent,
+            skipped_recent_failure=skipped_recent_failure,
             skipped_invalid_profile=skipped_invalid,
             duplicates_collapsed=duplicates,
             field_counts=field_counts,

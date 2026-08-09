@@ -8,6 +8,7 @@ database or external provider.
 fb-crawl data plan runtime/output/users-master.csv `
   --missing phone,address,current_city,birth_year `
   --cooldown-days 30 `
+  --failure-cooldown-days 1 `
   --limit 100 `
   --output runtime/targets/enrichment.txt `
   --report runtime/output/enrichment-plan.json
@@ -43,15 +44,27 @@ missing enrichment fields.
 Priority is deterministic:
 
 1. identity-repair candidates;
-2. records missing more requested fields;
-3. records never enriched or enriched least recently;
-4. original master-file order.
+2. records whose requested field previously had `navigation_failed` or
+   `section_unavailable`;
+3. records missing more requested fields;
+4. records never enriched or enriched least recently;
+5. original master-file order.
 
 `--cooldown-days` defaults to 30. An incomplete record with a recent
 `last_enriched_at` is skipped so a known-not-visible field is not requested on
-every run. `--force` bypasses this cooldown but still excludes complete rows.
+every run. `--failure-cooldown-days` defaults to 1 and applies only when the
+requested missing field has `navigation_failed` or `section_unavailable` in
+`field_status`; these transient failures therefore become eligible sooner.
+`not_visible` and `not_requested` continue to use the normal cooldown.
+When merged history contains both a transient failure and `not_visible` or
+`found` for the same field, the completed status suppresses the stale failure.
+`birth_year` reads the `birth_date` field status because that is the profile
+section used to derive it. `--force` bypasses both cooldowns but still excludes
+complete rows.
 
 The JSON report records selected/eligible/limited counts, skipped reasons,
-duplicate targets, field coverage needed by the selected batch, normalized
-`profile_fields`, and per-target reasons. Target and report files are written
-atomically. Identifiers remain strings throughout CSV processing.
+normal and failure cooldowns, retry-candidate counts, duplicate targets, field
+coverage needed by the selected batch, normalized `profile_fields`, and
+per-target reasons such as `retry:phone=navigation_failed`. Target and report
+files are written atomically. Identifiers remain strings throughout CSV
+processing.

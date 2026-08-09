@@ -150,11 +150,14 @@ Generate a bounded follow-up batch only for incomplete or suspicious profiles:
 ```powershell
 fb-crawl data plan runtime/output/users-master.csv `
   --missing phone,address,current_city,birth_year `
+  --failure-cooldown-days 1 `
   --output runtime/targets/enrichment.txt
 ```
 
 The plan respects `last_enriched_at` with a 30-day default cooldown and writes
-typed targets accepted directly by `authenticated batch`. See
+typed targets accepted directly by `authenticated batch`. Transient
+`navigation_failed` and `section_unavailable` field statuses use a shorter
+one-day retry cooldown, while `not_visible` keeps the normal cooldown. See
 [docs/data-plan.md](docs/data-plan.md) for the complete crawl/merge/plan loop.
 
 Merge the separate phone provenance files into an auditable master without

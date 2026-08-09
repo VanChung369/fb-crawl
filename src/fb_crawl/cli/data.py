@@ -58,9 +58,17 @@ def add_data_parser(mode_subparsers) -> None:
     plan.add_argument("--limit", type=int, default=100)
     plan.add_argument("--cooldown-days", type=int, default=30)
     plan.add_argument(
+        "--failure-cooldown-days",
+        type=int,
+        default=1,
+        help=(
+            "Short cooldown for navigation_failed or section_unavailable"
+        ),
+    )
+    plan.add_argument(
         "--force",
         action="store_true",
-        help="Ignore last_enriched_at cooldown for incomplete records",
+        help="Ignore last_enriched_at cooldowns for incomplete records",
     )
     plan.add_argument(
         "--skip-repair",
@@ -180,6 +188,7 @@ def _execute_plan(args: argparse.Namespace) -> int:
         missing_fields=_missing_fields(args.missing),
         limit=args.limit,
         cooldown_days=args.cooldown_days,
+        failure_cooldown_days=args.failure_cooldown_days,
         force=args.force,
         include_repair=not args.skip_repair,
     )
@@ -194,6 +203,8 @@ def _execute_plan(args: argparse.Namespace) -> int:
         f"rows={report.input_rows} eligible={report.eligible} "
         f"selected={report.selected} limited={report.limited} "
         f"skipped_recent={report.skipped_recent} "
+        f"retry_candidates={report.retry_candidates} "
+        f"selected_retry={report.selected_retry_candidates} "
         f"repair_candidates={report.repair_candidates} "
         f"output={args.output} report={args.report}"
     )
