@@ -30,6 +30,8 @@ from fb_crawl.core.models import (
     ScrapeResult,
     ScrapeStats,
     TargetKind,
+    UidResolution,
+    UidResolutionStats,
     UserRecord,
 )
 
@@ -60,6 +62,8 @@ __all__ = [
     "ScrapeStats",
     "SessionError",
     "TargetKind",
+    "UidResolution",
+    "UidResolutionStats",
     "UidResolutionError",
     "UserRecord",
     "ValidationError",

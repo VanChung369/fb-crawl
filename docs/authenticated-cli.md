@@ -26,7 +26,7 @@ Credentials are not persisted. Validated cookies are stored at `runtime/session.
 ## Reuse the session headlessly
 
 ```powershell
-fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID --headless --steps 5 --delay 3
+fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID --headless --max-duration 120 --delay 3
 fb-crawl authenticated comments https://www.facebook.com/PAGE/posts/POST_ID --headless
 ```
 
@@ -108,10 +108,32 @@ uses `--profile-delay` between profiles. If a UID cannot be verified, `user_id`
 is left empty, `username` is preserved, and an
 `authenticated_uid_resolution_failed` issue is exported.
 
+Each verified `username -> UID` pair is saved immediately and atomically in
+`runtime/cache/profile-uids.json`. A later run reuses the cache without opening
+that profile again. The cache contains identifiers only, never cookies, HTML,
+passwords, or profile enrichment fields.
+
+Use `--force` when mappings must be verified again. It bypasses cache reads for
+vanity usernames, performs fresh UID resolution, and replaces the corresponding
+cache entries. Profiles already represented by numeric `profile.php?id=...`
+links do not need another resolution request.
+
 ```powershell
 fb-crawl authenticated friends https://www.facebook.com/USERNAME --steps 10 --headless
 fb-crawl authenticated followers https://www.facebook.com/profile.php?id=USER_ID --steps 10 --headless
 ```
+
+Relationship traversal uses breadth-first search. The requested profile is
+depth `0`, directly visible users are depth `1`, and their visible relationships
+are depth `2`:
+
+```powershell
+fb-crawl authenticated friends https://www.facebook.com/USERNAME `
+  --depth 2 --max-users 500 --max-duration 120 --headless
+```
+
+`--max-users` is a global output bound across all BFS levels. Only a user with a
+verified numeric UID can be used as the next traversal node.
 
 Use `--enrich-profiles` with either list when the discovered users should also
 receive bounded profile enrichment. `--profile-limit` still controls the number
@@ -122,7 +144,8 @@ produce numeric UIDs for all exported users.
 
 `reactions` accepts the same supported post, video, reel, photo, and permalink
 forms as `comments`. It opens the visible reactions dialog without adding or
-changing a reaction, scrolls it up to `--steps`, and exports the visible users.
+changing a reaction, loads it until exhaustion or a configured limit, and
+exports the visible users.
 
 ```powershell
 fb-crawl authenticated reactions https://www.facebook.com/PAGE/posts/POST_ID `
@@ -243,8 +266,17 @@ parser version. It never writes DOM text, raw HTML, screenshots, or cookies.
 
 ## Options and environment
 
-- `--steps` defaults to `5` and must be greater than zero.
+- `--steps` is an optional positive hard limit on load/scroll attempts.
+- `--max-duration` is an optional positive time limit in seconds per scrollable
+  surface.
+- With neither `--steps` nor `--max-duration`, collection continues until the
+  surface stops growing or no visible load-more action remains. `Ctrl+C` remains
+  an explicit manual stop signal.
 - `--delay` defaults to `3.0` seconds and must be zero or greater.
+- `--depth` defaults to `1` for friends/followers and must be greater than zero.
+- `--max-users` defaults to `1000` and bounds unique BFS user output.
+- `--force` ignores cached username-to-UID mappings, resolves them again, and
+  refreshes the cache.
 - `--headless` and `--no-headless` override `FB_CRAWL_HEADLESS`.
 - `FB_CRAWL_HEADLESS` accepts `1`, `true`, `yes`, `on`, `0`, `false`, `no`, and `off`, case-insensitively.
 - `--proxy` overrides `FB_CRAWL_PROXY`.
@@ -285,7 +317,7 @@ runtime/output/batch.csv
 CSV and XLSX columns are:
 
 ```text
-user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,bio,workplace,education,gender,languages,relationship_status,phone_numbers,phone_sources,field_status,field_sources,first_seen,last_seen,last_enriched_at,commented,reacted,reaction_types,interaction_count,profile_url,source,source_url,error_code,error_message
+user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,bio,workplace,education,gender,languages,relationship_status,phone_numbers,phone_sources,field_status,field_sources,first_seen,last_seen,last_enriched_at,commented,reacted,reaction_types,interaction_count,profile_url,source,source_url,depth,error_code,error_message
 ```
 
 Authenticated profile/member/comment/friend/follower/reaction records populate
@@ -298,7 +330,9 @@ For authenticated users, `user_id` is numeric only. `username` stores the vanity
 handle independently. A failed UID verification never writes the username into
 the UID column.
 
-JSON contains `records`, `issues`, `stats`, and optional `enrichment` coverage.
+JSON contains `records`, `issues`, `stats`, optional `enrichment`, and optional
+`uid_resolution` coverage. CLI summaries distinguish `uid_cached`, newly
+`uid_resolved`, and `uid_failed` counts.
 
 TXT contains user IDs, usernames, non-empty enrichment fields, and target-error
 lines.
@@ -323,10 +357,11 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - Missing XLSX extra: run `python -m pip install -e ".[xlsx]"`; the command will not fall back to another format.
 - Invalid or expired session: rerun visibly with `--no-headless` to create a new validated session.
 - Checkpoint or two-factor prompt: complete it manually in the visible browser; the tool never bypasses it.
-- Empty output: increase `--steps` within a reasonable bound and confirm the account can see the requested list, dialog, or conversation in Firefox.
+- Empty output: confirm the account can see the requested list, dialog, or
+  conversation in Firefox; when using a limit, increase `--steps` or
+  `--max-duration` within a reasonable bound.
 - Slow UID resolution: vanity links require one visible profile navigation each;
-  keep `--profile-delay` nonzero for long lists and use checkpointing for
-  multiple targets.
+  keep `--profile-delay` nonzero for long lists. Later runs reuse the UID cache.
 - Empty enrichment fields: confirm the field is visible on the profile's About
   pages to the same account. Missing/hidden fields are not errors and are never
   guessed.

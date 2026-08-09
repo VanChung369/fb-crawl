@@ -15,7 +15,7 @@ from fb_crawl.core.exceptions import (
     SessionError,
     UidResolutionError,
 )
-from fb_crawl.core.models import UserRecord
+from fb_crawl.core.models import UidResolution, UserRecord
 
 
 NUMERIC_UID = re.compile(r"[1-9]\d{4,19}")
@@ -147,9 +147,15 @@ class ProfileUidResolver:
         self._authenticated = authenticated_func
         self._ready = ready_func
 
-    def resolve(self, browser, record: UserRecord) -> str:
+    def resolve(
+        self,
+        browser,
+        record: UserRecord,
+        *,
+        force: bool = False,
+    ) -> UidResolution:
         if record.user_id.isdigit():
-            return record.user_id
+            return UidResolution(record.user_id)
 
         try:
             browser.get(record.profile_url)
@@ -172,7 +178,7 @@ class ProfileUidResolver:
         redirected_uid = _numeric_profile_url(str(browser.current_url or ""))
 
         if redirected_uid is not None:
-            return redirected_uid
+            return UidResolution(redirected_uid)
 
         resolved = self._parser.parse(
             str(browser.page_source),
@@ -185,4 +191,4 @@ class ProfileUidResolver:
                 target=record.profile_url,
             )
 
-        return resolved
+        return UidResolution(resolved)

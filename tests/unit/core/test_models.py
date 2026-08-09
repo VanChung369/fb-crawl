@@ -96,6 +96,25 @@ def test_request_rejects_non_positive_authenticated_steps() -> None:
         )
 
 
+def test_request_allows_unbounded_steps_and_rejects_invalid_duration() -> None:
+    request = ScrapeRequest(
+        mode=ScrapeMode.AUTHENTICATED,
+        action=AuthenticatedAction.MEMBERS,
+        targets=("https://www.facebook.com/groups/example/members",),
+        steps=None,
+    )
+
+    assert request.steps is None
+
+    with pytest.raises(ValueError, match="max_duration_seconds"):
+        ScrapeRequest(
+            mode=ScrapeMode.AUTHENTICATED,
+            action=AuthenticatedAction.MEMBERS,
+            targets=("https://www.facebook.com/groups/example/members",),
+            max_duration_seconds=0,
+        )
+
+
 def test_profile_enrichment_contracts_are_typed_and_immutable() -> None:
     request = ScrapeRequest(
         mode=ScrapeMode.AUTHENTICATED,

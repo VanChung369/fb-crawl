@@ -97,6 +97,7 @@ def _write_txt(
             file.write(f"User ID: {row['user_id']}\n")
             if row["username"]:
                 file.write(f"Username: {row['username']}\n")
+            file.write(f"Depth: {record.depth}\n")
             if record.name:
                 file.write(f"Name: {record.name}\n")
             if record.phone_numbers:

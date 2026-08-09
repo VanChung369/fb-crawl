@@ -17,6 +17,7 @@ from fb_crawl.core.models import (
     ScrapeRequest,
     ScrapeResult,
     ScrapeStats,
+    UidResolutionStats,
     UserRecord,
 )
 from fb_crawl.exporters.atomic import atomic_text_writer
@@ -97,15 +98,22 @@ def _parts(result, action: AuthenticatedAction):
             result.message_result,
             result.inspect_result,
             result.enrichment,
+            result.uid_resolution,
         )
 
     if action is AuthenticatedAction.MESSAGES:
-        return _empty_result(), result, _empty_result(), None
+        return _empty_result(), result, _empty_result(), None, None
 
     if action is AuthenticatedAction.INSPECT:
-        return _empty_result(), _empty_result(), result, None
+        return _empty_result(), _empty_result(), result, None, None
 
-    return result, _empty_result(), _empty_result(), result.enrichment
+    return (
+        result,
+        _empty_result(),
+        _empty_result(),
+        result.enrichment,
+        result.uid_resolution,
+    )
 
 
 def _target_keys(request: ScrapeRequest) -> tuple[str, ...]:
@@ -126,6 +134,21 @@ def _target_keys(request: ScrapeRequest) -> tuple[str, ...]:
 
 def _single_target_key(request: ScrapeRequest) -> str:
     return _target_keys(request)[0]
+
+
+def _request_options(request: ScrapeRequest) -> dict:
+    return {
+        "steps": request.steps,
+        "max_duration_seconds": request.max_duration_seconds,
+        "depth": request.depth,
+        "max_nodes": request.max_nodes,
+        "delay_seconds": request.delay_seconds,
+        "enrich_profiles": request.enrich_profiles,
+        "profile_fields": [field.value for field in request.profile_fields],
+        "profile_limit": request.profile_limit,
+        "profile_delay_seconds": request.profile_delay_seconds,
+        "force_uid_refresh": request.force_uid_refresh,
+    }
 
 
 class JsonCheckpointStore:
@@ -176,6 +199,9 @@ class CheckpointingService:
         if tuple(payload.get("target_keys") or ()) != _target_keys(request):
             raise ValidationError("Checkpoint targets do not match this run.")
 
+        if payload.get("request_options") != _request_options(request):
+            raise ValidationError("Checkpoint options do not match this run.")
+
         return payload
 
     def validate(self, request: ScrapeRequest) -> None:
@@ -211,6 +237,7 @@ class CheckpointingService:
         output_inspect = dict(known_inspect) if request.resume else {}
         output_issues = list(stored_issues) if request.resume else []
         enrichment_values: list[EnrichmentStats] = []
+        uid_values: list[UidResolutionStats] = []
 
         for raw_target in request.targets:
             single = replace(
@@ -233,7 +260,13 @@ class CheckpointingService:
             ]
             result = self._service.run(single, browser)
             action = AuthenticatedAction(single.action)
-            users, messages, inspections, enrichment = _parts(result, action)
+            (
+                users,
+                messages,
+                inspections,
+                enrichment,
+                uid_resolution,
+            ) = _parts(result, action)
 
             for record in users.records:
                 was_known = record.user_id in known_users
@@ -273,12 +306,15 @@ class CheckpointingService:
 
             if enrichment is not None:
                 enrichment_values.append(enrichment)
+            if uid_resolution is not None:
+                uid_values.append(uid_resolution)
 
             store.save(
                 {
                     "schema_version": CHECKPOINT_SCHEMA_VERSION,
                     "action": str(request.action),
                     "target_keys": list(_target_keys(request)),
+                    "request_options": _request_options(request),
                     "completed_targets": sorted(completed),
                     "users": [asdict(item) for item in known_users.values()],
                     "messages": [
@@ -312,6 +348,16 @@ class CheckpointingService:
             if enrichment_values
             else None
         )
+        uid_resolution = (
+            UidResolutionStats(
+                selected=sum(item.selected for item in uid_values),
+                cached=sum(item.cached for item in uid_values),
+                resolved=sum(item.resolved for item in uid_values),
+                failed=sum(item.failed for item in uid_values),
+            )
+            if uid_values
+            else None
+        )
         user_result = ScrapeResult(
             records=tuple(output_users.values()),
             issues=tuple(
@@ -324,6 +370,7 @@ class CheckpointingService:
                 failed=len(output_issues),
             ),
             enrichment=enrichment,
+            uid_resolution=uid_resolution,
         )
         message_result = ScrapeResult(
             records=tuple(output_messages.values()),
@@ -376,4 +423,5 @@ class CheckpointingService:
             ),
             issues=tuple(output_issues),
             enrichment=enrichment,
+            uid_resolution=uid_resolution,
         )

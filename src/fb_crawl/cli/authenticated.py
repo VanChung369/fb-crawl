@@ -45,7 +45,15 @@ def _common(
     parser.add_argument(
         "--steps",
         type=int,
-        default=5,
+        help=(
+            "Maximum load/scroll attempts; omitted means continue until "
+            "the visible surface is exhausted"
+        ),
+    )
+    parser.add_argument(
+        "--max-duration",
+        type=float,
+        help="Maximum scrolling/loading time in seconds per surface",
     )
     parser.add_argument(
         "--delay",
@@ -97,6 +105,11 @@ def _common(
     )
     if profile_options:
         parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Ignore cached username-to-UID mappings and refresh them",
+        )
+        parser.add_argument(
             "--enrich-profiles",
             action="store_true",
         )
@@ -124,6 +137,7 @@ def _common(
             profile_fields=None,
             profile_limit=20,
             profile_delay=3.0,
+            force=False,
         )
 
 
@@ -172,6 +186,8 @@ def add_authenticated_parser(
         help="Collect a profile's visible friends",
     )
     friends.add_argument("urls", nargs="+")
+    friends.add_argument("--depth", type=int, default=1)
+    friends.add_argument("--max-users", type=int, default=1000)
     _common(friends)
 
     followers = actions.add_parser(
@@ -179,6 +195,8 @@ def add_authenticated_parser(
         help="Collect a profile's visible followers",
     )
     followers.add_argument("urls", nargs="+")
+    followers.add_argument("--depth", type=int, default=1)
+    followers.add_argument("--max-users", type=int, default=1000)
     _common(followers)
 
     reactions = actions.add_parser(
@@ -218,6 +236,8 @@ def add_authenticated_parser(
         type=Path,
         required=True,
     )
+    batch.add_argument("--depth", type=int, default=1)
+    batch.add_argument("--max-users", type=int, default=1000)
     _common(batch)
 
 
@@ -290,6 +310,15 @@ def request_from_authenticated_args(
     if profile_fields and not enrich_profiles:
         raise ValidationError("Profile fields require --enrich-profiles.")
 
+    depth = getattr(args, "depth", 0)
+    max_users = getattr(args, "max_users", 20)
+
+    if action in {
+        AuthenticatedAction.FRIENDS,
+        AuthenticatedAction.FOLLOWERS,
+    } and depth < 1:
+        raise ValidationError("Relationship depth must be greater than 0.")
+
     if args.checkpoint is not None and not (args.resume or args.incremental):
         raise ValidationError(
             "--checkpoint requires --resume or --incremental."
@@ -307,6 +336,9 @@ def request_from_authenticated_args(
         action=action,
         targets=targets,
         steps=args.steps,
+        max_duration_seconds=args.max_duration,
+        depth=depth,
+        max_nodes=max_users,
         delay_seconds=args.delay,
         enrich_profiles=enrich_profiles,
         profile_fields=profile_fields,
@@ -315,6 +347,7 @@ def request_from_authenticated_args(
         resume=args.resume,
         incremental=args.incremental,
         checkpoint_path=str(checkpoint) if checkpoint is not None else None,
+        force_uid_refresh=args.force,
     )
 
 
@@ -408,6 +441,10 @@ def _load_runtime() -> AuthenticatedRuntime:
         from fb_crawl.services.checkpoint import (
             CheckpointingService,
         )
+        from fb_crawl.services.uid_cache import (
+            CachedProfileUidResolver,
+            JsonProfileUidCache,
+        )
 
     except ModuleNotFoundError as error:
         dependency = str(error.name)
@@ -442,7 +479,12 @@ def _load_runtime() -> AuthenticatedRuntime:
             reactions=ReactionsCollector(settings),
             relationship_parser=UserParser(allow_plain_profile_links=True),
             reaction_parser=ReactionParser(),
-            uid_resolver=ProfileUidResolver(settings),
+            uid_resolver=CachedProfileUidResolver(
+                ProfileUidResolver(settings),
+                JsonProfileUidCache(
+                    Path("runtime/cache/profile-uids.json")
+                ),
+            ),
             messages=MessagesCollector(settings),
             message_parser=MessageParser(),
             inspector=BrowserInspector(settings),
@@ -536,12 +578,19 @@ def execute_authenticated(
             user_records = result.records
 
         if user_records:
-            uid_resolved = sum(
+            uid_numeric = sum(
                 record.user_id.isdigit() for record in user_records
             )
             summary += (
-                f" uid_resolved={uid_resolved}"
-                f" uid_unresolved={len(user_records) - uid_resolved}"
+                f" uid_numeric={uid_numeric}"
+                f" uid_unresolved={len(user_records) - uid_numeric}"
+            )
+
+        if result.uid_resolution is not None:
+            summary += (
+                f" uid_cached={result.uid_resolution.cached}"
+                f" uid_resolved={result.uid_resolution.resolved}"
+                f" uid_failed={result.uid_resolution.failed}"
             )
 
         if result.enrichment is not None:

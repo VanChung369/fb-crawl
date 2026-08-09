@@ -58,6 +58,19 @@ UID paired with that username in the same profile-route object, so it does not
 mistake the logged-in account's UID for the target. `user_id` contains only a
 numeric UID in output; `username` remains a separate field.
 
+By default, scrollable authenticated surfaces continue until Facebook stops
+loading new visible content. Use `--max-duration` for a time budget or `--steps`
+for a hard attempt limit. Friends and followers also support bounded BFS:
+
+```powershell
+fb-crawl authenticated friends https://www.facebook.com/USERNAME `
+  --depth 2 --max-users 500 --max-duration 120 --headless
+```
+
+Resolved username-to-UID pairs are written atomically after each profile to
+`runtime/cache/profile-uids.json` and reused by later runs. Add `--force` to
+ignore cached mappings, resolve them again, and refresh the cache.
+
 Optionally enrich a bounded number of unique profiles with fields visible to
 the authenticated account:
 

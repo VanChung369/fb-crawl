@@ -99,6 +99,27 @@ def test_members_collector_never_exceeds_steps() -> None:
     assert browser.scrolls == 3
 
 
+def test_members_collector_without_limits_stops_at_exhaustion_signal() -> None:
+    browser = FakeBrowser([100, 200, 200])
+    collector = MembersCollector(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda low, high: 0.0,
+    )
+
+    _, attempts = collector.collect(
+        browser,
+        "https://www.facebook.com/groups/1/members",
+        steps=None,
+        delay_seconds=0,
+        max_duration_seconds=None,
+    )
+
+    assert attempts == 2
+
+
 def test_members_collector_propagates_session_loss() -> None:
     collector = MembersCollector(
         BrowserSettings(),

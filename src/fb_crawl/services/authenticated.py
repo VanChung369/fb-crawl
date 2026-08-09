@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Protocol
 
 from urllib.parse import (
+    parse_qs,
     urlsplit,
     urlunsplit,
 )
@@ -15,6 +17,7 @@ from fb_crawl.core.exceptions import (
     BrowserNavigationError,
     BrowserParseError,
     SessionError,
+    UidResolutionError,
     ValidationError,
 )
 from fb_crawl.core.models import (
@@ -31,6 +34,8 @@ from fb_crawl.core.models import (
     ScrapeRequest,
     ScrapeResult,
     ScrapeStats,
+    UidResolution,
+    UidResolutionStats,
     UserRecord,
 )
 from fb_crawl.core.urls import (
@@ -63,8 +68,9 @@ class CollectionPort(Protocol):
         browser,
         url: str,
         *,
-        steps: int,
+        steps: int | None,
         delay_seconds: float,
+        max_duration_seconds: float | None = None,
     ) -> tuple[str, int]: ...
 
 
@@ -88,7 +94,13 @@ class ProfileEnricherPort(Protocol):
 
 
 class ProfileUidResolverPort(Protocol):
-    def resolve(self, browser, record: UserRecord) -> str: ...
+    def resolve(
+        self,
+        browser,
+        record: UserRecord,
+        *,
+        force: bool = False,
+    ) -> UidResolution | str: ...
 
 
 class MessageParserPort(Protocol):
@@ -301,6 +313,7 @@ def _merge_record(
             dict.fromkeys((*first.reaction_types, *later.reaction_types))
         ),
         interaction_count=first.interaction_count + later.interaction_count,
+        depth=min(first.depth, later.depth),
     )
 
 
@@ -451,6 +464,16 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _relationship_owner(url: str) -> str:
+    parsed = urlsplit(url)
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if len(parts) == 1 and parts[0].casefold() == "profile.php":
+        return parse_qs(parsed.query).get("id", [""])[0]
+
+    return parts[0] if parts else ""
+
+
 class AuthenticatedService:
     def __init__(
         self,
@@ -484,6 +507,204 @@ class AuthenticatedService:
         self._message_parser = message_parser
         self._inspector = inspector
         self._sleep = sleep_func
+
+    def _resolve_uid_record(
+        self,
+        browser,
+        record: UserRecord,
+        *,
+        force: bool = False,
+    ) -> tuple[UserRecord, bool]:
+        if self._uid_resolver is None or record.user_id.isdigit():
+            return record, True
+
+        outcome = self._uid_resolver.resolve(
+            browser,
+            record,
+            force=force,
+        )
+        resolution = (
+            outcome
+            if isinstance(outcome, UidResolution)
+            else UidResolution(str(outcome))
+        )
+
+        if not resolution.user_id.isdigit():
+            raise UidResolutionError(
+                "Authenticated UID resolution failed.",
+                target=record.profile_url,
+            )
+
+        return (
+            replace(
+                record,
+                user_id=resolution.user_id,
+                username=(record.username or record.user_id),
+                profile_url=(
+                    "https://www.facebook.com/"
+                    f"profile.php?id={resolution.user_id}"
+                ),
+            ),
+            resolution.cached,
+        )
+
+    def _collect_relationship_graph(
+        self,
+        request: ScrapeRequest,
+        browser,
+        prepared: list[PreparedTarget],
+        issues: list[ScrapeIssue],
+    ) -> tuple[
+        dict[str, UserRecord],
+        int,
+        UidResolutionStats | None,
+    ]:
+        if self._relationships is None or self._relationship_parser is None:
+            raise ValidationError("Relationship collection runtime is unavailable.")
+
+        queue = deque(
+            (action, url, 0)
+            for action, url in prepared
+            if action in {
+                AuthenticatedAction.FRIENDS,
+                AuthenticatedAction.FOLLOWERS,
+            }
+        )
+        visited: set[str] = set()
+        seed_owners = {
+            owner.casefold()
+            for _, url in prepared
+            if (owner := _relationship_owner(url))
+        }
+        records: dict[str, UserRecord] = {}
+        discovered = 0
+        uid_selected = 0
+        uid_cached = 0
+        uid_resolved = 0
+        uid_failed = 0
+        max_depth = max(1, request.depth)
+
+        while queue and len(records) < request.max_nodes:
+            action, url, parent_depth = queue.popleft()
+
+            if url in visited or parent_depth >= max_depth:
+                continue
+
+            visited.add(url)
+            self._session.assert_authenticated(browser)
+
+            try:
+                html, _ = self._relationships.collect(
+                    browser,
+                    url,
+                    steps=request.steps,
+                    delay_seconds=request.delay_seconds,
+                    max_duration_seconds=request.max_duration_seconds,
+                )
+
+                try:
+                    parsed = self._relationship_parser.parse(
+                        html,
+                        source=action.value,
+                        source_url=url,
+                    )
+                except BrowserParseError:
+                    raise
+                except Exception as error:
+                    raise BrowserParseError(
+                        "Authenticated user parsing failed.",
+                        target=url,
+                    ) from error
+
+            except SessionError:
+                raise
+            except (BrowserNavigationError, BrowserParseError) as error:
+                issues.append(
+                    ScrapeIssue(
+                        code=error.code,
+                        message=error.safe_message,
+                        target=(error.target or url),
+                        mode=ScrapeMode.AUTHENTICATED,
+                        action=action.value,
+                    )
+                )
+                continue
+
+            discovered += len(parsed)
+            child_depth = parent_depth + 1
+            captured_at = _utc_now()
+
+            for parsed_record in parsed:
+                if len(records) >= request.max_nodes:
+                    break
+
+                record = _seen_record(
+                    replace(parsed_record, depth=child_depth),
+                    captured_at,
+                )
+
+                if record.user_id.casefold() in seed_owners:
+                    continue
+
+                if self._uid_resolver is not None and not record.user_id.isdigit():
+                    uid_selected += 1
+
+                    try:
+                        record, cached = self._resolve_uid_record(
+                            browser,
+                            record,
+                            force=request.force_uid_refresh,
+                        )
+                    except SessionError:
+                        raise
+                    except (BrowserNavigationError, BrowserParseError) as error:
+                        uid_failed += 1
+                        issues.append(
+                            ScrapeIssue(
+                                code=error.code,
+                                message=error.safe_message,
+                                target=(error.target or record.profile_url),
+                                mode=ScrapeMode.AUTHENTICATED,
+                                action="uid_resolution",
+                            )
+                        )
+                    else:
+                        if cached:
+                            uid_cached += 1
+                        else:
+                            uid_resolved += 1
+                            if request.profile_delay_seconds:
+                                self._sleep(request.profile_delay_seconds)
+
+                existing = records.get(record.user_id)
+                records[record.user_id] = (
+                    record
+                    if existing is None
+                    else _merge_record(existing, record)
+                )
+
+                if child_depth >= max_depth or not record.user_id.isdigit():
+                    continue
+
+                next_url = normalize_profile_collection_url(
+                    record.profile_url,
+                    action.value,
+                )
+
+                if next_url is not None and next_url not in visited:
+                    queue.append((action, next_url, child_depth))
+
+        stats = (
+            UidResolutionStats(
+                selected=uid_selected,
+                cached=uid_cached,
+                resolved=uid_resolved,
+                failed=uid_failed,
+            )
+            if uid_selected
+            else None
+        )
+        return records, discovered, stats
 
     def validate(
         self,
@@ -563,8 +784,25 @@ class AuthenticatedService:
             UserRecord,
         ] = {}
         discovered = 0
+        uid_resolution: UidResolutionStats | None = None
+        relationship_graph = action_requested in {
+            AuthenticatedAction.FRIENDS,
+            AuthenticatedAction.FOLLOWERS,
+        }
 
-        for action, url in prepared:
+        if relationship_graph:
+            (
+                records_by_id,
+                discovered,
+                uid_resolution,
+            ) = self._collect_relationship_graph(
+                request,
+                browser,
+                prepared,
+                issues,
+            )
+
+        for action, url in (() if relationship_graph else prepared):
             self._session.assert_authenticated(browser)
 
             if action is AuthenticatedAction.PROFILE:
@@ -624,6 +862,7 @@ class AuthenticatedService:
                         url,
                         steps=request.steps,
                         delay_seconds=(request.delay_seconds),
+                        max_duration_seconds=request.max_duration_seconds,
                     )
 
                     try:
@@ -703,7 +942,7 @@ class AuthenticatedService:
                         )
                     )
 
-        if self._uid_resolver is not None:
+        if self._uid_resolver is not None and not relationship_graph:
             unresolved = tuple(
                 record
                 for record in records_by_id.values()
@@ -714,18 +953,20 @@ class AuthenticatedService:
                 for record in records_by_id.values()
                 if record.user_id.isdigit()
             }
+            uid_cached = 0
+            uid_resolved = 0
+            uid_failed = 0
 
             for index, record in enumerate(unresolved):
                 self._session.assert_authenticated(browser)
+                cached = False
 
                 try:
-                    resolved_uid = self._uid_resolver.resolve(browser, record)
-
-                    if not resolved_uid.isdigit():
-                        raise BrowserParseError(
-                            "Authenticated UID resolution failed.",
-                            target=record.profile_url,
-                        )
+                    resolved, cached = self._resolve_uid_record(
+                        browser,
+                        record,
+                        force=request.force_uid_refresh,
+                    )
 
                 except SessionError:
                     raise
@@ -734,6 +975,7 @@ class AuthenticatedService:
                     BrowserNavigationError,
                     BrowserParseError,
                 ) as error:
+                    uid_failed += 1
                     issues.append(
                         ScrapeIssue(
                             code=error.code,
@@ -746,15 +988,10 @@ class AuthenticatedService:
                     resolved = record
 
                 else:
-                    resolved = replace(
-                        record,
-                        user_id=resolved_uid,
-                        username=(record.username or record.user_id),
-                        profile_url=(
-                            "https://www.facebook.com/"
-                            f"profile.php?id={resolved_uid}"
-                        ),
-                    )
+                    if cached:
+                        uid_cached += 1
+                    else:
+                        uid_resolved += 1
 
                 existing = resolved_records.get(resolved.user_id)
                 resolved_records[resolved.user_id] = (
@@ -766,10 +1003,17 @@ class AuthenticatedService:
                 if (
                     index + 1 < len(unresolved)
                     and request.profile_delay_seconds
+                    and not cached
                 ):
                     self._sleep(request.profile_delay_seconds)
 
             records_by_id = resolved_records
+            uid_resolution = UidResolutionStats(
+                selected=len(unresolved),
+                cached=uid_cached,
+                resolved=uid_resolved,
+                failed=uid_failed,
+            )
 
         enrichment: EnrichmentStats | None = None
 
@@ -888,6 +1132,7 @@ class AuthenticatedService:
                 failed=len(issues),
             ),
             enrichment=enrichment,
+            uid_resolution=uid_resolution,
         )
 
     def _run_batch(
@@ -909,6 +1154,7 @@ class AuthenticatedService:
         inspect_issues: list[ScrapeIssue] = []
         discovered = 0
         enrichment_values: list[EnrichmentStats] = []
+        uid_values: list[UidResolutionStats] = []
 
         for action, targets in grouped.items():
             message_action = action is AuthenticatedAction.MESSAGES
@@ -971,6 +1217,8 @@ class AuthenticatedService:
                 user_issues.extend(result.issues)
                 if result.enrichment is not None:
                     enrichment_values.append(result.enrichment)
+                if result.uid_resolution is not None:
+                    uid_values.append(result.uid_resolution)
 
         enrichment = (
             EnrichmentStats(
@@ -995,6 +1243,16 @@ class AuthenticatedService:
             if enrichment_values
             else None
         )
+        uid_resolution = (
+            UidResolutionStats(
+                selected=sum(item.selected for item in uid_values),
+                cached=sum(item.cached for item in uid_values),
+                resolved=sum(item.resolved for item in uid_values),
+                failed=sum(item.failed for item in uid_values),
+            )
+            if uid_values
+            else None
+        )
         all_issues = (*user_issues, *message_issues, *inspect_issues)
         user_result = ScrapeResult(
             records=tuple(user_records.values()),
@@ -1011,6 +1269,7 @@ class AuthenticatedService:
                 failed=len(user_issues),
             ),
             enrichment=enrichment,
+            uid_resolution=uid_resolution,
         )
         message_result = ScrapeResult(
             records=tuple(message_records.values()),
@@ -1048,6 +1307,7 @@ class AuthenticatedService:
             ),
             issues=tuple(all_issues),
             enrichment=enrichment,
+            uid_resolution=uid_resolution,
         )
 
     def _run_inspect(
@@ -1113,6 +1373,7 @@ class AuthenticatedService:
                     url,
                     steps=request.steps,
                     delay_seconds=request.delay_seconds,
+                    max_duration_seconds=request.max_duration_seconds,
                 )
 
                 try:

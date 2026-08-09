@@ -11,7 +11,7 @@ from fb_crawl.core.exceptions import (
     SessionError,
     UidResolutionError,
 )
-from fb_crawl.core.models import UserRecord
+from fb_crawl.core.models import UidResolution, UserRecord
 
 
 def _html(payload: object) -> str:
@@ -116,7 +116,9 @@ def test_resolver_navigates_and_returns_the_matched_uid() -> None:
         ready_func=lambda browser, timeout: None,
     )
 
-    assert resolver.resolve(browser, _record()) == "100015374200952"
+    assert resolver.resolve(browser, _record()) == UidResolution(
+        "100015374200952"
+    )
     assert browser.visited == ["https://www.facebook.com/synthetic.user"]
 
 

@@ -79,7 +79,8 @@ class ScrapeRequest:
     depth: int = 0
     max_nodes: int = 20
     delay_seconds: float = 0.0
-    steps: int = 5
+    steps: int | None = None
+    max_duration_seconds: float | None = None
     enrich_profiles: bool = False
     profile_fields: tuple[ProfileField, ...] = ()
     profile_limit: int = 20
@@ -87,13 +88,20 @@ class ScrapeRequest:
     resume: bool = False
     incremental: bool = False
     checkpoint_path: str | None = None
+    force_uid_refresh: bool = False
 
     def __post_init__(self) -> None:
         if self.limit <= 0:
             raise ValueError("limit must be greater than 0")
 
-        if self.steps <= 0:
+        if self.steps is not None and self.steps <= 0:
             raise ValueError("steps must be greater than 0")
+
+        if (
+            self.max_duration_seconds is not None
+            and self.max_duration_seconds <= 0
+        ):
+            raise ValueError("max_duration_seconds must be greater than 0")
 
         if self.depth < 0:
             raise ValueError("depth must be greater than or equal to 0")
@@ -199,6 +207,7 @@ class UserRecord:
     reacted: bool = False
     reaction_types: tuple[str, ...] = ()
     interaction_count: int = 0
+    depth: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,11 +269,26 @@ class EnrichmentStats:
 
 
 @dataclass(frozen=True, slots=True)
+class UidResolution:
+    user_id: str
+    cached: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class UidResolutionStats:
+    selected: int
+    cached: int
+    resolved: int
+    failed: int
+
+
+@dataclass(frozen=True, slots=True)
 class ScrapeResult(Generic[RecordT]):
     records: tuple[RecordT, ...]
     issues: tuple[ScrapeIssue, ...]
     stats: ScrapeStats
     enrichment: EnrichmentStats | None = None
+    uid_resolution: UidResolutionStats | None = None
 
     @property
     def has_failures(self) -> bool:
@@ -279,6 +303,7 @@ class AuthenticatedBatchResult:
     stats: ScrapeStats
     issues: tuple[ScrapeIssue, ...]
     enrichment: EnrichmentStats | None = None
+    uid_resolution: UidResolutionStats | None = None
 
     @property
     def records(self) -> tuple[UserRecord | MessageRecord | InspectRecord, ...]:

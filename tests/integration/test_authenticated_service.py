@@ -57,8 +57,9 @@ class Collector:
         browser,
         url: str,
         *,
-        steps: int,
+        steps: int | None,
         delay_seconds: float,
+        max_duration_seconds: float | None = None,
     ):
         self.calls.append(url)
         value = self.pages[url]
@@ -361,9 +362,17 @@ class UidResolver:
     def __init__(self, outcomes: dict[str, str | Exception]) -> None:
         self.outcomes = outcomes
         self.calls: list[str] = []
+        self.force_calls: list[bool] = []
 
-    def resolve(self, browser, record: UserRecord) -> str:
+    def resolve(
+        self,
+        browser,
+        record: UserRecord,
+        *,
+        force: bool = False,
+    ) -> str:
         self.calls.append(record.user_id)
+        self.force_calls.append(force)
         outcome = self.outcomes[record.user_id]
 
         if isinstance(outcome, Exception):
@@ -406,12 +415,14 @@ def test_service_resolves_handle_to_numeric_uid_before_enrichment() -> None:
             AuthenticatedAction.MEMBERS,
             target,
             enrich_profiles=True,
+            force_uid_refresh=True,
             profile_delay_seconds=0,
         ),
         object(),
     )
 
     assert uids.calls == ["synthetic.user"]
+    assert uids.force_calls == [True]
     assert profiles.calls[0][0] == "100015374200952"
     assert result.records[0].user_id == "100015374200952"
     assert result.records[0].username == "synthetic.user"
@@ -460,6 +471,116 @@ def test_uid_resolution_failure_keeps_profile_and_adds_safe_issue() -> None:
     assert result.records[0].user_id == "synthetic.user"
     assert result.issues[0].action == "uid_resolution"
     assert result.issues[0].code == "authenticated_navigation_failed"
+
+
+def test_relationship_depth_uses_breadth_first_numeric_profile_traversal() -> None:
+    seed = "https://www.facebook.com/root.user/friends"
+    second = (
+        "https://www.facebook.com/profile.php?"
+        "id=100000000000001&sk=friends"
+    )
+
+    class HandleParser:
+        def parse(self, html, *, source, source_url):
+            handle, name = html.split(":", 1)
+            return (
+                UserRecord(
+                    user_id=handle,
+                    username=handle,
+                    name=name,
+                    profile_url=f"https://www.facebook.com/{handle}",
+                    source=source,
+                    source_url=source_url,
+                ),
+            )
+
+    uids = UidResolver(
+        {
+            "friend.one": "100000000000001",
+            "friend.two": "100000000000002",
+        }
+    )
+    relationships = Collector(
+        {
+            seed: "friend.one:Friend One",
+            second: "friend.two:Friend Two",
+        }
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        relationships=relationships,
+        relationship_parser=HandleParser(),
+        uid_resolver=uids,
+        sleep_func=lambda seconds: None,
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.FRIENDS,
+            "https://www.facebook.com/root.user",
+            depth=2,
+            max_nodes=10,
+            profile_delay_seconds=0,
+        ),
+        object(),
+    )
+
+    assert relationships.calls == [seed, second]
+    assert [(item.user_id, item.depth) for item in result.records] == [
+        ("100000000000001", 1),
+        ("100000000000002", 2),
+    ]
+    assert result.uid_resolution is not None
+    assert result.uid_resolution.resolved == 2
+
+
+def test_relationship_depth_respects_global_max_users() -> None:
+    seed = "https://www.facebook.com/root.user/followers"
+
+    class ManyParser:
+        def parse(self, html, *, source, source_url):
+            return tuple(
+                UserRecord(
+                    user_id=user_id,
+                    name=None,
+                    profile_url=(
+                        "https://www.facebook.com/"
+                        f"profile.php?id={user_id}"
+                    ),
+                    source=source,
+                    source_url=source_url,
+                )
+                for user_id in (
+                    "100000000000001",
+                    "100000000000002",
+                    "100000000000003",
+                )
+            )
+
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        relationships=Collector({seed: "ignored"}),
+        relationship_parser=ManyParser(),
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.FOLLOWERS,
+            "https://www.facebook.com/root.user",
+            depth=3,
+            max_nodes=2,
+        ),
+        object(),
+    )
+
+    assert len(result.records) == 2
+    assert [item.depth for item in result.records] == [1, 1]
 
 
 def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:

@@ -96,6 +96,7 @@ def test_user_csv_deduplicates_and_appends_issue_rows(
     assert rows[0]["hometown"] == "Synthetic Province"
     assert rows[0]["birth_date"] == "1990-01-02"
     assert rows[0]["birth_year"] == "1990"
+    assert rows[0]["depth"] == "0"
     assert rows[0]["phone_numbers"] == "+84 123 456 789"
     assert rows[1]["error_code"] == "authenticated_navigation_failed"
 
@@ -138,6 +139,7 @@ def test_user_txt_writes_records_and_target_issues(
 
     assert "User ID: \n" in content
     assert "Username: synthetic.user" in content
+    assert "Depth: 0" in content
     assert "Phone Numbers: +84 123 456 789" in content
     assert "Address: 123 Synthetic Street" in content
     assert "Current City: Synthetic City" in content

@@ -310,7 +310,7 @@ def test_enrichment_summary_is_printed_and_browser_quits(
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "uid_resolved=1" in output
+    assert "uid_numeric=1" in output
     assert "uid_unresolved=0" in output
     assert "enrichment_selected=1" in output
     assert "phone_found=1" in output

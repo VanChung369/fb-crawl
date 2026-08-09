@@ -11,6 +11,7 @@ from selenium.webdriver.support.ui import (
     WebDriverWait,
 )
 
+from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
 from fb_crawl.adapters.browser.driver import (
     wait_for_document_ready,
 )
@@ -74,20 +75,23 @@ class CommentsCollector:
             [float],
             None,
         ] = time.sleep,
+        monotonic_func: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._authenticated = authenticated_func
         self._ready = ready_func
         self._wait_factory = wait_factory
         self._sleep = sleep_func
+        self._monotonic = monotonic_func
 
     def collect(
         self,
         browser,
         url: str,
         *,
-        steps: int,
+        steps: int | None,
         delay_seconds: float,
+        max_duration_seconds: float | None = None,
     ) -> tuple[str, int]:
         try:
             browser.get(url)
@@ -103,8 +107,13 @@ class CommentsCollector:
                 )
 
             attempts = 0
+            budget = CrawlBudget(
+                steps=steps,
+                max_duration_seconds=max_duration_seconds,
+                monotonic_func=self._monotonic,
+            )
 
-            for _ in range(steps):
+            while budget.allows(attempts):
                 browser.execute_script(
                     "window.scrollTo(" "0, document.body.scrollHeight" ")"
                 )
@@ -114,7 +123,9 @@ class CommentsCollector:
                 try:
                     candidate = self._wait_factory(
                         browser,
-                        self._settings.browser_timeout_seconds,
+                        budget.wait_timeout(
+                            self._settings.browser_timeout_seconds
+                        ),
                     ).until(_first_clickable)
 
                 except TimeoutException:

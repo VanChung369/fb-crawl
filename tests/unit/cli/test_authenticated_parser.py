@@ -38,6 +38,56 @@ def test_members_parser_builds_explicit_authenticated_request() -> None:
     assert args.headless is True
 
 
+def test_authenticated_defaults_to_exhaustion_without_time_or_steps() -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+        ]
+    )
+
+    request = request_from_authenticated_args(args)
+
+    assert request.steps is None
+    assert request.max_duration_seconds is None
+
+
+def test_relationship_limits_build_depth_time_and_user_bounds() -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "friends",
+            "https://www.facebook.com/synthetic.user",
+            "--depth",
+            "3",
+            "--max-users",
+            "250",
+            "--max-duration",
+            "90",
+        ]
+    )
+
+    request = request_from_authenticated_args(args)
+
+    assert request.depth == 3
+    assert request.max_nodes == 250
+    assert request.max_duration_seconds == 90
+
+
+def test_force_requests_fresh_uid_resolution() -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "friends",
+            "https://www.facebook.com/synthetic.user",
+            "--force",
+        ]
+    )
+
+    assert request_from_authenticated_args(args).force_uid_refresh is True
+
+
 def test_batch_reader_ignores_blank_and_comment_lines(
     tmp_path: Path,
 ) -> None:

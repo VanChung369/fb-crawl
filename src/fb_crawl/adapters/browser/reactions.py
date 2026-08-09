@@ -7,6 +7,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
+from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
 from fb_crawl.adapters.browser.driver import wait_for_document_ready
 from fb_crawl.adapters.browser.session import is_authenticated
 from fb_crawl.config import BrowserSettings
@@ -67,20 +68,23 @@ class ReactionsCollector:
         ready_func: Callable[[object, float], None] = wait_for_document_ready,
         wait_factory=WebDriverWait,
         sleep_func: Callable[[float], None] = time.sleep,
+        monotonic_func: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._authenticated = authenticated_func
         self._ready = ready_func
         self._wait_factory = wait_factory
         self._sleep = sleep_func
+        self._monotonic = monotonic_func
 
     def collect(
         self,
         browser,
         url: str,
         *,
-        steps: int,
+        steps: int | None,
         delay_seconds: float,
+        max_duration_seconds: float | None = None,
     ) -> tuple[str, int]:
         try:
             browser.get(url)
@@ -101,8 +105,13 @@ class ReactionsCollector:
 
             attempts = 0
             previous: int | None = None
+            budget = CrawlBudget(
+                steps=steps,
+                max_duration_seconds=max_duration_seconds,
+                monotonic_func=self._monotonic,
+            )
 
-            for _ in range(steps):
+            while budget.allows(attempts):
                 height = browser.execute_script(REACTIONS_SCROLL_SCRIPT)
 
                 if height is None:

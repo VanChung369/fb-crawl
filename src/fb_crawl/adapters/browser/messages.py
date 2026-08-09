@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
+from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
 from fb_crawl.adapters.browser.driver import wait_for_document_ready
 from fb_crawl.adapters.browser.session import is_authenticated
 from fb_crawl.config import BrowserSettings
@@ -38,19 +39,22 @@ class MessagesCollector:
         authenticated_func: Callable[[object], bool] = is_authenticated,
         ready_func: Callable[[object, float], None] = wait_for_document_ready,
         sleep_func: Callable[[float], None] = time.sleep,
+        monotonic_func: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._authenticated = authenticated_func
         self._ready = ready_func
         self._sleep = sleep_func
+        self._monotonic = monotonic_func
 
     def collect(
         self,
         browser,
         url: str,
         *,
-        steps: int,
+        steps: int | None,
         delay_seconds: float,
+        max_duration_seconds: float | None = None,
     ) -> tuple[str, int]:
         try:
             browser.get(url)
@@ -63,8 +67,13 @@ class MessagesCollector:
 
             attempts = 0
             previous: int | None = None
+            budget = CrawlBudget(
+                steps=steps,
+                max_duration_seconds=max_duration_seconds,
+                monotonic_func=self._monotonic,
+            )
 
-            for _ in range(steps):
+            while budget.allows(attempts):
                 height = browser.execute_script(MESSAGE_SCROLL_SCRIPT)
 
                 if height is None:

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -132,3 +133,21 @@ def test_checkpoint_target_mismatch_fails_validation(tmp_path: Path) -> None:
         service.validate(
             request(checkpoint, "https://www.facebook.com/groups/200")
         )
+
+
+def test_checkpoint_depth_or_time_mismatch_fails_validation(
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "checkpoint.json"
+    target = "https://www.facebook.com/groups/100"
+    original = replace(
+        request(checkpoint, target),
+        depth=1,
+        max_duration_seconds=60,
+    )
+    CheckpointingService(PerTargetService()).run(original, object())
+
+    changed = replace(original, depth=2)
+
+    with pytest.raises(ValidationError, match="options do not match"):
+        CheckpointingService(PerTargetService()).validate(changed)
