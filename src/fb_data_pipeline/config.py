@@ -33,12 +33,18 @@ def _non_negative_int(name: str, raw: str) -> int:
 @dataclass(frozen=True, slots=True)
 class PipelineSettings:
     default_country_code: str = "84"
+    database_url: str = ""
+    database_statement_timeout_seconds: float = 5.0
     fb_number_api_url: str = DEFAULT_FB_NUMBER_API_URL
     fb_number_api_token: str = ""
     fb_number_auth_header: str = "Authorization"
     fb_number_auth_scheme: str = "Bearer"
     fb_number_timeout_seconds: float = 15.0
     fb_number_max_retries: int = 2
+
+    def require_database(self) -> None:
+        if not self.database_url:
+            raise ConfigurationError("DATABASE_URL is required.")
 
     def require_fb_number(self) -> None:
         if not self.fb_number_api_url:
@@ -65,6 +71,11 @@ def load_pipeline_settings(
 
     return PipelineSettings(
         default_country_code=country_code,
+        database_url=values.get("DATABASE_URL", "").strip(),
+        database_statement_timeout_seconds=_positive_float(
+            "DATABASE_STATEMENT_TIMEOUT_SECONDS",
+            values.get("DATABASE_STATEMENT_TIMEOUT_SECONDS", "5"),
+        ),
         fb_number_api_url=values.get(
             "FB_NUMBER_API_URL",
             DEFAULT_FB_NUMBER_API_URL,
@@ -87,4 +98,3 @@ def load_pipeline_settings(
             values.get("FB_NUMBER_MAX_RETRIES", "2"),
         ),
     )
-

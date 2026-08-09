@@ -32,6 +32,37 @@ def test_fbnumber_token_is_required_only_when_provider_is_started() -> None:
         settings.require_fb_number()
 
 
+def test_pipeline_settings_load_database_contract() -> None:
+    settings = load_pipeline_settings(
+        {
+            "DATABASE_URL": "postgresql://app:password@localhost/fb_pipeline",
+            "DATABASE_STATEMENT_TIMEOUT_SECONDS": "7.5",
+        }
+    )
+
+    assert settings.database_url == (
+        "postgresql://app:password@localhost/fb_pipeline"
+    )
+    assert settings.database_statement_timeout_seconds == 7.5
+
+
+def test_database_url_is_required_only_when_database_is_started() -> None:
+    settings = load_pipeline_settings({})
+
+    with pytest.raises(ConfigurationError, match="DATABASE_URL"):
+        settings.require_database()
+
+
+def test_pipeline_settings_reject_invalid_database_timeout() -> None:
+    with pytest.raises(
+        ConfigurationError,
+        match="DATABASE_STATEMENT_TIMEOUT_SECONDS",
+    ):
+        load_pipeline_settings(
+            {"DATABASE_STATEMENT_TIMEOUT_SECONDS": "0"}
+        )
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [
@@ -43,4 +74,3 @@ def test_fbnumber_token_is_required_only_when_provider_is_started() -> None:
 def test_pipeline_settings_reject_invalid_numbers(name: str, value: str) -> None:
     with pytest.raises(ConfigurationError, match=name):
         load_pipeline_settings({name: value})
-

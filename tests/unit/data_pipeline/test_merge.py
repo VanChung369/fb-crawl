@@ -5,6 +5,7 @@ import pytest
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
     PhoneEvidence,
+    ProfileData,
     UserBundle,
 )
 from fb_data_pipeline.services.merge import (
@@ -91,3 +92,59 @@ def test_bundles_reject_conflicting_uids_sharing_username() -> None:
             )
         )
 
+
+def test_bundle_merge_uses_newer_non_empty_profile_fields() -> None:
+    earlier = datetime(2026, 8, 8, tzinfo=UTC)
+    later = datetime(2026, 8, 9, tzinfo=UTC)
+    first = UserBundle(
+        FacebookIdentity(uid="10001"),
+        profile=ProfileData(
+            address="Ha Noi",
+            birth_date="1990",
+            source_url="https://www.facebook.com/a/about/old",
+            observed_at=earlier,
+        ),
+    )
+    second = UserBundle(
+        FacebookIdentity(uid="10001"),
+        profile=ProfileData(
+            address="",
+            birth_date="12 thang 8, 1990",
+            gender="Nam",
+            source_url="https://www.facebook.com/a/about/new",
+            observed_at=later,
+        ),
+    )
+
+    profile = merge_bundles((first, second))[0].profile
+
+    assert profile.address == "Ha Noi"
+    assert profile.birth_date == "12 thang 8, 1990"
+    assert profile.gender == "Nam"
+    assert profile.observed_at == later
+    assert profile.source_url == "https://www.facebook.com/a/about/new"
+
+
+def test_bundle_merge_prefers_timestamped_profile_then_first_unknown() -> None:
+    timestamped = datetime(2026, 8, 9, tzinfo=UTC)
+    unknown_first = UserBundle(
+        FacebookIdentity(uid="10001"),
+        profile=ProfileData(address="Unknown first"),
+    )
+    known_second = UserBundle(
+        FacebookIdentity(uid="10001"),
+        profile=ProfileData(address="Known", observed_at=timestamped),
+    )
+
+    known = merge_bundles((unknown_first, known_second))[0].profile
+
+    assert known.address == "Known"
+    assert known.observed_at == timestamped
+
+    unknown_second = UserBundle(
+        FacebookIdentity(uid="10001"),
+        profile=ProfileData(address="Unknown second"),
+    )
+    unknown = merge_bundles((unknown_first, unknown_second))[0].profile
+
+    assert unknown.address == "Unknown first"

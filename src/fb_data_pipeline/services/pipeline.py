@@ -75,6 +75,7 @@ class EnrichmentPipeline:
                     original.evidence,
                     provider_result.evidence,
                 ),
+                profile=original.profile,
             )
             enriched.append(
                 EnrichedUser(
@@ -134,4 +135,3 @@ class EnrichmentPipeline:
             invalid_crawler_phones=imported.invalid_phones,
             limit=limit,
         )
-

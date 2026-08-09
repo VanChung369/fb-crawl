@@ -1,9 +1,32 @@
+import fb_data_pipeline.core.models as pipeline_models
+
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
     PhoneEvidence,
     PhoneSlot,
     UserBundle,
 )
+
+
+def test_profile_data_cleans_raw_values_and_detects_content() -> None:
+    profile = pipeline_models.ProfileData(
+        address="  Ha Noi  ",
+        birth_date="  12 thang 8, 1990  ",
+        gender="  Nam  ",
+        source_url="  https://www.facebook.com/a.user/about  ",
+    )
+
+    assert profile.address == "Ha Noi"
+    assert profile.birth_date == "12 thang 8, 1990"
+    assert profile.gender == "Nam"
+    assert profile.source_url == "https://www.facebook.com/a.user/about"
+    assert profile.is_empty is False
+
+
+def test_user_bundle_defaults_to_empty_profile_data() -> None:
+    bundle = UserBundle(FacebookIdentity(uid="100"))
+
+    assert bundle.profile.is_empty is True
 
 
 def test_identity_canonicalizes_mobile_and_tracking_profile_urls() -> None:

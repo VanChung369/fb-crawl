@@ -12,3 +12,6 @@ dist/
 .idea/
 .vscode/
 runtime/
+.env
+.env.*
+!.env.example

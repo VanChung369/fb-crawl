@@ -6,6 +6,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_runtime_and_secret_paths_are_ignored() -> None:
     for relative in (
+        ".env",
+        ".env.local",
         "runtime/output/pages.csv",
         "runtime/output/members.csv",
         "runtime/output/comments.json",

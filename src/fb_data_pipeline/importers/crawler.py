@@ -14,6 +14,7 @@ from fb_crawl.core.models import (
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
     PhoneEvidence,
+    ProfileData,
     UserBundle,
 )
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
@@ -39,6 +40,14 @@ def _timestamp(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _first_timestamp(*values: str | None) -> datetime | None:
+    for value in values:
+        parsed = _timestamp(value)
+        if parsed is not None:
+            return parsed
+    return None
 
 
 def _username(profile_url: str, user_id: str = "") -> str:
@@ -123,8 +132,10 @@ def import_user_record(
         precise_numbers.add(converted.normalized_phone)
         evidence.append(converted)
 
-    captured_at = _timestamp(
-        record.last_enriched_at or record.last_seen or record.first_seen
+    captured_at = _first_timestamp(
+        record.last_enriched_at,
+        record.last_seen,
+        record.first_seen,
     )
     for index, number in enumerate(record.phone_numbers):
         try:
@@ -160,6 +171,13 @@ def import_user_record(
         UserBundle(
             identity=identity,
             evidence=merge_evidence(tuple(evidence)),
+            profile=ProfileData(
+                address=record.address,
+                birth_date=record.birth_date,
+                gender=record.gender,
+                source_url=record.source_url or record.profile_url,
+                observed_at=captured_at,
+            ),
         ),
         invalid_phones,
     )
@@ -204,6 +222,10 @@ def import_page_record(
         UserBundle(
             identity=identity,
             evidence=merge_evidence(tuple(evidence)),
+            profile=ProfileData(
+                address=record.address,
+                source_url=identity.profile_url,
+            ),
         ),
         invalid_phones,
     )
@@ -259,4 +281,3 @@ def import_scrape_result(
         result.records,
         default_country_code=default_country_code,
     )
-

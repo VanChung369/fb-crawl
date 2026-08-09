@@ -76,6 +76,25 @@ class FacebookIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class ProfileData:
+    address: str = ""
+    birth_date: str = ""
+    gender: str = ""
+    source_url: str = ""
+    observed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "address", _clean(self.address))
+        object.__setattr__(self, "birth_date", _clean(self.birth_date))
+        object.__setattr__(self, "gender", _clean(self.gender))
+        object.__setattr__(self, "source_url", _clean(self.source_url))
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.address or self.birth_date or self.gender)
+
+
+@dataclass(frozen=True, slots=True)
 class PhoneEvidence:
     phone_number: str
     normalized_phone: str
@@ -108,6 +127,7 @@ class PhoneEvidence:
 class UserBundle:
     identity: FacebookIdentity
     evidence: tuple[PhoneEvidence, ...] = ()
+    profile: ProfileData = field(default_factory=ProfileData)
 
     def _first_phone(self, slot: PhoneSlot) -> str | None:
         return next(

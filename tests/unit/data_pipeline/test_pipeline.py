@@ -40,6 +40,9 @@ def scrape_result() -> ScrapeResult[UserRecord]:
                 profile_url="https://www.facebook.com/a.user",
                 source="profile",
                 source_url="https://www.facebook.com/a.user",
+                address="Ha Noi",
+                birth_date="12 thang 8, 1990",
+                gender="Nam",
                 phone_numbers=("0912 345 678",),
                 phone_evidence=(
                     CrawlPhoneEvidence(
@@ -83,6 +86,9 @@ def test_pipeline_calls_provider_after_crawl_and_combines_two_slots() -> None:
     assert run.report.phone_1_found == 1
     assert run.report.phone_2_found == 1
     assert run.report.provider_found == 1
+    assert run.users[0].bundle.profile.address == "Ha Noi"
+    assert run.users[0].bundle.profile.birth_date == "12 thang 8, 1990"
+    assert run.users[0].bundle.profile.gender == "Nam"
 
 
 def test_provider_failure_keeps_crawler_phone_2() -> None:
@@ -99,4 +105,3 @@ def test_provider_failure_keeps_crawler_phone_2() -> None:
     assert run.users[0].bundle.phone_1 is None
     assert run.users[0].bundle.phone_2 == "+84912345678"
     assert run.report.provider_failed == 1
-

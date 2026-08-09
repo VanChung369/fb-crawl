@@ -126,9 +126,27 @@ completed batch.
 
 See [docs/authenticated-cli.md](docs/authenticated-cli.md) for supported URLs, session handling, formats, exit codes, and security guidance.
 
-The future external-enrichment/PostgreSQL direction is documented in
-[docs/future-data-pipeline.md](docs/future-data-pipeline.md). It is not active in
-the current CLI.
+The external-enrichment direction is documented in
+[docs/future-data-pipeline.md](docs/future-data-pipeline.md).
+
+## PostgreSQL source of truth
+
+The `fb_data_pipeline` package can normalize crawler records, call FBNumber,
+preserve `phone_1` from FBNumber and `phone_2` from Facebook-visible evidence,
+preserve raw `address`, `birth_date`, and `gender` profile values, and persist
+the merged data to regular PostgreSQL 17.
+
+Start PostgreSQL and apply the packaged migrations:
+
+```powershell
+docker compose up -d postgres
+$env:DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@localhost:5432/fb_pipeline"
+fb-crawl pipeline migrate
+```
+
+PostgreSQL is authoritative; output files are not deleted automatically. See
+[docs/postgresql.md](docs/postgresql.md) for schema, tests, security, and the
+current integration boundary.
 
 ## Merge crawl output
 
@@ -180,6 +198,7 @@ configurable `--default-country-code`. See
 - `2`: invalid input or configuration
 - `3`: authenticated session, login, or manual verification unavailable
 - `4`: output could not be written safely
+- `5`: database operation failed safely
 - `130`: authenticated collection was stopped safely with `Ctrl+C`
 
 ## Privacy and safety

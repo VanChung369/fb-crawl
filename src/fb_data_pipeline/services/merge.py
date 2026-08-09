@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
     PhoneEvidence,
+    ProfileData,
     UserBundle,
 )
 
@@ -68,6 +71,73 @@ def _stronger(left: PhoneEvidence, right: PhoneEvidence) -> PhoneEvidence:
     )
 
 
+def _profile_value(
+    left: str,
+    left_time: datetime | None,
+    right: str,
+    right_time: datetime | None,
+) -> tuple[str, bool]:
+    if not right:
+        return left, False
+    if not left:
+        return right, True
+    if right_time is not None and left_time is None:
+        return right, True
+    if left_time is not None and right_time is None:
+        return left, False
+    if right_time is not None and left_time is not None:
+        return (right, True) if right_time >= left_time else (left, False)
+    return left, False
+
+
+def merge_profiles(left: ProfileData, right: ProfileData) -> ProfileData:
+    if left.is_empty:
+        return right
+    if right.is_empty:
+        return left
+
+    address, address_from_right = _profile_value(
+        left.address,
+        left.observed_at,
+        right.address,
+        right.observed_at,
+    )
+    birth_date, birth_date_from_right = _profile_value(
+        left.birth_date,
+        left.observed_at,
+        right.birth_date,
+        right.observed_at,
+    )
+    gender, gender_from_right = _profile_value(
+        left.gender,
+        left.observed_at,
+        right.gender,
+        right.observed_at,
+    )
+    accepted_right = any(
+        (address_from_right, birth_date_from_right, gender_from_right)
+    )
+    observed_at = max(
+        (
+            value
+            for value in (left.observed_at, right.observed_at)
+            if value is not None
+        ),
+        default=None,
+    )
+    return ProfileData(
+        address=address,
+        birth_date=birth_date,
+        gender=gender,
+        source_url=(
+            right.source_url
+            if accepted_right and right.source_url
+            else left.source_url
+        ),
+        observed_at=observed_at,
+    )
+
+
 def merge_evidence(*groups: tuple[PhoneEvidence, ...]) -> tuple[PhoneEvidence, ...]:
     merged: dict[tuple[str, str, str, str], PhoneEvidence] = {}
     for group in groups:
@@ -99,10 +169,10 @@ def merge_bundles(bundles: tuple[UserBundle, ...]) -> tuple[UserBundle, ...]:
             combined = UserBundle(
                 identity=_merge_identity(existing.identity, combined.identity),
                 evidence=merge_evidence(existing.evidence, combined.evidence),
+                profile=merge_profiles(existing.profile, combined.profile),
             )
         for index in reversed(matches[1:]):
             del merged[index]
         merged[first] = combined
 
     return tuple(merged)
-
