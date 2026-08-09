@@ -47,4 +47,6 @@ The JSON report includes:
   city, and birth year.
 
 Use the report to select another `authenticated repair` or profile enrichment
-pass before sending records to a future external provider or PostgreSQL.
+pass before sending records to a future external provider or PostgreSQL. The
+selection can be generated automatically with
+[`data plan`](data-plan.md).

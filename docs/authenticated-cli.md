@@ -279,6 +279,10 @@ Run:
 fb-crawl authenticated batch --input runtime/targets.txt --headless --output runtime/output/batch.csv
 ```
 
+`fb-crawl data plan` can generate a typed profile batch from missing fields in
+a unified master CSV. Its target file is accepted here without conversion; use
+the report's `profile_fields` values for `--profile-fields`.
+
 Invalid targets and bounded navigation or parser failures become issue rows while other targets continue. Session loss stops the entire run.
 
 Batch also accepts explicit action prefixes:

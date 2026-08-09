@@ -138,6 +138,18 @@ Rows are linked by numeric UID, normalized profile URL, or username; names are
 never identity keys. Conflicting values remain visible in the report. See
 [docs/data-merge.md](docs/data-merge.md) for merge and coverage rules.
 
+Generate a bounded follow-up batch only for incomplete or suspicious profiles:
+
+```powershell
+fb-crawl data plan runtime/output/users-master.csv `
+  --missing phone,address,current_city,birth_year `
+  --output runtime/targets/enrichment.txt
+```
+
+The plan respects `last_enriched_at` with a 30-day default cooldown and writes
+typed targets accepted directly by `authenticated batch`. See
+[docs/data-plan.md](docs/data-plan.md) for the complete crawl/merge/plan loop.
+
 ## Exit codes
 
 - `0`: run completed without target failures

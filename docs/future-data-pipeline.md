@@ -4,7 +4,9 @@ This document records the planned direction only. The current CLI does not call
 external phone APIs and does not connect to PostgreSQL.
 
 The local normalization/deduplication quality gate is now available through
-`fb-crawl data merge`; external providers and PostgreSQL remain future work.
+`fb-crawl data merge`, and `fb-crawl data plan` produces bounded follow-up
+profile batches from its master output. External providers and PostgreSQL
+remain future work.
 
 ## Intended pipeline
 
