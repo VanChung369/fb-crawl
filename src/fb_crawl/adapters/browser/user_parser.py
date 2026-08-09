@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import replace
 from urllib.parse import (
     parse_qs,
@@ -11,6 +10,7 @@ from urllib.parse import (
 
 from bs4 import BeautifulSoup
 
+from fb_crawl.core.identity import is_social_context_label
 from fb_crawl.core.models import UserRecord
 from fb_crawl.core.urls import (
     FACEBOOK_HOSTS,
@@ -59,39 +59,13 @@ def _is_action_label(
     return name is not None and name.casefold() in ACTION_LABELS
 
 
-def _ascii_fold(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value.casefold())
-    return "".join(
-        character
-        for character in normalized
-        if not unicodedata.combining(character)
-    )
-
-
-SOCIAL_CONTEXT_LABEL = re.compile(
-    r"^(?:\d[\d\s.,]*[kmbt]?)\s+(?:"
-    r"friends?|followers?|following|mutual friends?|"
-    r"ban be|nguoi ban|nguoi theo doi|ban chung"
-    r")$",
-    re.IGNORECASE,
-)
-
-
-def _is_social_context_label(name: str | None) -> bool:
-    if name is None:
-        return False
-
-    folded = " ".join(_ascii_fold(name).split())
-    return bool(SOCIAL_CONTEXT_LABEL.fullmatch(folded))
-
-
 def _profile_name(anchor) -> str | None:
     return next(
         (
             candidate
             for candidate in _name_candidates(anchor)
             if not _is_action_label(candidate)
-            and not _is_social_context_label(candidate)
+            and not is_social_context_label(candidate)
         ),
         None,
     )

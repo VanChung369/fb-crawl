@@ -50,6 +50,7 @@ fb-crawl authenticated engagement https://www.facebook.com/PAGE/posts/POST_ID --
 fb-crawl authenticated messages https://www.facebook.com/messages/t/THREAD_ID --headless
 fb-crawl authenticated inspect https://www.facebook.com/USERNAME --format json --headless
 fb-crawl authenticated batch --input runtime/targets.txt --headless
+fb-crawl authenticated repair runtime/output/friends.csv --headless
 ```
 
 Authenticated user commands automatically resolve vanity links such as
@@ -94,6 +95,19 @@ fb-crawl authenticated members https://www.facebook.com/groups/GROUP_ID `
 `--resume` continues unfinished targets and returns the combined checkpointed
 result. `--incremental` re-runs targets and emits only newly observed
 identities.
+
+Repair suspicious or legacy CSV identities without crawling the relationship
+surface again:
+
+```powershell
+fb-crawl authenticated repair runtime/output/friends.csv `
+  --output runtime/output/friends-repaired.csv --limit 20 --headless
+```
+
+The repair pass preserves every existing CSV column, verifies only suspicious
+rows, and records `identity_status` plus `identity_source`. Use
+`--retry-failed` for previous repair failures or `--force` to verify every
+supported profile row.
 
 See [docs/authenticated-cli.md](docs/authenticated-cli.md) for supported URLs, session handling, formats, exit codes, and security guidance.
 

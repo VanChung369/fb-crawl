@@ -140,6 +140,43 @@ receive bounded profile enrichment. `--profile-limit` still controls the number
 of profiles enriched; it does not cap the identity-resolution pass required to
 produce numeric UIDs for all exported users.
 
+## Repair identities in an existing CSV
+
+`repair` reads an existing user CSV and verifies only suspicious profile rows.
+It is useful for old exports containing a missing UID or username, a mismatched
+profile URL, or a social-context label such as `174 friends` in the `name`
+column.
+
+```powershell
+fb-crawl authenticated repair runtime/output/friends.csv `
+  --output runtime/output/friends-repaired.csv `
+  --limit 20 --delay 3 --headless
+```
+
+The input file is never overwritten by default. The default destination is a
+sibling named `INPUT-repaired.csv`. Every original column and value is
+preserved unless one of `user_id`, `name`, `username`, or `profile_url` is
+verified and corrected.
+
+Repair provenance uses these columns:
+
+- `identity_status=collected`: exported by a normal crawl but not independently
+  verified from the profile.
+- `identity_status=verified`: the profile confirmed the existing identity.
+- `identity_status=repaired`: at least one identity value was corrected.
+- `identity_status=failed`: the bounded verification attempt failed.
+- `identity_source=facebook:profile`: identity was checked on the target
+  profile.
+- `identity_error_code` and `identity_error_message`: safe failure details that
+  do not replace the original crawl error columns.
+
+`--limit` defaults to `20`. When the summary reports `pending` greater than
+zero, use the repaired output as the next input to process the next batch.
+Successfully verified/repaired rows are skipped automatically. Add
+`--retry-failed` to retry failed rows, or `--force` to verify all supported
+profile rows again. A blank username remains valid when Facebook exposes only a
+numeric `profile.php?id=...` identity.
+
 ## Visible post reactions
 
 `reactions` accepts the same supported post, video, reel, photo, and permalink

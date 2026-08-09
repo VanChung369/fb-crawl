@@ -44,6 +44,10 @@ UNIFIED_FIELDS = (
     "source",
     "source_url",
     "depth",
+    "identity_status",
+    "identity_source",
+    "identity_error_code",
+    "identity_error_message",
     "error_code",
     "error_message",
 )
@@ -111,6 +115,10 @@ def page_record_row(record: PageRecord) -> dict[str, str]:
         "source": record.discovery_source,
         "source_url": record.canonical_url,
         "depth": str(record.depth),
+        "identity_status": "collected",
+        "identity_source": "facebook:public",
+        "identity_error_code": "",
+        "identity_error_message": "",
         "error_code": "",
         "error_message": "",
     }
@@ -157,6 +165,10 @@ def user_record_row(record: UserRecord) -> dict[str, str]:
         "source": record.source,
         "source_url": record.source_url,
         "depth": str(record.depth),
+        "identity_status": "collected",
+        "identity_source": f"facebook:{record.source}",
+        "identity_error_code": "",
+        "identity_error_message": "",
         "error_code": "",
         "error_message": "",
     }
@@ -206,6 +218,10 @@ def issue_row(issue: ScrapeIssue) -> dict[str, str]:
         "source": issue.action,
         "source_url": issue.target or "",
         "depth": "",
+        "identity_status": "",
+        "identity_source": "",
+        "identity_error_code": "",
+        "identity_error_message": "",
         "error_code": issue.code,
         "error_message": issue.message,
     }

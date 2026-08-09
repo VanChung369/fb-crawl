@@ -52,3 +52,7 @@ class BrowserParseError(FbCrawlError):
 
 class UidResolutionError(BrowserParseError):
     code = "authenticated_uid_resolution_failed"
+
+
+class IdentityResolutionError(BrowserParseError):
+    code = "authenticated_identity_resolution_failed"

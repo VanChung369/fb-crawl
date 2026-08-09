@@ -7,11 +7,17 @@ from fb_crawl.adapters.browser.profile_uid import (
     ProfileUidParser,
     ProfileUidResolver,
 )
+from fb_crawl.adapters.browser.profile_identity import (
+    ProfileIdentityParser,
+    ProfileIdentityResolver,
+)
 
 __all__ = [
     "BrowserInspector",
     "MessageParser",
     "ProfileEnricher",
+    "ProfileIdentityParser",
+    "ProfileIdentityResolver",
     "ProfileParser",
     "ProfileUidParser",
     "ProfileUidResolver",

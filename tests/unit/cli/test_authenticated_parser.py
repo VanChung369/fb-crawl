@@ -271,3 +271,31 @@ def test_checkpoint_path_requires_a_checkpoint_mode() -> None:
 
     with pytest.raises(ValidationError, match="requires"):
         request_from_authenticated_args(args)
+
+
+def test_repair_parser_builds_bounded_identity_repair_arguments() -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "repair",
+            "runtime/output/friends.csv",
+            "--output",
+            "runtime/output/friends-repaired.csv",
+            "--limit",
+            "7",
+            "--delay",
+            "1.5",
+            "--retry-failed",
+            "--force",
+            "--headless",
+        ]
+    )
+
+    assert args.action == "repair"
+    assert args.input == Path("runtime/output/friends.csv")
+    assert args.output == Path("runtime/output/friends-repaired.csv")
+    assert args.limit == 7
+    assert args.delay == 1.5
+    assert args.retry_failed is True
+    assert args.force is True
+    assert args.headless is True

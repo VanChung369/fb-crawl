@@ -275,6 +275,38 @@ class UidResolution:
 
 
 @dataclass(frozen=True, slots=True)
+class ProfileIdentity:
+    user_id: str
+    name: str | None
+    username: str | None
+    profile_url: str
+    source: str = "facebook:profile"
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityRepairStats:
+    rows: int
+    eligible: int
+    attempted: int
+    repaired: int
+    verified: int
+    failed: int
+    skipped: int
+    pending: int
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityRepairResult:
+    fieldnames: tuple[str, ...]
+    rows: tuple[dict[str, str], ...]
+    stats: IdentityRepairStats
+
+    @property
+    def has_failures(self) -> bool:
+        return self.stats.failed > 0
+
+
+@dataclass(frozen=True, slots=True)
 class UidResolutionStats:
     selected: int
     cached: int

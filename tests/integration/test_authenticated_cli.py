@@ -5,6 +5,7 @@ from pathlib import Path
 from fb_crawl.cli.app import main
 from fb_crawl.cli.authenticated import (
     AuthenticatedRuntime,
+    IdentityRepairRuntime,
 )
 from fb_crawl.core.exceptions import (
     ConfigurationError,
@@ -14,6 +15,8 @@ from fb_crawl.core.exceptions import (
 )
 from fb_crawl.core.models import (
     EnrichmentStats,
+    IdentityRepairResult,
+    IdentityRepairStats,
     ScrapeResult,
     ScrapeStats,
     UserRecord,
@@ -344,6 +347,112 @@ def test_invalid_enrichment_options_fail_before_runtime(
             "members",
             "https://www.facebook.com/groups/1",
             *extra,
+        ]
+    )
+
+    assert exit_code == 2
+    assert runtime_loads == []
+
+
+def test_identity_repair_command_reads_writes_and_quits_browser(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    browser = Browser()
+    source = tmp_path / "friends.csv"
+    source.write_text(
+        "user_id,name,username,profile_url\n"
+        "123,174 friends,,https://www.facebook.com/profile.php?id=123\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "friends-fixed.csv"
+    calls = []
+    fieldnames = (
+        "user_id",
+        "name",
+        "username",
+        "profile_url",
+        "identity_status",
+    )
+    repaired_row = {
+        "user_id": "123",
+        "name": "Synthetic User",
+        "username": "",
+        "profile_url": "https://www.facebook.com/profile.php?id=123",
+        "identity_status": "repaired",
+    }
+
+    class RepairService:
+        def run(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            return IdentityRepairResult(
+                fieldnames=fieldnames,
+                rows=(repaired_row,),
+                stats=IdentityRepairStats(
+                    rows=1,
+                    eligible=1,
+                    attempted=1,
+                    repaired=1,
+                    verified=0,
+                    failed=0,
+                    skipped=0,
+                    pending=0,
+                ),
+            )
+
+    def write_result(result, path: Path) -> bool:
+        path.write_text(result.rows[0]["name"], encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_repair_runtime",
+        lambda: IdentityRepairRuntime(
+            create_browser=lambda settings: browser,
+            create_service=lambda settings, credentials: RepairService(),
+            read_rows=lambda path: (fieldnames, (repaired_row,)),
+            write_result=write_result,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "repair",
+            str(source),
+            "--output",
+            str(output),
+            "--limit",
+            "1",
+            "--delay",
+            "0",
+            "--headless",
+        ]
+    )
+
+    summary = capsys.readouterr().out
+    assert exit_code == 0
+    assert output.read_text(encoding="utf-8") == "Synthetic User"
+    assert calls[0][1]["limit"] == 1
+    assert calls[0][1]["delay_seconds"] == 0
+    assert "repaired=1" in summary
+    assert browser.quit_calls == 1
+
+
+def test_invalid_identity_repair_limit_fails_before_runtime(monkeypatch) -> None:
+    runtime_loads = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_repair_runtime",
+        lambda: runtime_loads.append(True),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "repair",
+            "runtime/output/friends.csv",
+            "--limit",
+            "0",
         ]
     )
 

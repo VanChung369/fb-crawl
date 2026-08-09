@@ -240,6 +240,34 @@ def add_authenticated_parser(
     batch.add_argument("--max-users", type=int, default=1000)
     _common(batch)
 
+    repair = actions.add_parser(
+        "repair",
+        help="Verify and repair suspicious profile identities in a CSV",
+    )
+    repair.add_argument("input", type=Path)
+    repair.add_argument("--output", type=Path)
+    repair.add_argument("--limit", type=int, default=20)
+    repair.add_argument("--delay", type=float, default=3.0)
+    repair.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry rows whose previous identity repair failed",
+    )
+    repair.add_argument(
+        "--force",
+        action="store_true",
+        help="Verify every row with a supported profile target",
+    )
+    repair.add_argument(
+        "--headless",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    repair.add_argument("--proxy")
+    repair.add_argument("--session-path", type=Path)
+    repair.add_argument("--browser-timeout", type=float)
+    repair.add_argument("--verification-timeout", type=float)
+
 
 def _read_batch(
     path: Path,
@@ -384,6 +412,31 @@ class AuthenticatedRuntime:
     ]
 
 
+class RepairServicePort(Protocol):
+    def run(
+        self,
+        fieldnames,
+        rows,
+        browser,
+        *,
+        force: bool,
+        retry_failed: bool,
+        limit: int,
+        delay_seconds: float,
+    ): ...
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityRepairRuntime:
+    create_browser: Callable[[BrowserSettings], object]
+    create_service: Callable[
+        [BrowserSettings, Callable[[], tuple[str, str]]],
+        RepairServicePort,
+    ]
+    read_rows: Callable[[Path], tuple[tuple[str, ...], tuple[dict[str, str], ...]]]
+    write_result: Callable[[object, Path], bool]
+
+
 def _load_runtime() -> AuthenticatedRuntime:
     try:
         from fb_crawl.adapters.browser.comments import (
@@ -499,6 +552,55 @@ def _load_runtime() -> AuthenticatedRuntime:
     )
 
 
+def _load_repair_runtime() -> IdentityRepairRuntime:
+    try:
+        from fb_crawl.adapters.browser.driver import create_firefox_driver
+        from fb_crawl.adapters.browser.login import SessionManager
+        from fb_crawl.adapters.browser.profile_identity import (
+            ProfileIdentityResolver,
+        )
+        from fb_crawl.adapters.browser.session import SessionStore
+        from fb_crawl.exporters.identity_repair import (
+            read_identity_csv,
+            write_identity_csv,
+        )
+        from fb_crawl.services.identity_repair import IdentityRepairService
+
+    except ModuleNotFoundError as error:
+        dependency = str(error.name)
+
+        if dependency == "selenium" or dependency.startswith("selenium."):
+            raise ConfigurationError(
+                "Authenticated mode requires: "
+                'python -m pip install -e ".[browser]"'
+            ) from error
+
+        if dependency == "bs4" or dependency.startswith("bs4."):
+            raise ConfigurationError(
+                "Authenticated mode requires: "
+                'python -m pip install -e ".[browser]"'
+            ) from error
+
+        raise
+
+    def create_service(settings, credentials_provider):
+        return IdentityRepairService(
+            SessionManager(
+                SessionStore(settings.session_path),
+                settings,
+                credentials_provider,
+            ),
+            ProfileIdentityResolver(settings),
+        )
+
+    return IdentityRepairRuntime(
+        create_browser=create_firefox_driver,
+        create_service=create_service,
+        read_rows=read_identity_csv,
+        write_result=write_identity_csv,
+    )
+
+
 def _credentials_provider() -> tuple[str, str]:
     email = input("Facebook email: ")
     password = getpass.getpass("Facebook password: ")
@@ -506,9 +608,70 @@ def _credentials_provider() -> tuple[str, str]:
     return email, password
 
 
+def execute_identity_repair(args: argparse.Namespace) -> int:
+    if args.limit <= 0:
+        raise ValidationError("Repair limit must be greater than 0.")
+
+    if args.delay < 0:
+        raise ValidationError(
+            "Repair delay must be greater than or equal to 0."
+        )
+
+    runtime = _load_repair_runtime()
+    fieldnames, rows = runtime.read_rows(args.input)
+    output = args.output or args.input.with_name(
+        f"{args.input.stem}-repaired.csv"
+    )
+    settings = load_browser_settings(
+        headless=args.headless,
+        proxy=args.proxy,
+        session_path=args.session_path,
+        browser_timeout_seconds=args.browser_timeout,
+        verification_timeout_seconds=args.verification_timeout,
+        repository_root=Path.cwd(),
+    )
+    browser = None
+
+    try:
+        service = runtime.create_service(settings, _credentials_provider)
+        browser = runtime.create_browser(settings)
+        result = service.run(
+            fieldnames,
+            rows,
+            browser,
+            force=args.force,
+            retry_failed=args.retry_failed,
+            limit=args.limit,
+            delay_seconds=args.delay,
+        )
+        runtime.write_result(result, output)
+        stats = result.stats
+        print(
+            f"rows={stats.rows} "
+            f"eligible={stats.eligible} "
+            f"attempted={stats.attempted} "
+            f"repaired={stats.repaired} "
+            f"verified={stats.verified} "
+            f"failed={stats.failed} "
+            f"pending={stats.pending} "
+            f"output={output}"
+        )
+        return 1 if result.has_failures else 0
+
+    finally:
+        if browser is not None:
+            try:
+                browser.quit()
+            except Exception:
+                pass
+
+
 def execute_authenticated(
     args: argparse.Namespace,
 ) -> int:
+    if args.action == "repair":
+        return execute_identity_repair(args)
+
     request = request_from_authenticated_args(args)
 
     if request.checkpoint_path is not None:
