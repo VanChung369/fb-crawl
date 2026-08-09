@@ -299,6 +299,36 @@ class ProfileEnricher:
             details = _merge_details(details, parsed)
             succeeded += 1
 
+        if ProfileField.PHONE in requested_set and route_profile_url:
+            try:
+                browser.get(route_profile_url)
+                self._ready(browser, self._settings.browser_timeout_seconds)
+
+                if not self._authenticated(browser):
+                    raise SessionError(
+                        "The authenticated Facebook session is no longer valid."
+                    )
+
+                self._content_ready(
+                    browser,
+                    self._settings.browser_timeout_seconds,
+                    route_profile_url,
+                )
+                timeline_details = self._parser.parse(
+                    str(browser.page_source),
+                    source_url=route_profile_url,
+                    requested_fields=(ProfileField.PHONE,),
+                )
+                details = _merge_details(details, timeline_details)
+
+            except (SessionError, RateLimitError):
+                raise
+
+            except Exception:
+                # Timeline scanning is supplementary. Dedicated profile fields
+                # remain valid when the visible feed is unavailable.
+                pass
+
         if critical_parse_failure:
             raise BrowserParseError(
                 "Authenticated profile parsing failed.",
@@ -322,8 +352,14 @@ class ProfileEnricher:
                     status = FieldStatus.NOT_REQUESTED
                 elif _field_value(details, field):
                     status = FieldStatus.FOUND
+                    field_source = (
+                        ";".join(details.phone_sources)
+                        if field is ProfileField.PHONE
+                        and details.phone_sources
+                        else f"facebook:{section}"
+                    )
                     sources.append(
-                        (field.value, f"facebook:{section}")
+                        (field.value, field_source)
                     )
                 elif section in failed_sections:
                     status = FieldStatus.NAVIGATION_FAILED

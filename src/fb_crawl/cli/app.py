@@ -12,6 +12,7 @@ from fb_crawl.cli.authenticated import (
     add_authenticated_parser,
     execute_authenticated,
 )
+from fb_crawl.cli.data import add_data_parser, execute_data
 from fb_crawl.core.exceptions import FbCrawlError
 
 
@@ -26,6 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_public_parser(modes)
 
     add_authenticated_parser(modes)
+
+    add_data_parser(modes)
 
     return parser
 
@@ -43,6 +46,9 @@ def main(
 
         if args.mode == "authenticated":
             return execute_authenticated(args)
+
+        if args.mode == "data":
+            return execute_data(args)
 
         parser.error(f"Unsupported mode: {args.mode}")
 

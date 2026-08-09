@@ -271,3 +271,61 @@ def test_enrichment_v2_parses_visible_labelled_fields() -> None:
     assert details.gender == "Male"
     assert details.languages == ("Vietnamese", "English")
     assert details.relationship_status == "Single"
+
+
+def test_profile_root_extracts_phone_from_intro_and_visible_post_text() -> None:
+    html = """
+    <main>
+      <section aria-label="Giới thiệu">
+        <h2>Giới thiệu</h2>
+        <div>Liên hệ Zalo 0912 345 678</div>
+      </section>
+      <div role="article">
+        <div data-ad-preview="message">Hotline +84 987 654 321</div>
+        <span>09/08/2026</span>
+      </div>
+    </main>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url="https://www.facebook.com/synthetic.user",
+        requested_fields=(ProfileField.PHONE,),
+    )
+
+    assert details.phone_numbers == (
+        "0912 345 678",
+        "+84 987 654 321",
+    )
+    assert details.phone_sources == (
+        "facebook:profile_intro_text",
+        "facebook:post_text",
+    )
+
+
+def test_directory_page_does_not_scan_unlabelled_global_numbers() -> None:
+    details = ProfileParser().parse(
+        "<main><div>174 friends</div><div>09/08/2026</div></main>",
+        source_url=(
+            "https://www.facebook.com/synthetic.user"
+            "/directory_personal_details"
+        ),
+        requested_fields=(ProfileField.PHONE,),
+    )
+
+    assert details.phone_numbers == ()
+
+
+def test_profile_intro_heading_finds_nearby_phone_without_aria_label() -> None:
+    details = ProfileParser().parse(
+        """
+        <main>
+          <div><h2>Intro</h2><div>Số điện thoại: 0987 654 321</div></div>
+        </main>
+        """,
+        source_url="https://www.facebook.com/synthetic.user",
+        requested_fields=(ProfileField.PHONE,),
+    )
+
+    assert details.phone_numbers == ("0987 654 321",)
+    assert details.phone_sources == ("facebook:profile_intro_text",)

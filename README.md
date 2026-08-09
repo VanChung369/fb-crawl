@@ -123,6 +123,21 @@ The future external-enrichment/PostgreSQL direction is documented in
 [docs/future-data-pipeline.md](docs/future-data-pipeline.md). It is not active in
 the current CLI.
 
+## Merge crawl output
+
+Combine unified public/authenticated user CSV files and produce a quality gate
+before future external enrichment or PostgreSQL storage:
+
+```powershell
+fb-crawl data merge runtime/output/*.csv `
+  --output runtime/output/users-master.csv `
+  --report runtime/output/quality-report.json
+```
+
+Rows are linked by numeric UID, normalized profile URL, or username; names are
+never identity keys. Conflicting values remain visible in the report. See
+[docs/data-merge.md](docs/data-merge.md) for merge and coverage rules.
+
 ## Exit codes
 
 - `0`: run completed without target failures

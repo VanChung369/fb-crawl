@@ -56,6 +56,12 @@ valid birthday/year value.
 Each selected unique user is visited at most once after global deduplication.
 The browser opens only the normalized routes needed by the requested fields:
 `directory_personal_details`, `directory_work`, and `directory_links`.
+When `phone` is requested, it also scans the target profile's currently visible
+intro and initially rendered post text for strong phone patterns. Those values
+are tagged separately as `facebook:profile_intro_text` or
+`facebook:post_text`; they never overwrite a dedicated profile-contact value.
+Plain dates, counters, and ambiguous digit strings are rejected unless an
+explicit phone/contact context is present.
 For numeric `profile.php?id=...` identities it uses equivalent bounded `sk=`
 routes, then switches to Facebook's canonical vanity URL when a redirect,
 canonical link, or Open Graph URL exposes it. A failed profile preserves the
@@ -83,6 +89,10 @@ and `last_enriched_at`. Field status values are `found`, `not_visible`,
 a genuinely absent visible value from a route/render failure. Sources remain
 additive so a future external provider can append evidence without overwriting
 Facebook-visible evidence.
+
+Timeline phone scanning is bounded to content already rendered for the target
+profile. It does not infer hidden values, open inaccessible posts, or attach a
+post author's number to commenters and reaction users.
 
 ## Direct profiles and visible social lists
 
@@ -432,9 +442,9 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - Empty enrichment fields: confirm the field is visible on the profile's About
   pages to the same account. Missing/hidden fields are not errors and are never
   guessed.
-- Slow enrichment: each unique profile can require two bounded page loads plus
+- Slow enrichment: each unique profile can require up to four bounded page loads plus
   `--profile-delay`; reduce `--profile-limit` for a shorter run.
-- Treat exported birthday and location values as personal data and apply an
+- Treat exported phone, birthday, and location values as personal data and apply an
   appropriate retention/deletion policy.
 - Treat message exports as highly sensitive. Keep them under `runtime/`, limit
   access, and delete them when they are no longer required.

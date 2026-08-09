@@ -14,7 +14,10 @@ from urllib.parse import (
 
 from bs4 import BeautifulSoup
 
-from fb_crawl.adapters.http.contact_parser import extract_phone_numbers
+from fb_crawl.adapters.http.contact_parser import (
+    extract_phone_numbers,
+    extract_visible_phone_numbers,
+)
 from fb_crawl.core.models import ProfileDetails, ProfileField
 from fb_crawl.core.urls import FACEBOOK_HOSTS
 
@@ -102,6 +105,7 @@ WEBSITE_LABELS = frozenset(
     }
 )
 BIO_LABELS = frozenset({"bio", "details about", "gioi thieu", "tieu su"})
+INTRO_HEADINGS = frozenset({"intro", "introduction", "gioi thieu"})
 WORKPLACE_LABELS = frozenset(
     {"cong viec", "noi lam viec", "work", "workplace", "works at"}
 )
@@ -186,6 +190,14 @@ MONTHS = {
 
 def _visible_text(node) -> str:
     return " ".join(node.stripped_strings).strip()
+
+
+def _visible_lines(node) -> str:
+    return "\n".join(
+        " ".join(str(value).split())
+        for value in node.stripped_strings
+        if str(value).strip()
+    )
 
 
 def _fold(value: str) -> str:
@@ -344,6 +356,19 @@ def _profile_section(source_url: str) -> str:
     return parts[-1].casefold() if parts else ""
 
 
+def _is_profile_root(source_url: str) -> bool:
+    parsed = urlparse(source_url)
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if len(parts) != 1:
+        return False
+
+    if parts[0].casefold() != "profile.php":
+        return True
+
+    return not parse_qs(parsed.query).get("sk", [""])[0]
+
+
 class ProfileParser:
     def parse(
         self,
@@ -367,6 +392,7 @@ class ProfileParser:
             ) or None
 
         phones: dict[str, str] = {}
+        phone_sources: list[str] = []
         website: str | None = None
         address: str | None = None
         current_city: str | None = None
@@ -380,12 +406,27 @@ class ProfileParser:
         languages: tuple[str, ...] = ()
         relationship_status: str | None = None
 
+        def add_phones(values: list[str], source: str) -> None:
+            added = False
+
+            for phone in values:
+                key = re.sub(r"\D", "", phone)
+
+                if key:
+                    phones.setdefault(key, phone)
+                    added = True
+
+            if added and source not in phone_sources:
+                phone_sources.append(source)
+
         if ProfileField.PHONE in requested:
             for anchor in soup.find_all("a", href=True):
                 href = str(anchor.get("href") or "")
                 if href.casefold().startswith("tel:"):
-                    for phone in extract_phone_numbers(unquote(href[4:])):
-                        phones.setdefault(re.sub(r"\D", "", phone), phone)
+                    add_phones(
+                        extract_phone_numbers(unquote(href[4:])),
+                        "facebook:profile_contact",
+                    )
 
         if (
             ProfileField.WEBSITE in requested
@@ -448,8 +489,10 @@ class ProfileParser:
 
                 if is_contact or is_phone:
                     if ProfileField.PHONE in requested:
-                        for phone in extract_phone_numbers(text):
-                            phones.setdefault(re.sub(r"\D", "", phone), phone)
+                        add_phones(
+                            extract_phone_numbers(text),
+                            "facebook:profile_contact",
+                        )
 
                 if is_contact:
                     if ProfileField.ADDRESS in requested and address is None:
@@ -521,8 +564,10 @@ class ProfileParser:
                 birth_date, birth_year = _birthday(value)
 
             elif label in PHONE_LABELS and ProfileField.PHONE in requested:
-                for phone in extract_phone_numbers(value):
-                    phones.setdefault(re.sub(r"\D", "", phone), phone)
+                add_phones(
+                    extract_phone_numbers(value),
+                    "facebook:profile_contact",
+                )
 
             elif (
                 label in ADDRESS_LABELS
@@ -547,6 +592,12 @@ class ProfileParser:
                 and bio is None
             ):
                 bio = value
+
+                if ProfileField.PHONE in requested:
+                    add_phones(
+                        extract_visible_phone_numbers(value),
+                        "facebook:profile_intro_text",
+                    )
 
             elif (
                 label in WORKPLACE_LABELS
@@ -585,11 +636,66 @@ class ProfileParser:
             ):
                 relationship_status = value
 
+        if ProfileField.PHONE in requested and _is_profile_root(source_url):
+            intro_nodes = []
+
+            for container in soup.find_all(attrs={"aria-label": True}):
+                label = _fold(str(container.get("aria-label") or ""))
+
+                if label in INTRO_HEADINGS:
+                    intro_nodes.append(container)
+                    add_phones(
+                        extract_visible_phone_numbers(_visible_lines(container)),
+                        "facebook:profile_intro_text",
+                    )
+
+            for text_node in soup.find_all(string=True):
+                if _fold(str(text_node)) not in INTRO_HEADINGS:
+                    continue
+
+                current = text_node.parent
+
+                for _ in range(5):
+                    if current is None:
+                        break
+
+                    values = extract_visible_phone_numbers(
+                        _visible_lines(current)
+                    )
+
+                    if values:
+                        add_phones(values, "facebook:profile_intro_text")
+                        intro_nodes.append(current)
+                        break
+
+                    current = current.parent
+
+            post_nodes = [
+                *soup.select('[role="article"]'),
+                *soup.select('[data-ad-preview="message"]'),
+            ]
+
+            for post in post_nodes:
+                related_to_intro = any(
+                    post is intro
+                    or intro in post.parents
+                    or post in intro.parents
+                    for intro in intro_nodes
+                )
+
+                if related_to_intro:
+                    continue
+
+                add_phones(
+                    extract_visible_phone_numbers(_visible_lines(post)),
+                    "facebook:post_text",
+                )
+
         phone_values = tuple(phones.values())
         return ProfileDetails(
             name=name,
             phone_numbers=phone_values,
-            phone_sources=("facebook:profile_contact",) if phone_values else (),
+            phone_sources=tuple(phone_sources),
             website=website,
             address=address,
             current_city=current_city,

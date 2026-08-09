@@ -113,7 +113,11 @@ def test_profile_enricher_visits_directory_routes_once_and_merges_details() -> N
         ),
     ).enrich(browser, record(), fields)
 
-    assert browser.get_calls == [personal, links]
+    assert browser.get_calls == [
+        personal,
+        links,
+        "https://www.facebook.com/synthetic.user",
+    ]
     assert ready_calls == [(browser, 7), (browser, 7)]
     assert content_calls == [
         (browser, 7, personal),
@@ -142,7 +146,12 @@ def test_failed_optional_links_route_keeps_personal_details() -> None:
     ).enrich(browser, record(), ())
 
     assert details.address == "123 Synthetic Street"
-    assert browser.get_calls == [personal, links, work_route()]
+    assert browser.get_calls == [
+        personal,
+        links,
+        work_route(),
+        "https://www.facebook.com/synthetic.user",
+    ]
 
 
 def test_profile_enricher_uses_sanitized_browser_title_for_missing_name() -> None:
@@ -193,7 +202,12 @@ def test_failed_required_personal_route_is_not_hidden_by_loaded_links() -> None:
             ready_func=lambda browser, timeout: None,
         ).enrich(browser, record(), ())
 
-    assert browser.get_calls == [personal, links, work_route()]
+    assert browser.get_calls == [
+        personal,
+        links,
+        work_route(),
+        "https://www.facebook.com/synthetic.user",
+    ]
 
 
 def test_all_navigation_failures_are_sanitized() -> None:
@@ -285,7 +299,12 @@ def test_numeric_profile_switches_to_redirected_vanity_directory_routes() -> Non
         ready_func=lambda browser, timeout: None,
     ).enrich(browser, numeric_record, ())
 
-    assert browser.get_calls == [numeric_personal, vanity_links, work_route()]
+    assert browser.get_calls == [
+        numeric_personal,
+        vanity_links,
+        work_route(),
+        "https://www.facebook.com/synthetic.user",
+    ]
     assert details.canonical_profile_url == (
         "https://www.facebook.com/synthetic.user"
     )
@@ -330,7 +349,12 @@ def test_numeric_profile_can_resolve_vanity_from_canonical_html() -> None:
         ready_func=lambda browser, timeout: None,
     ).enrich(browser, numeric_record, ())
 
-    assert browser.get_calls == [numeric_personal, vanity_links, work_route()]
+    assert browser.get_calls == [
+        numeric_personal,
+        vanity_links,
+        work_route(),
+        "https://www.facebook.com/synthetic.user",
+    ]
     assert details.canonical_profile_url == (
         "https://www.facebook.com/synthetic.user"
     )
@@ -363,6 +387,34 @@ def test_profile_enricher_reports_field_status_and_sources() -> None:
     assert sources["current_city"] == (
         "facebook:directory_personal_details"
     )
+
+
+def test_phone_enrichment_also_scans_visible_profile_timeline() -> None:
+    personal, _ = routes()
+    timeline = "https://www.facebook.com/synthetic.user"
+    browser = Browser({personal: "personal", timeline: "timeline"})
+    parser = Parser(
+        {
+            personal: ProfileDetails(),
+            timeline: ProfileDetails(
+                phone_numbers=("0912 345 678",),
+                phone_sources=("facebook:post_text",),
+            ),
+        }
+    )
+
+    details = ProfileEnricher(
+        BrowserSettings(),
+        parser,  # type: ignore[arg-type]
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+    ).enrich(browser, record(), (ProfileField.PHONE,))
+
+    assert browser.get_calls == [personal, timeline]
+    assert details.phone_numbers == ("0912 345 678",)
+    assert details.phone_sources == ("facebook:post_text",)
+    assert dict(details.field_sources)["phone"] == "facebook:post_text"
 
 
 def test_profile_enricher_marks_unrendered_section_unavailable() -> None:

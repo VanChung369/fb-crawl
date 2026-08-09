@@ -40,6 +40,9 @@ PHONE_CONTEXT_WORDS = (
     "dien thoai",
     "điện thoại",
     "lien he",
+    "số điện thoại",
+    "điện thoại",
+    "liên hệ",
     "liên hệ",
 )
 
@@ -51,6 +54,10 @@ PHONE_PATTERN = re.compile(
     r"\d{3,4}[\s().\-/]*\d{3,4}"
     r"(?:[\s().\-/]*\d{2,4})?"
     r"(?![\w])"
+)
+
+VIETNAM_MOBILE_PATTERN = re.compile(
+    r"(?<!\d)(?:\+?84|0)[\s().-]?[35789](?:[\s().-]?\d){8}(?!\d)"
 )
 
 
@@ -124,6 +131,63 @@ def extract_phone_numbers(
 
             if key and key not in found:
                 found[key] = value
+
+    return list(found.values())
+
+
+def extract_visible_phone_numbers(text: str | None) -> list[str]:
+    """Extract phone-shaped values from user-visible free text.
+
+    Free text is noisier than a dedicated contact field. Plain values are
+    therefore accepted only when they look like a Vietnamese mobile number,
+    carry an international prefix, contain a conventional phone separator,
+    or appear next to an explicit contact word.
+    """
+    if not text:
+        return []
+
+    found: dict[str, str] = {}
+
+    for chunk in re.split(r"[\n\r|â€¢;]+", text):
+        folded = chunk.casefold()
+        has_context = any(word in folded for word in PHONE_CONTEXT_WORDS)
+
+        for match in VIETNAM_MOBILE_PATTERN.finditer(chunk):
+            value = re.sub(r"\s+", " ", match.group(0)).strip()
+            key = _phone_key(value)
+
+            if key:
+                found.setdefault(key, value)
+
+        for value in extract_phone_numbers(chunk):
+            key = _phone_key(value)
+
+            if key is None:
+                continue
+
+            compact = re.sub(r"\s", "", value)
+
+            if re.fullmatch(
+                r"\d{1,4}[./-]\d{1,2}[./-]\d{2,4}", compact
+            ):
+                continue
+
+            vietnam_mobile = bool(
+                re.fullmatch(r"(?:0|84)[35789]\d{8}", key)
+            )
+            malformed_vietnam_mobile = bool(
+                re.match(r"(?:0|84)[35789]", key)
+            ) and not vietnam_mobile
+            international = value.lstrip().startswith("+") and len(key) >= 9
+            separated = len(key) >= 9 and bool(
+                re.search(r"[\s().-]", value)
+            )
+
+            if malformed_vietnam_mobile:
+                continue
+
+            if has_context or vietnam_mobile or international or separated:
+                found.setdefault(key, value)
 
     return list(found.values())
 

@@ -3,6 +3,7 @@ from fb_crawl.adapters.http.contact_parser import (
     extract_phone_numbers,
     extract_raw_phone_numbers,
     extract_uid,
+    extract_visible_phone_numbers,
 )
 
 from fb_crawl.core.models import (
@@ -43,6 +44,24 @@ def test_phone_and_uid_helpers_preserve_regression_behavior() -> None:
     ]
 
     assert extract_uid('{"pageID":"1156899667774877"}') == "1156899667774877"
+
+
+def test_visible_phone_extraction_accepts_strong_patterns_and_context() -> None:
+    assert extract_visible_phone_numbers(
+        "Goi 0912 345 678 hoac Zalo 12345678."
+    ) == ["0912 345 678", "12345678"]
+
+
+def test_visible_phone_extraction_rejects_dates_and_ambiguous_counts() -> None:
+    assert extract_visible_phone_numbers(
+        "Dang ngay 09/08/2026, 174 friends, ma bai 12345678."
+    ) == []
+
+
+def test_visible_phone_does_not_consume_the_date_after_a_mobile_number() -> None:
+    assert extract_visible_phone_numbers(
+        "Hotline +84 987 654 321 dang ngay 09/08/2026"
+    ) == ["+84 987 654 321"]
 
 
 def test_enricher_merges_sources_without_duplicate_phone_values() -> None:
