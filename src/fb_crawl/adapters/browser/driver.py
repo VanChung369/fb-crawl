@@ -8,7 +8,9 @@ from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import (
     BrowserNavigationError,
     ConfigurationError,
+    RateLimitError,
 )
+from fb_crawl.core.identity import ascii_fold
 
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.support.ui import WebDriverWait
@@ -16,6 +18,15 @@ from selenium import webdriver
 
 
 MAX_PROFILE_CONTENT_WAIT_SECONDS = 15.0
+
+RATE_LIMIT_MARKERS = (
+    "you're temporarily blocked",
+    "you’re temporarily blocked",
+    "we limit how often",
+    "temporarily blocked",
+    "chung toi gioi han tan suat",
+    "ban tam thoi bi chan",
+)
 
 PROFILE_SECTION_LABELS = {
     "directory_personal_details": (
@@ -200,6 +211,28 @@ def wait_for_document_ready(
 
     except WebDriverException as error:
         raise BrowserNavigationError("Facebook page readiness timed out.") from error
+
+    if not hasattr(browser, "execute_script"):
+        return
+
+    try:
+        visible_text = str(
+            browser.execute_script(
+                "return document.body ? document.body.innerText : '';"
+            )
+            or ""
+        )
+    except WebDriverException as error:
+        raise BrowserNavigationError(
+            "Facebook page inspection failed."
+        ) from error
+
+    folded = " ".join(ascii_fold(visible_text).split())
+
+    if any(marker in folded for marker in RATE_LIMIT_MARKERS):
+        raise RateLimitError(
+            "Facebook temporarily limited authenticated requests."
+        )
 
 
 def _profile_section(source_url: str) -> str:

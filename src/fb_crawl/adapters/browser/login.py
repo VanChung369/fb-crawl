@@ -244,6 +244,9 @@ class SessionManager:
         self,
         browser,
     ) -> None:
+        if is_authenticated(browser):
+            return
+
         if self._store.restore(browser):
             return
 

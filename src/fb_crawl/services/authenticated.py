@@ -626,6 +626,7 @@ class AuthenticatedService:
                         target=(error.target or url),
                         mode=ScrapeMode.AUTHENTICATED,
                         action=action.value,
+                        retryable=True,
                     )
                 )
                 continue
@@ -666,6 +667,7 @@ class AuthenticatedService:
                                 target=(error.target or record.profile_url),
                                 mode=ScrapeMode.AUTHENTICATED,
                                 action="uid_resolution",
+                                retryable=True,
                             )
                         )
                     else:
@@ -939,6 +941,7 @@ class AuthenticatedService:
                             target=(error.target or url),
                             mode=(ScrapeMode.AUTHENTICATED),
                             action=issue_action,
+                            retryable=True,
                         )
                     )
 
@@ -983,6 +986,7 @@ class AuthenticatedService:
                             target=(error.target or record.profile_url),
                             mode=ScrapeMode.AUTHENTICATED,
                             action="uid_resolution",
+                            retryable=True,
                         )
                     )
                     resolved = record
@@ -1066,6 +1070,7 @@ class AuthenticatedService:
                             target=(error.target or record.profile_url),
                             mode=ScrapeMode.AUTHENTICATED,
                             action="profile_enrichment",
+                            retryable=True,
                         )
                     )
 
@@ -1088,6 +1093,7 @@ class AuthenticatedService:
                             target=record.profile_url,
                             mode=ScrapeMode.AUTHENTICATED,
                             action="profile_enrichment",
+                            retryable=True,
                         )
                     )
 
@@ -1337,6 +1343,7 @@ class AuthenticatedService:
                         target=error.target or url,
                         mode=ScrapeMode.AUTHENTICATED,
                         action=action.value,
+                        retryable=True,
                     )
                 )
 
@@ -1405,6 +1412,7 @@ class AuthenticatedService:
                         target=error.target or url,
                         mode=ScrapeMode.AUTHENTICATED,
                         action=action.value,
+                        retryable=True,
                     )
                 )
 

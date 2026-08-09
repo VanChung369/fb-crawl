@@ -60,6 +60,9 @@ def _common(
         type=float,
         default=3.0,
     )
+    parser.add_argument("--max-retries", type=int, default=2)
+    parser.add_argument("--retry-backoff", type=float, default=5.0)
+    parser.add_argument("--retry-jitter", type=float, default=1.0)
     parser.add_argument(
         "--headless",
         action=argparse.BooleanOptionalAction,
@@ -379,6 +382,9 @@ def request_from_authenticated_args(
         incremental=args.incremental,
         checkpoint_path=str(checkpoint) if checkpoint is not None else None,
         force_uid_refresh=args.force,
+        max_retries=args.max_retries,
+        retry_backoff_seconds=args.retry_backoff,
+        retry_jitter_seconds=args.retry_jitter,
     )
 
 
@@ -799,7 +805,19 @@ def execute_authenticated(
                 f" birth_year_found={result.enrichment.birth_year_found}"
             )
 
+        if result.retry is not None:
+            summary += (
+                f" targets_attempted={result.retry.attempted_targets}"
+                f" retried={result.retry.retried}"
+                f" rate_limited={result.retry.rate_limited}"
+                f" pending={result.retry.pending}"
+                f" interrupted={result.retry.interrupted}"
+            )
+
         print(summary)
+
+        if result.retry is not None and result.retry.interrupted:
+            return 130
 
         return 1 if result.has_failures else 0
 

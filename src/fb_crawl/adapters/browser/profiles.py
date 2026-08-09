@@ -17,6 +17,7 @@ from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import (
     BrowserNavigationError,
     BrowserParseError,
+    RateLimitError,
     SessionError,
 )
 from fb_crawl.core.models import (
@@ -251,7 +252,7 @@ class ProfileEnricher:
                 if content_ready is False:
                     unavailable_sections.add(section)
 
-            except SessionError:
+            except (SessionError, RateLimitError):
                 raise
 
             except Exception:

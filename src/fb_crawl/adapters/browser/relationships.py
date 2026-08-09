@@ -8,7 +8,11 @@ from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
 from fb_crawl.adapters.browser.driver import wait_for_document_ready
 from fb_crawl.adapters.browser.session import is_authenticated
 from fb_crawl.config import BrowserSettings
-from fb_crawl.core.exceptions import BrowserNavigationError, SessionError
+from fb_crawl.core.exceptions import (
+    BrowserNavigationError,
+    RateLimitError,
+    SessionError,
+)
 
 
 RELATIONSHIP_CONTENT_SCRIPT = """
@@ -86,7 +90,7 @@ class RelationshipCollector:
             html = browser.execute_script(RELATIONSHIP_CONTENT_SCRIPT)
             return str(html or browser.page_source), attempts
 
-        except SessionError:
+        except (SessionError, RateLimitError):
             raise
 
         except Exception as error:

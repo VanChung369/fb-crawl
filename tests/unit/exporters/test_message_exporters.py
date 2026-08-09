@@ -6,6 +6,7 @@ from fb_crawl.core.models import (
     AuthenticatedBatchResult,
     InspectRecord,
     MessageRecord,
+    RetryStats,
     ScrapeResult,
     ScrapeStats,
     UserRecord,
@@ -51,6 +52,25 @@ def test_message_json_contains_stats_and_visible_records(tmp_path: Path) -> None
     assert payload["records"][0]["message_id"] == "mid.1"
     assert payload["stats"]["succeeded"] == 1
     assert payload["enrichment"] is None
+
+
+def test_message_json_includes_target_retry_coverage(tmp_path: Path) -> None:
+    output = tmp_path / "messages.json"
+    retry_result = ScrapeResult(
+        records=result().records,
+        issues=(),
+        stats=result().stats,
+        retry=RetryStats(
+            attempted_targets=1,
+            retried=1,
+            rate_limited=0,
+            pending=0,
+        ),
+    )
+
+    assert write_messages(retry_result, output, "json") is True
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["retry"]["retried"] == 1
 
 
 def test_authenticated_writer_dispatches_message_records(tmp_path: Path) -> None:

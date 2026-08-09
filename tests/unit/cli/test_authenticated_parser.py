@@ -88,6 +88,28 @@ def test_force_requests_fresh_uid_resolution() -> None:
     assert request_from_authenticated_args(args).force_uid_refresh is True
 
 
+def test_authenticated_retry_policy_builds_typed_request() -> None:
+    args = build_parser().parse_args(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--max-retries",
+            "4",
+            "--retry-backoff",
+            "2.5",
+            "--retry-jitter",
+            "0.25",
+        ]
+    )
+
+    request = request_from_authenticated_args(args)
+
+    assert request.max_retries == 4
+    assert request.retry_backoff_seconds == 2.5
+    assert request.retry_jitter_seconds == 0.25
+
+
 def test_batch_reader_ignores_blank_and_comment_lines(
     tmp_path: Path,
 ) -> None:

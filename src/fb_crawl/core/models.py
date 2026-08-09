@@ -89,6 +89,9 @@ class ScrapeRequest:
     incremental: bool = False
     checkpoint_path: str | None = None
     force_uid_refresh: bool = False
+    max_retries: int = 2
+    retry_backoff_seconds: float = 5.0
+    retry_jitter_seconds: float = 1.0
 
     def __post_init__(self) -> None:
         if self.limit <= 0:
@@ -131,6 +134,14 @@ class ScrapeRequest:
 
         if self.resume and self.incremental:
             raise ValueError("resume and incremental cannot be used together")
+
+        if self.max_retries < 0:
+            raise ValueError("max_retries must be greater than or equal to 0")
+
+        if self.retry_backoff_seconds < 0 or self.retry_jitter_seconds < 0:
+            raise ValueError(
+                "retry backoff and jitter must be greater than or equal to 0"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +267,15 @@ class ScrapeStats:
 
 
 @dataclass(frozen=True, slots=True)
+class RetryStats:
+    attempted_targets: int
+    retried: int
+    rate_limited: int
+    pending: int
+    interrupted: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class EnrichmentStats:
     selected: int
     attempted: int
@@ -325,6 +345,7 @@ class ScrapeResult(Generic[RecordT]):
     stats: ScrapeStats
     enrichment: EnrichmentStats | None = None
     uid_resolution: UidResolutionStats | None = None
+    retry: RetryStats | None = None
 
     @property
     def has_failures(self) -> bool:
@@ -340,6 +361,7 @@ class AuthenticatedBatchResult:
     issues: tuple[ScrapeIssue, ...]
     enrichment: EnrichmentStats | None = None
     uid_resolution: UidResolutionStats | None = None
+    retry: RetryStats | None = None
 
     @property
     def records(self) -> tuple[UserRecord | MessageRecord | InspectRecord, ...]:

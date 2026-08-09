@@ -17,6 +17,7 @@ from fb_crawl.core.models import (
     EnrichmentStats,
     IdentityRepairResult,
     IdentityRepairStats,
+    RetryStats,
     ScrapeResult,
     ScrapeStats,
     UserRecord,
@@ -543,3 +544,84 @@ def test_identity_repair_uses_distinct_session_and_interrupt_exit_codes(
 
     assert exit_code == expected_exit
     assert browser.quit_calls == 1
+
+
+def test_authenticated_interruption_summary_returns_130_and_keeps_output(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    browser = Browser()
+
+    class InterruptedService(Service):
+        def run(self, request, browser):
+            result = super().run(request, browser)
+            return ScrapeResult(
+                records=result.records,
+                issues=result.issues,
+                stats=result.stats,
+                retry=RetryStats(
+                    attempted_targets=2,
+                    retried=1,
+                    rate_limited=0,
+                    pending=1,
+                    interrupted=1,
+                ),
+            )
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime(browser, InterruptedService()),
+    )
+    output = tmp_path / "members.csv"
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--output",
+            str(output),
+            "--headless",
+        ]
+    )
+
+    summary = capsys.readouterr().out
+    assert exit_code == 130
+    assert output.exists()
+    assert "targets_attempted=2" in summary
+    assert "retried=1" in summary
+    assert "pending=1" in summary
+    assert "interrupted=1" in summary
+    assert browser.quit_calls == 1
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--max-retries", "-1"],
+        ["--retry-backoff", "-1"],
+        ["--retry-jitter", "-1"],
+    ],
+)
+def test_invalid_authenticated_retry_options_fail_before_runtime(
+    monkeypatch,
+    extra: list[str],
+) -> None:
+    runtime_loads = []
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_runtime",
+        lambda: runtime_loads.append(True),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            *extra,
+        ]
+    )
+
+    assert exit_code == 2
+    assert runtime_loads == []

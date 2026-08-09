@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import random
+import time
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Protocol
@@ -12,6 +15,7 @@ from fb_crawl.core.models import (
     EnrichmentStats,
     InspectRecord,
     MessageRecord,
+    RetryStats,
     ScrapeIssue,
     ScrapeMode,
     ScrapeRequest,
@@ -25,6 +29,7 @@ from fb_crawl.services.authenticated import _merge_record, _prepared_targets
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
+RATE_LIMIT_CODE = "authenticated_rate_limited"
 
 
 class AuthenticatedServicePort(Protocol):
@@ -116,6 +121,25 @@ def _parts(result, action: AuthenticatedAction):
     )
 
 
+def _result_issues(
+    result,
+    action: AuthenticatedAction,
+) -> tuple[ScrapeIssue, ...]:
+    users, messages, inspections, _, _ = _parts(result, action)
+    return (*users.issues, *messages.issues, *inspections.issues)
+
+
+def _result_quality(result, action: AuthenticatedAction) -> tuple[int, int]:
+    users, messages, inspections, _, _ = _parts(result, action)
+    issues = (*users.issues, *messages.issues, *inspections.issues)
+    records = (
+        len(users.records)
+        + len(messages.records)
+        + len(inspections.records)
+    )
+    return len(issues), -records
+
+
 def _target_keys(request: ScrapeRequest) -> tuple[str, ...]:
     keys: list[str] = []
 
@@ -178,8 +202,52 @@ class JsonCheckpointStore:
 
 
 class CheckpointingService:
-    def __init__(self, service: AuthenticatedServicePort) -> None:
+    def __init__(
+        self,
+        service: AuthenticatedServicePort,
+        *,
+        sleep_func: Callable[[float], None] = time.sleep,
+        jitter_func: Callable[[float, float], float] = random.uniform,
+    ) -> None:
         self._service = service
+        self._sleep = sleep_func
+        self._jitter = jitter_func
+
+    def _run_with_retry(self, request: ScrapeRequest, browser):
+        action = AuthenticatedAction(request.action)
+        best = None
+        retried = 0
+        rate_limited = 0
+
+        for retry_index in range(request.max_retries + 1):
+            result = self._service.run(request, browser)
+            issues = _result_issues(result, action)
+            rate_limited += sum(
+                issue.code == RATE_LIMIT_CODE for issue in issues
+            )
+
+            if best is None or _result_quality(
+                result,
+                action,
+            ) <= _result_quality(best, action):
+                best = result
+
+            retryable = any(issue.retryable for issue in issues)
+
+            if not retryable or retry_index >= request.max_retries:
+                return best, retried, rate_limited, retryable
+
+            retried += 1
+            backoff = min(
+                request.retry_backoff_seconds * (2**retry_index),
+                300.0,
+            )
+            self._sleep(
+                backoff
+                + self._jitter(0.0, request.retry_jitter_seconds)
+            )
+
+        raise AssertionError("bounded authenticated retry loop exhausted")
 
     def _store(self, request: ScrapeRequest) -> JsonCheckpointStore:
         if not request.checkpoint_path:
@@ -210,11 +278,9 @@ class CheckpointingService:
             self._validated_state(request)
 
     def run(self, request: ScrapeRequest, browser):
-        if not (request.resume or request.incremental):
-            return self._service.run(request, browser)
-
-        store = self._store(request)
-        state = self._validated_state(request)
+        checkpoint_enabled = request.resume or request.incremental
+        store = self._store(request) if checkpoint_enabled else None
+        state = self._validated_state(request) if checkpoint_enabled else None
         known_users = {
             item["user_id"]: _user_from_json(item)
             for item in (state or {}).get("users", ())
@@ -238,8 +304,29 @@ class CheckpointingService:
         output_issues = list(stored_issues) if request.resume else []
         enrichment_values: list[EnrichmentStats] = []
         uid_values: list[UidResolutionStats] = []
+        attempted_targets = 0
+        retried = 0
+        rate_limited = 0
+        pending = 0
+        interrupted = 0
+        pending_targets = []
 
         for raw_target in request.targets:
+            candidate = replace(
+                request,
+                targets=(raw_target,),
+                resume=False,
+                incremental=False,
+                checkpoint_path=None,
+            )
+            key = _single_target_key(candidate)
+
+            if request.resume and key in completed:
+                continue
+
+            pending_targets.append(raw_target)
+
+        for target_index, raw_target in enumerate(pending_targets):
             single = replace(
                 request,
                 targets=(raw_target,),
@@ -249,16 +336,69 @@ class CheckpointingService:
             )
             key = _single_target_key(single)
 
-            if request.resume and key in completed:
-                continue
-
             normalized_target = key.split(":", 1)[1] if ":" in key else key
             output_issues = [
                 issue
                 for issue in output_issues
                 if issue.target != normalized_target
             ]
-            result = self._service.run(single, browser)
+            attempted_targets += 1
+
+            try:
+                (
+                    result,
+                    target_retried,
+                    target_rate_limited,
+                    retryable_failure,
+                ) = self._run_with_retry(single, browser)
+            except KeyboardInterrupt:
+                interrupted = 1
+                pending += len(pending_targets) - target_index
+                issue = ScrapeIssue(
+                    code="authenticated_interrupted",
+                    message="Authenticated collection was interrupted safely.",
+                    target=normalized_target,
+                    mode=ScrapeMode.AUTHENTICATED,
+                    action=str(request.action),
+                    retryable=True,
+                )
+                output_issues.append(issue)
+                stored_issues = [
+                    item
+                    for item in stored_issues
+                    if item.target != normalized_target
+                ]
+                stored_issues.append(issue)
+
+                if store is not None:
+                    store.save(
+                        {
+                            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                            "action": str(request.action),
+                            "target_keys": list(_target_keys(request)),
+                            "request_options": _request_options(request),
+                            "completed_targets": sorted(completed),
+                            "users": [
+                                asdict(item) for item in known_users.values()
+                            ],
+                            "messages": [
+                                asdict(item)
+                                for item in known_messages.values()
+                            ],
+                            "inspect": [
+                                asdict(item) for item in known_inspect.values()
+                            ],
+                            "issues": [
+                                asdict(item) for item in stored_issues
+                            ],
+                        }
+                    )
+
+                break
+
+            retried += target_retried
+            rate_limited += target_rate_limited
+            pending += retryable_failure
             action = AuthenticatedAction(single.action)
             (
                 users,
@@ -269,12 +409,25 @@ class CheckpointingService:
             ) = _parts(result, action)
 
             for record in users.records:
+                bounded_users = action in {
+                    AuthenticatedAction.FRIENDS,
+                    AuthenticatedAction.FOLLOWERS,
+                    AuthenticatedAction.BATCH,
+                }
+
+                if (
+                    bounded_users
+                    and record.user_id not in known_users
+                    and len(known_users) >= request.max_nodes
+                ):
+                    continue
+
                 was_known = record.user_id in known_users
                 existing = known_users.get(record.user_id)
                 known_users[record.user_id] = (
                     record if existing is None else _merge_record(existing, record)
                 )
-                if request.resume or not was_known:
+                if not request.incremental or not was_known:
                     output_users[record.user_id] = known_users[record.user_id]
 
             for record in messages.records:
@@ -283,7 +436,7 @@ class CheckpointingService:
                 known_messages[record.message_id] = (
                     record if existing is None else _merge_message(existing, record)
                 )
-                if request.resume or not was_known:
+                if not request.incremental or not was_known:
                     output_messages[record.message_id] = known_messages[
                         record.message_id
                     ]
@@ -291,7 +444,7 @@ class CheckpointingService:
             for record in inspections.records:
                 was_known = record.target_url in known_inspect
                 known_inspect[record.target_url] = record
-                if request.resume or not was_known:
+                if not request.incremental or not was_known:
                     output_inspect[record.target_url] = record
 
             current_issues = [*users.issues, *messages.issues, *inspections.issues]
@@ -309,21 +462,26 @@ class CheckpointingService:
             if uid_resolution is not None:
                 uid_values.append(uid_resolution)
 
-            store.save(
-                {
-                    "schema_version": CHECKPOINT_SCHEMA_VERSION,
-                    "action": str(request.action),
-                    "target_keys": list(_target_keys(request)),
-                    "request_options": _request_options(request),
-                    "completed_targets": sorted(completed),
-                    "users": [asdict(item) for item in known_users.values()],
-                    "messages": [
-                        asdict(item) for item in known_messages.values()
-                    ],
-                    "inspect": [asdict(item) for item in known_inspect.values()],
-                    "issues": [asdict(item) for item in stored_issues],
-                }
-            )
+            if store is not None:
+                store.save(
+                    {
+                        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                        "action": str(request.action),
+                        "target_keys": list(_target_keys(request)),
+                        "request_options": _request_options(request),
+                        "completed_targets": sorted(completed),
+                        "users": [
+                            asdict(item) for item in known_users.values()
+                        ],
+                        "messages": [
+                            asdict(item) for item in known_messages.values()
+                        ],
+                        "inspect": [
+                            asdict(item) for item in known_inspect.values()
+                        ],
+                        "issues": [asdict(item) for item in stored_issues],
+                    }
+                )
 
         enrichment = (
             EnrichmentStats(
@@ -358,41 +516,58 @@ class CheckpointingService:
             if uid_values
             else None
         )
+        retry_stats = RetryStats(
+            attempted_targets=attempted_targets,
+            retried=retried,
+            rate_limited=rate_limited,
+            pending=pending,
+            interrupted=interrupted,
+        )
+        message_issues = tuple(
+            issue for issue in output_issues if issue.action == "messages"
+        )
+        inspect_issues = tuple(
+            issue for issue in output_issues if issue.action == "inspect"
+        )
+        user_issues = tuple(
+            issue
+            for issue in output_issues
+            if issue.action not in {"messages", "inspect"}
+        )
         user_result = ScrapeResult(
             records=tuple(output_users.values()),
-            issues=tuple(
-                issue for issue in output_issues if issue.action != "messages"
-            ),
+            issues=user_issues,
             stats=ScrapeStats(
                 requested=len(request.targets),
                 discovered=len(output_users),
                 succeeded=len(output_users),
-                failed=len(output_issues),
+                failed=len(user_issues),
             ),
             enrichment=enrichment,
             uid_resolution=uid_resolution,
+            retry=retry_stats,
         )
         message_result = ScrapeResult(
             records=tuple(output_messages.values()),
-            issues=tuple(
-                issue for issue in output_issues if issue.action == "messages"
-            ),
+            issues=message_issues,
             stats=ScrapeStats(
                 requested=len(request.targets),
                 discovered=len(output_messages),
                 succeeded=len(output_messages),
-                failed=len(output_issues),
+                failed=len(message_issues),
             ),
+            retry=retry_stats,
         )
         inspect_result = ScrapeResult(
             records=tuple(output_inspect.values()),
-            issues=(),
+            issues=inspect_issues,
             stats=ScrapeStats(
                 requested=len(request.targets),
                 discovered=len(output_inspect),
                 succeeded=len(output_inspect),
-                failed=0,
+                failed=len(inspect_issues),
             ),
+            retry=retry_stats,
         )
         action = AuthenticatedAction(request.action)
 
@@ -424,4 +599,5 @@ class CheckpointingService:
             issues=tuple(output_issues),
             enrichment=enrichment,
             uid_resolution=uid_resolution,
+            retry=retry_stats,
         )

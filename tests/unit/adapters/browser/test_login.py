@@ -24,8 +24,10 @@ class FakeStore:
     ) -> None:
         self.restored = restored
         self.saved = 0
+        self.restore_calls = 0
 
     def restore(self, browser) -> bool:
+        self.restore_calls += 1
         return self.restored
 
     def save(self, browser) -> None:
@@ -142,6 +144,21 @@ def test_manager_reuses_restored_session_without_credentials() -> None:
     manager.ensure_authenticated(Browser())
 
     assert store.saved == 0
+
+
+def test_manager_reuses_browser_session_without_restoring_cookies() -> None:
+    store = FakeStore(restored=False)
+    browser = Browser()
+    browser.cookies = [{"name": "c_user", "value": "100"}]
+    manager = SessionManager(
+        store,
+        BrowserSettings(headless=True),
+        credentials_provider=lambda: pytest.fail("credentials must not be requested"),
+    )
+
+    manager.ensure_authenticated(browser)
+
+    assert store.restore_calls == 0
 
 
 def test_headless_manager_fails_without_prompt_when_restore_fails() -> None:

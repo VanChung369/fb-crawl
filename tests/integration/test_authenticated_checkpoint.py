@@ -7,6 +7,7 @@ from fb_crawl.core.exceptions import SessionError, ValidationError
 from fb_crawl.core.models import (
     AuthenticatedAction,
     ScrapeMode,
+    ScrapeIssue,
     ScrapeRequest,
     ScrapeResult,
     ScrapeStats,
@@ -151,3 +152,199 @@ def test_checkpoint_depth_or_time_mismatch_fails_validation(
 
     with pytest.raises(ValidationError, match="options do not match"):
         CheckpointingService(PerTargetService()).validate(changed)
+
+
+def issue_result(
+    target: str,
+    *,
+    code: str = "authenticated_navigation_failed",
+    retryable: bool = True,
+) -> ScrapeResult[UserRecord]:
+    return ScrapeResult(
+        records=(),
+        issues=(
+            ScrapeIssue(
+                code=code,
+                message="Authenticated target failed.",
+                target=target,
+                mode=ScrapeMode.AUTHENTICATED,
+                action=AuthenticatedAction.MEMBERS.value,
+                retryable=retryable,
+            ),
+        ),
+        stats=ScrapeStats(
+            requested=1,
+            discovered=0,
+            succeeded=0,
+            failed=1,
+        ),
+    )
+
+
+class OutcomeService:
+    def __init__(self, outcomes: dict[str, list[object]]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[str] = []
+
+    def validate(self, request: ScrapeRequest) -> None:
+        return None
+
+    def run(self, request: ScrapeRequest, browser):
+        target = request.targets[0]
+        self.calls.append(target)
+        outcome = self.outcomes[target].pop(0)
+
+        if isinstance(outcome, BaseException):
+            raise outcome
+
+        return outcome
+
+
+def plain_request(*targets: str, **changes) -> ScrapeRequest:
+    return ScrapeRequest(
+        mode=ScrapeMode.AUTHENTICATED,
+        action=AuthenticatedAction.MEMBERS,
+        targets=targets,
+        **changes,
+    )
+
+
+def test_retryable_target_uses_backoff_then_keeps_success() -> None:
+    target = "https://www.facebook.com/groups/100"
+    service = OutcomeService(
+        {
+            target: [
+                issue_result(target),
+                result(record("100", target)),
+            ]
+        }
+    )
+    sleeps = []
+    outcome = CheckpointingService(
+        service,
+        sleep_func=sleeps.append,
+        jitter_func=lambda low, high: high / 2,
+    ).run(
+        plain_request(
+            target,
+            max_retries=1,
+            retry_backoff_seconds=2,
+            retry_jitter_seconds=0.5,
+        ),
+        object(),
+    )
+
+    assert service.calls == [target, target]
+    assert [item.user_id for item in outcome.records] == ["100"]
+    assert outcome.issues == ()
+    assert outcome.retry.retried == 1
+    assert outcome.retry.pending == 0
+    assert sleeps == [2.25]
+
+
+def test_nonretryable_target_is_not_repeated() -> None:
+    target = "https://www.facebook.com/groups/100"
+    service = OutcomeService(
+        {target: [issue_result(target, retryable=False)]}
+    )
+
+    outcome = CheckpointingService(service).run(
+        plain_request(target, max_retries=3),
+        object(),
+    )
+
+    assert service.calls == [target]
+    assert outcome.retry.retried == 0
+    assert outcome.retry.pending == 0
+
+
+def test_rate_limit_issue_is_counted_across_attempts() -> None:
+    target = "https://www.facebook.com/groups/100"
+    service = OutcomeService(
+        {
+            target: [
+                issue_result(target, code="authenticated_rate_limited"),
+                result(record("100", target)),
+            ]
+        }
+    )
+
+    outcome = CheckpointingService(
+        service,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda low, high: 0,
+    ).run(plain_request(target, max_retries=1), object())
+
+    assert outcome.retry.rate_limited == 1
+    assert outcome.retry.retried == 1
+
+
+def test_keyboard_interrupt_returns_completed_targets_and_pending_count() -> None:
+    first = "https://www.facebook.com/groups/100"
+    second = "https://www.facebook.com/groups/200"
+    service = OutcomeService(
+        {
+            first: [result(record("100", first))],
+            second: [KeyboardInterrupt()],
+        }
+    )
+
+    outcome = CheckpointingService(service).run(
+        plain_request(first, second),
+        object(),
+    )
+
+    assert [item.user_id for item in outcome.records] == ["100"]
+    assert outcome.retry.attempted_targets == 2
+    assert outcome.retry.interrupted == 1
+    assert outcome.retry.pending == 1
+    assert outcome.issues[-1].code == "authenticated_interrupted"
+
+
+def test_resume_checkpoint_skips_target_completed_before_interrupt(
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "interrupt.json"
+    first = "https://www.facebook.com/groups/100"
+    second = "https://www.facebook.com/groups/200"
+    interrupted_service = OutcomeService(
+        {
+            first: [result(record("100", first))],
+            second: [KeyboardInterrupt()],
+        }
+    )
+    interrupted_request = request(checkpoint, first, second)
+
+    partial = CheckpointingService(interrupted_service).run(
+        interrupted_request,
+        object(),
+    )
+    assert partial.retry.interrupted == 1
+
+    resumed_service = OutcomeService(
+        {second: [result(record("200", second))]}
+    )
+    resumed = CheckpointingService(resumed_service).run(
+        interrupted_request,
+        object(),
+    )
+
+    assert resumed_service.calls == [second]
+    assert [item.user_id for item in resumed.records] == ["100", "200"]
+    assert resumed.retry.pending == 0
+
+
+def test_interrupted_inspect_keeps_issue_for_json_export() -> None:
+    target = "https://www.facebook.com/synthetic.user"
+    service = OutcomeService({target: [KeyboardInterrupt()]})
+    inspect_request = ScrapeRequest(
+        mode=ScrapeMode.AUTHENTICATED,
+        action=AuthenticatedAction.INSPECT,
+        targets=(target,),
+    )
+
+    outcome = CheckpointingService(service).run(inspect_request, object())
+
+    assert outcome.retry.interrupted == 1
+    assert outcome.stats.failed == 1
+    assert outcome.issues[0].code == "authenticated_interrupted"

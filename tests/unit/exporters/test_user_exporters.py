@@ -1,12 +1,14 @@
 import pytest
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from fb_crawl.core.models import (
     AuthenticatedAction,
     EnrichmentStats,
     ScrapeIssue,
+    RetryStats,
     ScrapeMode,
     ScrapeResult,
     ScrapeStats,
@@ -114,6 +116,30 @@ def test_user_json_keeps_full_result_envelope(tmp_path: Path) -> None:
     assert len(payload["records"]) == 1
     assert payload["stats"]["failed"] == 1
     assert payload["enrichment"]["birth_year_found"] == 1
+
+
+def test_user_json_includes_authenticated_retry_coverage(tmp_path: Path) -> None:
+    path = tmp_path / "users.json"
+    retry_result = replace(
+        result(),
+        retry=RetryStats(
+            attempted_targets=2,
+            retried=1,
+            rate_limited=1,
+            pending=0,
+        ),
+    )
+
+    assert write_users(retry_result, path, "json") is True
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["retry"] == {
+        "attempted_targets": 2,
+        "retried": 1,
+        "rate_limited": 1,
+        "pending": 0,
+        "interrupted": 0,
+    }
 
 
 def test_numeric_profile_php_is_not_exported_as_username() -> None:

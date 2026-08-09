@@ -14,6 +14,7 @@ from fb_crawl.adapters.browser.session import (
 from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import (
     BrowserNavigationError,
+    RateLimitError,
     SessionError,
 )
 
@@ -113,7 +114,7 @@ class MembersCollector:
                 attempts,
             )
 
-        except SessionError:
+        except (SessionError, RateLimitError):
             raise
 
         except Exception as error:

@@ -274,7 +274,7 @@ class ProfileIdentityResolver:
                     "The authenticated Facebook session is no longer valid."
                 )
 
-        except SessionError:
+        except (SessionError, RateLimitError):
             raise
 
         except Exception as error:

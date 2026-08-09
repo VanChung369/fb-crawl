@@ -44,6 +44,7 @@ def write_json(
         "stats": _jsonable(result.stats),
         "enrichment": _jsonable(result.enrichment),
         "uid_resolution": _jsonable(result.uid_resolution),
+        "retry": _jsonable(result.retry),
     }
 
     with atomic_text_writer(

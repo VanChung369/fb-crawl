@@ -7,6 +7,7 @@ from fb_crawl.config import BrowserSettings
 
 from fb_crawl.core.exceptions import (
     BrowserNavigationError,
+    RateLimitError,
     SessionError,
 )
 
@@ -161,3 +162,20 @@ def test_members_collector_sanitizes_driver_failure() -> None:
     assert captured.value.target == ("https://www.facebook.com/" "groups/1/members")
 
     assert "private HTML" not in captured.value.safe_message
+
+
+def test_members_collector_preserves_rate_limit_signal() -> None:
+    collector = MembersCollector(
+        BrowserSettings(),
+        ready_func=lambda browser, timeout: (_ for _ in ()).throw(
+            RateLimitError("Facebook temporarily limited requests.")
+        ),
+    )
+
+    with pytest.raises(RateLimitError):
+        collector.collect(
+            FakeBrowser([100]),
+            "https://www.facebook.com/groups/1/members",
+            steps=1,
+            delay_seconds=0,
+        )

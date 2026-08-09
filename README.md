@@ -68,6 +68,11 @@ fb-crawl authenticated friends https://www.facebook.com/USERNAME `
   --depth 2 --max-users 500 --max-duration 120 --headless
 ```
 
+Every authenticated URL uses the same bounded retry policy. Transient
+navigation, parsing, and rate-limit failures retry with exponential backoff and
+jitter; session/checkpoint/2FA failures stop immediately. Override the defaults
+with `--max-retries`, `--retry-backoff`, and `--retry-jitter`.
+
 Resolved username-to-UID pairs are written atomically after each profile to
 `runtime/cache/profile-uids.json` and reused by later runs. Add `--force` to
 ignore cached mappings, resolve them again, and refresh the cache.
@@ -125,7 +130,7 @@ the current CLI.
 - `2`: invalid input or configuration
 - `3`: authenticated session, login, or manual verification unavailable
 - `4`: output could not be written safely
-- `130`: identity repair was stopped safely with `Ctrl+C`
+- `130`: authenticated collection was stopped safely with `Ctrl+C`
 
 ## Privacy and safety
 

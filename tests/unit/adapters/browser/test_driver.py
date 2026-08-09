@@ -7,7 +7,7 @@ from fb_crawl.adapters.browser.driver import (
     wait_for_profile_content,
 )
 from fb_crawl.config import BrowserSettings
-from fb_crawl.core.exceptions import ConfigurationError
+from fb_crawl.core.exceptions import ConfigurationError, RateLimitError
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 
@@ -93,6 +93,30 @@ def test_document_ready_wait_uses_explicit_timeout(
     )
 
     assert observed == [12.5]
+
+
+def test_document_ready_detects_visible_rate_limit_surface(monkeypatch) -> None:
+    class Browser:
+        def execute_script(self, script: str):
+            if "readyState" in script:
+                return "complete"
+
+            return "We limit how often you can do certain things."
+
+    class FakeWait:
+        def __init__(self, browser, timeout: float) -> None:
+            self.browser = browser
+
+        def until(self, predicate) -> None:
+            assert predicate(self.browser)
+
+    monkeypatch.setattr(
+        "fb_crawl.adapters.browser.driver.WebDriverWait",
+        FakeWait,
+    )
+
+    with pytest.raises(RateLimitError):
+        wait_for_document_ready(Browser(), 5)
 
 
 def test_profile_content_wait_scrolls_and_uses_bounded_timeout(monkeypatch) -> None:

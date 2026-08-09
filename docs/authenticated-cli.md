@@ -305,6 +305,9 @@ completed targets, and safe issues. They never contain cookie/session content,
 passwords, full HTML, or screenshots. Resume is target-level because Facebook
 does not provide a stable private infinite-scroll cursor. A checkpoint is
 rejected if its action or normalized target set differs from the command.
+Each completed target is persisted immediately. `Ctrl+C` returns the completed
+targets, records an interrupted target, and exits with code `130`; the next
+matching `--resume` run skips completed targets and continues from that target.
 
 ## Safe diagnostics
 
@@ -328,6 +331,12 @@ parser version. It never writes DOM text, raw HTML, screenshots, or cookies.
   surface stops growing or no visible load-more action remains. `Ctrl+C` remains
   an explicit manual stop signal.
 - `--delay` defaults to `3.0` seconds and must be zero or greater.
+- `--max-retries` defaults to `2` for each authenticated target.
+- `--retry-backoff` defaults to `5.0` seconds and grows exponentially, capped
+  at 300 seconds.
+- `--retry-jitter` defaults to `1.0` second and randomizes retry timing.
+- Navigation, parse, UID-resolution, profile-enrichment, and rate-limit issues
+  are retryable. Invalid input and session/checkpoint/2FA failures are not.
 - `--depth` defaults to `1` for friends/followers and must be greater than zero.
 - `--max-users` defaults to `1000` and bounds unique BFS user output.
 - `--force` ignores cached username-to-UID mappings, resolves them again, and
@@ -372,7 +381,7 @@ runtime/output/batch.csv
 CSV and XLSX columns are:
 
 ```text
-user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,bio,workplace,education,gender,languages,relationship_status,phone_numbers,phone_sources,field_status,field_sources,first_seen,last_seen,last_enriched_at,commented,reacted,reaction_types,interaction_count,profile_url,source,source_url,depth,error_code,error_message
+user_id,name,username,page_name,category,website,address,current_city,hometown,birth_date,birth_year,bio,workplace,education,gender,languages,relationship_status,phone_numbers,phone_sources,field_status,field_sources,first_seen,last_seen,last_enriched_at,commented,reacted,reaction_types,interaction_count,profile_url,source,source_url,depth,identity_status,identity_source,identity_error_code,identity_error_message,error_code,error_message
 ```
 
 Authenticated profile/member/comment/friend/follower/reaction records populate
@@ -385,9 +394,10 @@ For authenticated users, `user_id` is numeric only. `username` stores the vanity
 handle independently. A failed UID verification never writes the username into
 the UID column.
 
-JSON contains `records`, `issues`, `stats`, optional `enrichment`, and optional
-`uid_resolution` coverage. CLI summaries distinguish `uid_cached`, newly
-`uid_resolved`, and `uid_failed` counts.
+JSON contains `records`, `issues`, `stats`, optional `enrichment`, optional
+`uid_resolution`, and target-level `retry` coverage. CLI summaries distinguish
+UID coverage plus `targets_attempted`, `retried`, `rate_limited`, `pending`, and
+`interrupted` counts.
 
 TXT contains user IDs, usernames, non-empty enrichment fields, and target-error
 lines.
@@ -401,7 +411,8 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - `2`: invalid target, configuration, or missing optional dependency.
 - `3`: authenticated session, login, or manual verification unavailable.
 - `4`: output could not be replaced safely.
-- `130`: identity repair was interrupted safely and its progress was saved.
+- `130`: authenticated collection was interrupted safely; completed target
+  progress was preserved.
 
 ## Security and troubleshooting
 

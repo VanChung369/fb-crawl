@@ -5,7 +5,11 @@ from collections.abc import Callable
 from fb_crawl.adapters.browser.driver import wait_for_document_ready
 from fb_crawl.adapters.browser.session import is_authenticated
 from fb_crawl.config import BrowserSettings
-from fb_crawl.core.exceptions import BrowserNavigationError, SessionError
+from fb_crawl.core.exceptions import (
+    BrowserNavigationError,
+    RateLimitError,
+    SessionError,
+)
 from fb_crawl.core.models import InspectRecord
 from fb_crawl.core.urls import classify_authenticated_url
 
@@ -89,7 +93,7 @@ class BrowserInspector:
                 ),
             )
 
-        except SessionError:
+        except (SessionError, RateLimitError):
             raise
         except Exception as error:
             raise BrowserNavigationError(

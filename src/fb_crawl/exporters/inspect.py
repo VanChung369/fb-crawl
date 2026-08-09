@@ -102,6 +102,7 @@ def write_inspect(
             "issues": [inspect_issue_row(issue) for issue in result.issues],
             "stats": asdict(result.stats),
             "enrichment": None,
+            "retry": asdict(result.retry) if result.retry is not None else None,
         }
         with atomic_text_writer(destination, encoding="utf-8") as file:
             json.dump(payload, file, ensure_ascii=False, indent=2)
