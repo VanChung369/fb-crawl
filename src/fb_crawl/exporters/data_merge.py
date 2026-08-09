@@ -36,8 +36,16 @@ def read_merge_rows(paths: Sequence[Path]) -> LoadedMergeRows:
             reader = csv.DictReader(file)
             fields = frozenset(reader.fieldnames or ())
 
-            if "profile_url" not in fields or not fields.intersection(
-                {"user_id", "username", "name", "page_name"}
+            is_phone_evidence = bool(
+                {"phone_number", "normalized_phone"}.intersection(fields)
+            )
+
+            if (
+                is_phone_evidence
+                or "profile_url" not in fields
+                or not fields.intersection(
+                    {"user_id", "username", "name", "page_name"}
+                )
             ):
                 skipped.append(str(path))
                 continue

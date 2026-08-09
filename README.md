@@ -157,6 +157,19 @@ The plan respects `last_enriched_at` with a 30-day default cooldown and writes
 typed targets accepted directly by `authenticated batch`. See
 [docs/data-plan.md](docs/data-plan.md) for the complete crawl/merge/plan loop.
 
+Merge the separate phone provenance files into an auditable master without
+flattening them into user rows:
+
+```powershell
+fb-crawl data phone-merge runtime/output/*-phone-evidence.csv `
+  --output runtime/output/phone-evidence-master.csv `
+  --report runtime/output/phone-evidence-quality.json
+```
+
+Vietnamese `0`, `84`, `+84`, and `0084` prefix forms are normalized using the
+configurable `--default-country-code`. See
+[docs/phone-evidence.md](docs/phone-evidence.md) for schema and quality rules.
+
 ## Exit codes
 
 - `0`: run completed without target failures

@@ -8,7 +8,9 @@ The local normalization/deduplication quality gate is now available through
 profile batches from its master output. Authenticated phone extraction also
 writes `*-phone-evidence.csv` with source URL, capture time, and confidence, so
 future provider values can be merged without erasing Facebook-visible
-provenance. External providers and PostgreSQL remain future work.
+provenance. `fb-crawl data phone-merge` now consolidates those files into a
+normalized, quality-checked evidence master. External providers and PostgreSQL
+remain future work.
 
 ## Intended pipeline
 

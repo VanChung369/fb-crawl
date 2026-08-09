@@ -11,8 +11,10 @@ fb-crawl data merge runtime/output/*.csv `
 
 The command accepts explicit CSV paths and glob patterns. CSV files without the
 unified `profile_url` identity schema, such as message and inspect output, are
-skipped and listed in `skipped_files`. The selected output file is excluded
-from its own glob automatically.
+skipped and listed in `skipped_files`. Phone evidence sidecars and their master
+are also skipped because their one-to-many provenance belongs to
+[`data phone-merge`](phone-evidence.md), not the flat user schema. The selected
+output file is excluded from its own glob automatically.
 
 ## Identity and merge rules
 

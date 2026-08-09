@@ -10,6 +10,12 @@ from fb_crawl.exporters.phone_evidence import (
     PHONE_EVIDENCE_FIELDS,
     write_phone_evidence,
 )
+from fb_crawl.exporters.phone_evidence_merge import (
+    PHONE_EVIDENCE_MASTER_FIELDS,
+    read_phone_evidence,
+    write_phone_evidence_master,
+    write_phone_evidence_report,
+)
 
 __all__ = [
     "ensure_user_format_available",
@@ -18,4 +24,8 @@ __all__ = [
     "write_authenticated",
     "PHONE_EVIDENCE_FIELDS",
     "write_phone_evidence",
+    "PHONE_EVIDENCE_MASTER_FIELDS",
+    "read_phone_evidence",
+    "write_phone_evidence_master",
+    "write_phone_evidence_report",
 ]

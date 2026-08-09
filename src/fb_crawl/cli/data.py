@@ -14,8 +14,14 @@ from fb_crawl.exporters.data_plan import (
     write_plan_report,
     write_plan_targets,
 )
+from fb_crawl.exporters.phone_evidence_merge import (
+    read_phone_evidence,
+    write_phone_evidence_master,
+    write_phone_evidence_report,
+)
 from fb_crawl.services.data_merge import DataMergeService
 from fb_crawl.services.data_plan import DataPlanService
+from fb_crawl.services.phone_evidence_merge import PhoneEvidenceMergeService
 
 
 def add_data_parser(mode_subparsers) -> None:
@@ -70,6 +76,30 @@ def add_data_parser(mode_subparsers) -> None:
         "--report",
         type=Path,
         default=Path("runtime/output/enrichment-plan.json"),
+    )
+    phone_merge = actions.add_parser(
+        "phone-merge",
+        help="Merge phone evidence CSV files and write a quality report",
+    )
+    phone_merge.add_argument(
+        "inputs",
+        nargs="+",
+        help="Phone evidence CSV paths or glob patterns",
+    )
+    phone_merge.add_argument(
+        "--default-country-code",
+        default="84",
+        help="Country calling code used for local numbers; default: 84",
+    )
+    phone_merge.add_argument(
+        "--output",
+        type=Path,
+        default=Path("runtime/output/phone-evidence-master.csv"),
+    )
+    phone_merge.add_argument(
+        "--report",
+        type=Path,
+        default=Path("runtime/output/phone-evidence-quality.json"),
     )
 
 
@@ -170,11 +200,42 @@ def _execute_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _execute_phone_merge(args: argparse.Namespace) -> int:
+    paths = _input_paths(args.inputs, args.output)
+    loaded = read_phone_evidence(paths)
+
+    if not loaded.input_files:
+        raise ValueError("No phone evidence CSV merge inputs were found.")
+
+    result = PhoneEvidenceMergeService().run(
+        loaded.rows,
+        input_files=loaded.input_files,
+        skipped_files=loaded.skipped_files,
+        default_country_code=args.default_country_code,
+    )
+    write_phone_evidence_master(result, args.output)
+    write_phone_evidence_report(result, args.report)
+    report = result.report
+    print(
+        f"inputs={report.input_files} rows={report.rows_read} "
+        f"records={report.records_written} "
+        f"duplicates_merged={report.duplicates_merged} "
+        f"invalid_phone={report.invalid_phone_rows} "
+        f"missing_uid={report.missing_uid_rows} "
+        f"identity_conflicts={report.identity_conflict_rows} "
+        f"output={args.output} report={args.report}"
+    )
+    return 0
+
+
 def execute_data(args: argparse.Namespace) -> int:
     if args.data_action == "merge":
         return _execute_merge(args)
 
     if args.data_action == "plan":
         return _execute_plan(args)
+
+    if args.data_action == "phone-merge":
+        return _execute_phone_merge(args)
 
     raise ValueError(f"Unsupported data action: {args.data_action}")

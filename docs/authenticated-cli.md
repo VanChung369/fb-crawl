@@ -416,6 +416,10 @@ Evidence is deduplicated by user, normalized phone digits, source, and source
 URL. Phone numbers and Facebook identifiers remain text values; the evidence
 CSV is UTF-8 with BOM and is replaced atomically.
 
+Combine evidence sidecars from multiple runs with `fb-crawl data phone-merge`.
+See [phone-evidence.md](phone-evidence.md) for phone-prefix normalization, the
+master schema, and quality-report rules.
+
 CSV and XLSX columns are:
 
 ```text
