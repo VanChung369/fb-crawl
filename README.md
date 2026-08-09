@@ -52,6 +52,12 @@ fb-crawl authenticated inspect https://www.facebook.com/USERNAME --format json -
 fb-crawl authenticated batch --input runtime/targets.txt --headless
 ```
 
+Authenticated user commands automatically resolve vanity links such as
+`/USERNAME` to the account's numeric Facebook UID. The resolver only accepts a
+UID paired with that username in the same profile-route object, so it does not
+mistake the logged-in account's UID for the target. `user_id` contains only a
+numeric UID in output; `username` remains a separate field.
+
 Optionally enrich a bounded number of unique profiles with fields visible to
 the authenticated account:
 

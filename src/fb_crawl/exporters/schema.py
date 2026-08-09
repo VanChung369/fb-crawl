@@ -116,9 +116,12 @@ def page_record_row(record: PageRecord) -> dict[str, str]:
 
 def user_record_row(record: UserRecord) -> dict[str, str]:
     return {
-        "user_id": record.user_id,
+        "user_id": record.user_id if record.user_id.isdigit() else "",
         "name": record.name or "",
-        "username": _username(record.profile_url, record.user_id),
+        "username": (
+            record.username
+            or _username(record.profile_url, record.user_id)
+        ),
         "page_name": "",
         "category": "",
         "website": record.website or "",

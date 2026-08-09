@@ -175,6 +175,7 @@ class UserRecord:
     profile_url: str
     source: str
     source_url: str
+    username: str | None = None
     phone_numbers: tuple[str, ...] = ()
     phone_sources: tuple[str, ...] = ()
     website: str | None = None

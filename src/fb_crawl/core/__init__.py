@@ -7,6 +7,7 @@ from fb_crawl.core.exceptions import (
     FetchError,
     ParseError,
     SessionError,
+    UidResolutionError,
     ValidationError,
 )
 
@@ -59,6 +60,7 @@ __all__ = [
     "ScrapeStats",
     "SessionError",
     "TargetKind",
+    "UidResolutionError",
     "UserRecord",
     "ValidationError",
 ]

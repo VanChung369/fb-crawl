@@ -4,6 +4,7 @@ from fb_crawl.core.exceptions import (
     ExportError,
     FetchError,
     SessionError,
+    UidResolutionError,
     ValidationError,
 )
 
@@ -36,3 +37,7 @@ def test_authenticated_errors_have_stable_codes_and_exit_codes() -> None:
 
     assert parse.code == "authenticated_parse_failed"
     assert parse.exit_code == 1
+
+    uid = UidResolutionError("UID resolution failed.")
+    assert uid.code == "authenticated_uid_resolution_failed"
+    assert uid.exit_code == 1

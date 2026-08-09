@@ -48,3 +48,7 @@ class BrowserNavigationError(FbCrawlError):
 class BrowserParseError(FbCrawlError):
     code = "authenticated_parse_failed"
     exit_code = 1
+
+
+class UidResolutionError(BrowserParseError):
+    code = "authenticated_uid_resolution_failed"

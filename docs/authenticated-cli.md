@@ -100,6 +100,14 @@ Friends and followers use the same normalized profile forms. Only rows rendered
 for the authenticated account are collected; an empty or privacy-restricted
 list remains empty and is never reconstructed from other sources.
 
+When a rendered user link contains only `/USERNAME`, the CLI visits that visible
+profile and resolves the numeric UID from a username-linked route object before
+export. A standalone `profile_id` or `userID` is never trusted because it may
+belong to the logged-in account or another user rendered on the page. Resolution
+uses `--profile-delay` between profiles. If a UID cannot be verified, `user_id`
+is left empty, `username` is preserved, and an
+`authenticated_uid_resolution_failed` issue is exported.
+
 ```powershell
 fb-crawl authenticated friends https://www.facebook.com/USERNAME --steps 10 --headless
 fb-crawl authenticated followers https://www.facebook.com/profile.php?id=USER_ID --steps 10 --headless
@@ -107,7 +115,8 @@ fb-crawl authenticated followers https://www.facebook.com/profile.php?id=USER_ID
 
 Use `--enrich-profiles` with either list when the discovered users should also
 receive bounded profile enrichment. `--profile-limit` still controls the number
-of profiles visited.
+of profiles enriched; it does not cap the identity-resolution pass required to
+produce numeric UIDs for all exported users.
 
 ## Visible post reactions
 
@@ -247,7 +256,8 @@ parser version. It never writes DOM text, raw HTML, screenshots, or cookies.
 - `--enrich-profiles` explicitly enables visible profile-directory collection.
 - `--profile-fields` selects a comma-separated subset of enrichment fields.
 - `--profile-limit` defaults to `20` and must be greater than zero.
-- `--profile-delay` defaults to `3.0` seconds and must be zero or greater.
+- `--profile-delay` defaults to `3.0` seconds, must be zero or greater, and also
+  spaces automatic numeric-UID resolution requests.
 - `--resume` continues a matching checkpoint and skips completed targets.
 - `--incremental` emits only identities not already known by the checkpoint.
 - `--checkpoint` overrides the default JSON path and requires one of the two
@@ -284,9 +294,14 @@ empty when they are not available. Public output uses the exact same schema and
 populates page-specific fields when found. Messages use the separate
 conversation schema documented above.
 
+For authenticated users, `user_id` is numeric only. `username` stores the vanity
+handle independently. A failed UID verification never writes the username into
+the UID column.
+
 JSON contains `records`, `issues`, `stats`, and optional `enrichment` coverage.
 
-TXT contains user IDs, non-empty enrichment fields, and target-error lines.
+TXT contains user IDs, usernames, non-empty enrichment fields, and target-error
+lines.
 
 Existing output is preserved when both records and issues are empty. Every non-empty write uses a same-directory temporary file and atomic replacement.
 
@@ -309,6 +324,9 @@ Existing output is preserved when both records and issues are empty. Every non-e
 - Invalid or expired session: rerun visibly with `--no-headless` to create a new validated session.
 - Checkpoint or two-factor prompt: complete it manually in the visible browser; the tool never bypasses it.
 - Empty output: increase `--steps` within a reasonable bound and confirm the account can see the requested list, dialog, or conversation in Firefox.
+- Slow UID resolution: vanity links require one visible profile navigation each;
+  keep `--profile-delay` nonzero for long lists and use checkpointing for
+  multiple targets.
 - Empty enrichment fields: confirm the field is visible on the profile's About
   pages to the same account. Missing/hidden fields are not errors and are never
   guessed.

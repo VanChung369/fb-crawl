@@ -357,6 +357,111 @@ class ProfileEnricher:
         return outcome
 
 
+class UidResolver:
+    def __init__(self, outcomes: dict[str, str | Exception]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[str] = []
+
+    def resolve(self, browser, record: UserRecord) -> str:
+        self.calls.append(record.user_id)
+        outcome = self.outcomes[record.user_id]
+
+        if isinstance(outcome, Exception):
+            raise outcome
+
+        return outcome
+
+
+def test_service_resolves_handle_to_numeric_uid_before_enrichment() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+
+    class HandleParser:
+        def parse(self, html, *, source, source_url):
+            return (
+                UserRecord(
+                    user_id="synthetic.user",
+                    name="Synthetic User",
+                    profile_url="https://www.facebook.com/synthetic.user",
+                    source=source,
+                    source_url=source_url,
+                ),
+            )
+
+    uids = UidResolver({"synthetic.user": "100015374200952"})
+    profiles = ProfileEnricher(
+        {"100015374200952": ProfileDetails(current_city="Synthetic City")}
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({target: "ignored"}),
+        Collector({}),
+        HandleParser(),
+        profiles,
+        uid_resolver=uids,
+        sleep_func=lambda seconds: None,
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.MEMBERS,
+            target,
+            enrich_profiles=True,
+            profile_delay_seconds=0,
+        ),
+        object(),
+    )
+
+    assert uids.calls == ["synthetic.user"]
+    assert profiles.calls[0][0] == "100015374200952"
+    assert result.records[0].user_id == "100015374200952"
+    assert result.records[0].username == "synthetic.user"
+    assert result.records[0].profile_url == (
+        "https://www.facebook.com/profile.php?id=100015374200952"
+    )
+
+
+def test_uid_resolution_failure_keeps_profile_and_adds_safe_issue() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+
+    class HandleParser:
+        def parse(self, html, *, source, source_url):
+            return (
+                UserRecord(
+                    user_id="synthetic.user",
+                    name=None,
+                    profile_url="https://www.facebook.com/synthetic.user",
+                    source=source,
+                    source_url=source_url,
+                ),
+            )
+
+    uids = UidResolver(
+        {
+            "synthetic.user": BrowserNavigationError(
+                "Authenticated profile navigation failed.",
+                target="https://www.facebook.com/synthetic.user",
+            )
+        }
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({target: "ignored"}),
+        Collector({}),
+        HandleParser(),
+        uid_resolver=uids,
+        sleep_func=lambda seconds: None,
+    )
+
+    result = service.run(
+        request(AuthenticatedAction.MEMBERS, target),
+        object(),
+    )
+
+    assert result.records[0].user_id == "synthetic.user"
+    assert result.issues[0].action == "uid_resolution"
+    assert result.issues[0].code == "authenticated_navigation_failed"
+
+
 def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
     first = "https://www.facebook.com/acme/posts/1"
     second = "https://www.facebook.com/acme/posts/2"

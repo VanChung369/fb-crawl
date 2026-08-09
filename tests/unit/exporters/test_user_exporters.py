@@ -88,7 +88,7 @@ def test_user_csv_deduplicates_and_appends_issue_rows(
         rows = list(reader)
 
     assert reader.fieldnames == list(UNIFIED_FIELDS)
-    assert [row["user_id"] for row in rows] == ["synthetic.user", ""]
+    assert [row["user_id"] for row in rows] == ["", ""]
     assert rows[0]["username"] == "synthetic.user"
     assert rows[0]["page_name"] == ""
     assert rows[0]["address"] == "123 Synthetic Street"
@@ -108,7 +108,7 @@ def test_user_json_keeps_full_result_envelope(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
 
     assert tuple(payload["records"][0]) == UNIFIED_FIELDS
-    assert payload["records"][0]["user_id"] == "synthetic.user"
+    assert payload["records"][0]["user_id"] == ""
     assert payload["records"][0]["username"] == "synthetic.user"
     assert len(payload["records"]) == 1
     assert payload["stats"]["failed"] == 1
@@ -136,7 +136,8 @@ def test_user_txt_writes_records_and_target_issues(
 
     content = path.read_text(encoding="utf-8")
 
-    assert "User ID: synthetic.user" in content
+    assert "User ID: \n" in content
+    assert "Username: synthetic.user" in content
     assert "Phone Numbers: +84 123 456 789" in content
     assert "Address: 123 Synthetic Street" in content
     assert "Current City: Synthetic City" in content
@@ -177,7 +178,7 @@ def test_user_xlsx_uses_the_same_schema(tmp_path: Path) -> None:
     rows = list(load_workbook(path).active.values)
 
     assert rows[0] == UNIFIED_FIELDS
-    assert rows[1][0] == "synthetic.user"
+    assert rows[1][0] is None
     assert rows[1][2] == "synthetic.user"
     assert rows[2][UNIFIED_FIELDS.index("error_code")] == (
         "authenticated_navigation_failed"

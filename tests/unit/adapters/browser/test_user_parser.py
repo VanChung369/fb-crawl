@@ -31,6 +31,9 @@ def test_parser_accepts_handles_and_filters_action_labels() -> None:
         ("202", "User 202"),
     ]
 
+    assert records[0].username == "synthetic.handle"
+    assert records[1].username is None
+
     assert all("comment_id" not in record.profile_url for record in records)
 
 
@@ -61,3 +64,4 @@ def test_relationship_parser_accepts_plain_visible_profile_links() -> None:
     assert [(record.user_id, record.name) for record in records] == [
         ("synthetic.friend", "Synthetic Friend")
     ]
+    assert records[0].username == "synthetic.friend"

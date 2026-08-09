@@ -389,6 +389,9 @@ def _load_runtime() -> AuthenticatedRuntime:
         from fb_crawl.adapters.browser.profiles import (
             ProfileEnricher,
         )
+        from fb_crawl.adapters.browser.profile_uid import (
+            ProfileUidResolver,
+        )
         from fb_crawl.adapters.browser.session import (
             SessionStore,
         )
@@ -439,6 +442,7 @@ def _load_runtime() -> AuthenticatedRuntime:
             reactions=ReactionsCollector(settings),
             relationship_parser=UserParser(allow_plain_profile_links=True),
             reaction_parser=ReactionParser(),
+            uid_resolver=ProfileUidResolver(settings),
             messages=MessagesCollector(settings),
             message_parser=MessageParser(),
             inspector=BrowserInspector(settings),
@@ -520,6 +524,25 @@ def execute_authenticated(
             f"failed={result.stats.failed} "
             f"output={output_status}"
         )
+
+        if action is AuthenticatedAction.BATCH:
+            user_records = result.user_result.records
+        elif action in {
+            AuthenticatedAction.MESSAGES,
+            AuthenticatedAction.INSPECT,
+        }:
+            user_records = ()
+        else:
+            user_records = result.records
+
+        if user_records:
+            uid_resolved = sum(
+                record.user_id.isdigit() for record in user_records
+            )
+            summary += (
+                f" uid_resolved={uid_resolved}"
+                f" uid_unresolved={len(user_records) - uid_resolved}"
+            )
 
         if result.enrichment is not None:
             summary += (

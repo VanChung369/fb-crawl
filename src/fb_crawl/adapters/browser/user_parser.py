@@ -160,6 +160,7 @@ class UserParser:
                     profile_url=profile_url,
                     source=source,
                     source_url=source_url,
+                    username=(None if user_id.isdigit() else user_id),
                 )
             )
 

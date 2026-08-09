@@ -87,6 +87,10 @@ class ProfileEnricherPort(Protocol):
     ) -> ProfileDetails: ...
 
 
+class ProfileUidResolverPort(Protocol):
+    def resolve(self, browser, record: UserRecord) -> str: ...
+
+
 class MessageParserPort(Protocol):
     def parse(
         self,
@@ -254,6 +258,7 @@ def _merge_record(
     return replace(
         first,
         name=first.name or later.name,
+        username=first.username or later.username,
         profile_url=(first.profile_url or later.profile_url),
         phone_numbers=tuple(
             dict.fromkeys((*first.phone_numbers, *later.phone_numbers))
@@ -459,6 +464,7 @@ class AuthenticatedService:
         reactions: CollectionPort | None = None,
         relationship_parser: UserParserPort | None = None,
         reaction_parser: UserParserPort | None = None,
+        uid_resolver: ProfileUidResolverPort | None = None,
         messages: CollectionPort | None = None,
         message_parser: MessageParserPort | None = None,
         inspector: InspectorPort | None = None,
@@ -473,6 +479,7 @@ class AuthenticatedService:
         self._reactions = reactions
         self._relationship_parser = relationship_parser
         self._reaction_parser = reaction_parser or relationship_parser
+        self._uid_resolver = uid_resolver
         self._messages = messages
         self._message_parser = message_parser
         self._inspector = inspector
@@ -571,6 +578,7 @@ class AuthenticatedService:
                     profile_url=profile_url,
                     source=action.value,
                     source_url=url,
+                    username=(None if user_id.isdigit() else user_id),
                     first_seen=_utc_now(),
                     last_seen=_utc_now(),
                     field_status=_default_field_status(),
@@ -694,6 +702,74 @@ class AuthenticatedService:
                             action=issue_action,
                         )
                     )
+
+        if self._uid_resolver is not None:
+            unresolved = tuple(
+                record
+                for record in records_by_id.values()
+                if not record.user_id.isdigit()
+            )
+            resolved_records: dict[str, UserRecord] = {
+                record.user_id: record
+                for record in records_by_id.values()
+                if record.user_id.isdigit()
+            }
+
+            for index, record in enumerate(unresolved):
+                self._session.assert_authenticated(browser)
+
+                try:
+                    resolved_uid = self._uid_resolver.resolve(browser, record)
+
+                    if not resolved_uid.isdigit():
+                        raise BrowserParseError(
+                            "Authenticated UID resolution failed.",
+                            target=record.profile_url,
+                        )
+
+                except SessionError:
+                    raise
+
+                except (
+                    BrowserNavigationError,
+                    BrowserParseError,
+                ) as error:
+                    issues.append(
+                        ScrapeIssue(
+                            code=error.code,
+                            message=error.safe_message,
+                            target=(error.target or record.profile_url),
+                            mode=ScrapeMode.AUTHENTICATED,
+                            action="uid_resolution",
+                        )
+                    )
+                    resolved = record
+
+                else:
+                    resolved = replace(
+                        record,
+                        user_id=resolved_uid,
+                        username=(record.username or record.user_id),
+                        profile_url=(
+                            "https://www.facebook.com/"
+                            f"profile.php?id={resolved_uid}"
+                        ),
+                    )
+
+                existing = resolved_records.get(resolved.user_id)
+                resolved_records[resolved.user_id] = (
+                    resolved
+                    if existing is None
+                    else _merge_record(existing, resolved)
+                )
+
+                if (
+                    index + 1 < len(unresolved)
+                    and request.profile_delay_seconds
+                ):
+                    self._sleep(request.profile_delay_seconds)
+
+            records_by_id = resolved_records
 
         enrichment: EnrichmentStats | None = None
 

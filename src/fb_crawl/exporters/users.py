@@ -93,7 +93,10 @@ def _write_txt(
         encoding="utf-8",
     ) as file:
         for record in result.records:
-            file.write(f"User ID: {record.user_id}\n")
+            row = user_record_row(record)
+            file.write(f"User ID: {row['user_id']}\n")
+            if row["username"]:
+                file.write(f"Username: {row['username']}\n")
             if record.name:
                 file.write(f"Name: {record.name}\n")
             if record.phone_numbers:
