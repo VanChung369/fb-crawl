@@ -14,6 +14,7 @@ from fb_crawl.cli.authenticated import (
 )
 from fb_crawl.cli.data import add_data_parser, execute_data
 from fb_crawl.cli.pipeline import add_pipeline_parser, execute_pipeline
+from fb_crawl.cli.worker import add_worker_parser, execute_worker
 from fb_crawl.core.exceptions import FbCrawlError
 
 
@@ -32,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_data_parser(modes)
 
     add_pipeline_parser(modes)
+
+    add_worker_parser(modes)
 
     return parser
 
@@ -56,6 +59,9 @@ def main(
         if args.mode == "pipeline":
             return execute_pipeline(args)
 
+        if args.mode == "worker":
+            return execute_worker(args)
+
         parser.error(f"Unsupported mode: {args.mode}")
 
     except FbCrawlError as error:
@@ -73,3 +79,7 @@ def main(
         return 2
 
     return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

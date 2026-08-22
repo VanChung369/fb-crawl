@@ -7,6 +7,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from fb_crawl.composition.authenticated import (
+    AuthenticatedComponents,
+    AuthenticatedPersistenceRuntime,
+    build_authenticated_components,
+    build_authenticated_persistence,
+)
 from fb_crawl.config import (
     BrowserSettings,
     load_browser_settings,
@@ -489,69 +495,25 @@ class ServicePort(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class AuthenticatedRuntime:
-    create_browser: Callable[
-        [BrowserSettings],
-        object,
-    ]
+    create_browser: Callable[[BrowserSettings], object] | None
     create_service: Callable[
-        [
-            BrowserSettings,
-            Callable[[], tuple[str, str]],
-        ],
-        ServicePort,
-    ]
+        [BrowserSettings, Callable[[], tuple[str, str]]], ServicePort
+    ] | None
     ensure_format: Callable[[str], None]
     write_result: Callable[
         [object, Path, str],
         bool,
     ]
-
-
-@dataclass(frozen=True, slots=True)
-class AuthenticatedPersistenceRuntime:
-    ingest_result: Callable[[ScrapeResult[UserRecord]], IngestionReport]
-    close: Callable[[], None]
+    create_components: Callable[
+        [BrowserSettings, Callable[[], tuple[str, str]]],
+        AuthenticatedComponents,
+    ] | None = None
 
 
 def _load_persistence_runtime() -> AuthenticatedPersistenceRuntime:
     from fb_data_pipeline.config import load_pipeline_settings
-    from fb_data_pipeline.exceptions import PipelineExecutionError
-    from fb_data_pipeline.providers.fbnumber import FBNumberProvider
-    from fb_data_pipeline.repositories.postgres import PostgresRepository
-    from fb_data_pipeline.services.ingestion import (
-        AuthenticatedIngestionService,
-    )
-    from fb_data_pipeline.services.persistence import (
-        PipelinePersistenceService,
-    )
-    from fb_data_pipeline.services.pipeline import EnrichmentPipeline
 
-    try:
-        settings = load_pipeline_settings()
-        settings.require_database()
-        settings.require_fb_number()
-    except ConfigurationError as error:
-        raise PipelineExecutionError(
-            "Persistence pipeline configuration is incomplete."
-        ) from error
-    provider = FBNumberProvider.from_settings(settings)
-    repository = PostgresRepository(
-        settings.database_url,
-        statement_timeout_seconds=(
-            settings.database_statement_timeout_seconds
-        ),
-    )
-    ingestion = AuthenticatedIngestionService(
-        EnrichmentPipeline(provider),
-        PipelinePersistenceService(repository),
-    )
-    return AuthenticatedPersistenceRuntime(
-        ingest_result=lambda result: ingestion.ingest(
-            result,
-            default_country_code=settings.default_country_code,
-        ),
-        close=provider.close,
-    )
+    return build_authenticated_persistence(load_pipeline_settings())
 
 
 class RepairServicePort(Protocol):
@@ -584,117 +546,24 @@ class IdentityRepairRuntime:
 
 
 def _load_runtime() -> AuthenticatedRuntime:
-    try:
-        from fb_crawl.adapters.browser.comments import (
-            CommentsCollector,
-        )
-        from fb_crawl.adapters.browser.driver import (
-            create_firefox_driver,
-        )
-        from fb_crawl.adapters.browser.login import (
-            SessionManager,
-        )
-        from fb_crawl.adapters.browser.members import (
-            MembersCollector,
-        )
-        from fb_crawl.adapters.browser.inspect import (
-            BrowserInspector,
-        )
-        from fb_crawl.adapters.browser.message_parser import (
-            MessageParser,
-        )
-        from fb_crawl.adapters.browser.messages import (
-            MessagesCollector,
-        )
-        from fb_crawl.adapters.browser.profile_parser import (
-            ProfileParser,
-        )
-        from fb_crawl.adapters.browser.reactions import (
-            ReactionsCollector,
-        )
-        from fb_crawl.adapters.browser.reaction_parser import (
-            ReactionParser,
-        )
-        from fb_crawl.adapters.browser.relationships import (
-            RelationshipCollector,
-        )
-        from fb_crawl.adapters.browser.profiles import (
-            ProfileEnricher,
-        )
-        from fb_crawl.adapters.browser.profile_uid import (
-            ProfileUidResolver,
-        )
-        from fb_crawl.adapters.browser.session import (
-            SessionStore,
-        )
-        from fb_crawl.adapters.browser.user_parser import (
-            UserParser,
-        )
+    def ensure_format(format_name: str) -> None:
         from fb_crawl.exporters.authenticated import (
             ensure_authenticated_format_available,
-            write_authenticated,
-        )
-        from fb_crawl.services.authenticated import (
-            AuthenticatedService,
-        )
-        from fb_crawl.services.checkpoint import (
-            CheckpointingService,
-        )
-        from fb_crawl.services.uid_cache import (
-            CachedProfileUidResolver,
-            JsonProfileUidCache,
         )
 
-    except ModuleNotFoundError as error:
-        dependency = str(error.name)
+        ensure_authenticated_format_available(format_name)
 
-        if dependency == "selenium" or dependency.startswith("selenium."):
-            raise ConfigurationError(
-                "Authenticated mode requires: " 'python -m pip install -e ".[browser]"'
-            ) from error
+    def write_result(result, output: Path, format_name: str) -> bool:
+        from fb_crawl.exporters.authenticated import write_authenticated
 
-        if dependency == "bs4" or dependency.startswith("bs4."):
-            raise ConfigurationError(
-                "Authenticated mode requires: " 'python -m pip install -e ".[browser]"'
-            ) from error
-
-        raise
-
-    def create_service(
-        settings,
-        credentials_provider,
-    ):
-        service = AuthenticatedService(
-            SessionManager(
-                SessionStore(settings.session_path),
-                settings,
-                credentials_provider,
-            ),
-            MembersCollector(settings),
-            CommentsCollector(settings),
-            UserParser(),
-            ProfileEnricher(settings, ProfileParser()),
-            relationships=RelationshipCollector(settings),
-            reactions=ReactionsCollector(settings),
-            relationship_parser=UserParser(allow_plain_profile_links=True),
-            reaction_parser=ReactionParser(),
-            uid_resolver=CachedProfileUidResolver(
-                ProfileUidResolver(settings),
-                JsonProfileUidCache(
-                    Path("runtime/cache/profile-uids.json")
-                ),
-            ),
-            messages=MessagesCollector(settings),
-            message_parser=MessageParser(),
-            inspector=BrowserInspector(settings),
-        )
-        return CheckpointingService(service)
+        return write_authenticated(result, output, format_name)
 
     return AuthenticatedRuntime(
-        create_browser=create_firefox_driver,
-        create_service=create_service,
-        ensure_format=ensure_authenticated_format_available,
-        write_result=write_authenticated,
+        create_browser=None,
+        create_service=None,
+        ensure_format=ensure_format,
+        write_result=write_result,
+        create_components=build_authenticated_components,
     )
 
 
@@ -876,10 +745,19 @@ def execute_authenticated(
     persistence_runtime = None
 
     try:
-        service = runtime.create_service(
-            settings,
-            _credentials_provider,
+        components = (
+            runtime.create_components(settings, _credentials_provider)
+            if runtime.create_components is not None
+            else None
         )
+        service = (
+            components.create_service()
+            if components is not None
+            else runtime.create_service(settings, _credentials_provider)
+        )
+
+        if service is None:
+            raise RuntimeError("Authenticated runtime did not create a service.")
 
         # Target phải hợp lệ trước khi khởi động Firefox.
         service.validate(request)
@@ -887,7 +765,13 @@ def execute_authenticated(
         if persist:
             persistence_runtime = _load_persistence_runtime()
 
-        browser = runtime.create_browser(settings)
+        browser = (
+            components.create_browser(settings)
+            if components is not None
+            else runtime.create_browser(settings)
+        )
+        if browser is None:
+            raise RuntimeError("Authenticated runtime did not create a browser.")
         result = service.run(request, browser)
 
         action = AuthenticatedAction(args.action)

@@ -13,6 +13,12 @@ from fb_crawl.adapters.browser.session import (
 
 
 from fb_crawl.core.exceptions import SessionError
+from fb_crawl.services.execution_control import (
+    AccountSafetyStop,
+    CrawlCancelled,
+    JobBudgetReached,
+)
+from fb_crawl.adapters.browser.account_safety import SafetyCode, SafetySignal
 
 
 class FakeBrowser:
@@ -25,6 +31,7 @@ class FakeBrowser:
         self.current_url = current_url
         self.added: list[dict[str, object]] = []
         self.visited: list[str] = []
+        self.refreshes = 0
 
     def get(self, url: str) -> None:
         self.current_url = url
@@ -37,6 +44,7 @@ class FakeBrowser:
         self.added.append(cookie)
 
     def refresh(self) -> None:
+        self.refreshes += 1
         self.cookies = list(self.added)
 
 
@@ -173,3 +181,153 @@ def test_save_is_atomic_owner_only_and_requires_authentication(
         match="valid authenticated session",
     ):
         SessionStore(tmp_path / "invalid.json").save(FakeBrowser())
+
+
+def test_restore_propagates_cancellation_before_home_navigation(tmp_path: Path) -> None:
+    path = tmp_path / "session.json"
+    path.write_text(json.dumps([{"name": "c_user", "value": "100"}]), encoding="utf-8")
+
+    class Cancelled:
+        def is_cancel_requested(self): return True
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): return None
+
+    browser = FakeBrowser()
+    with pytest.raises(CrawlCancelled):
+        SessionStore(path, control=Cancelled()).restore(browser)
+    assert browser.visited == []
+
+
+def test_restore_paces_home_and_refresh_and_stops_after_cookie_safety_check(tmp_path: Path) -> None:
+    path = tmp_path / "session.json"
+    path.write_text(json.dumps([{"name": "c_user", "value": "100"}]), encoding="utf-8")
+    calls = []
+    class Control:
+        def is_cancel_requested(self): return False
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser):
+            calls.append((len(browser.added), browser.refreshes))
+            return None
+    class Pacer:
+        def wait(self): calls.append("pace")
+    browser = FakeBrowser()
+    assert SessionStore(path, control=Control(), navigation_pacer=Pacer()).restore(browser) is True
+    assert calls == ["pace", (1, 0), "pace", (1, 1)]
+
+
+def test_restore_rechecks_cancellation_immediately_before_refresh(
+    tmp_path: Path,
+) -> None:
+    class CancelBeforeRefresh:
+        def __init__(self, trace) -> None:
+            self.cancelled = False
+            self.trace = trace
+
+        def is_cancel_requested(self):
+            self.trace.append("guard:cancellation")
+            return self.cancelled
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            self.trace.append("guard:safety")
+            self.cancelled = True
+            return None
+
+    class Pacer:
+        def __init__(self, trace) -> None:
+            self.trace = trace
+
+        def wait(self):
+            self.trace.append("pace")
+
+    path = tmp_path / "session.json"
+    path.write_text(
+        json.dumps([{"name": "c_user", "value": "100"}]),
+        encoding="utf-8",
+    )
+    trace: list[str] = []
+    browser = FakeBrowser()
+    original_get = browser.get
+
+    def traced_get(url):
+        trace.append("home")
+        original_get(url)
+
+    browser.get = traced_get
+    with pytest.raises(CrawlCancelled) as captured:
+        SessionStore(
+            path,
+            control=CancelBeforeRefresh(trace),
+            navigation_pacer=Pacer(trace),
+        ).restore(browser)
+
+    assert captured.value.__cause__ is None
+    assert trace == [
+        "guard:cancellation",
+        "pace",
+        "home",
+        "guard:cancellation",
+        "guard:safety",
+        "guard:cancellation",
+    ]
+    assert browser.refreshes == 0
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        AccountSafetyStop(
+            SafetySignal(
+                SafetyCode.CHECKPOINT,
+                "Facebook checkpoint requires manual review.",
+                True,
+            )
+        ),
+        JobBudgetReached(),
+    ],
+)
+def test_restore_propagates_typed_guard_stop_before_refresh_unwrapped(
+    tmp_path: Path, stop: RuntimeError
+) -> None:
+    path = tmp_path / "session.json"
+    path.write_text(json.dumps([{"name": "c_user", "value": "100"}]), encoding="utf-8")
+    trace: list[str] = []
+
+    class StopAfterCookieSafety:
+        def is_cancel_requested(self):
+            trace.append("guard:cancellation")
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            trace.append("guard:safety")
+            raise stop
+
+    class Pacer:
+        def wait(self):
+            trace.append("pace")
+
+    browser = FakeBrowser()
+    original_get = browser.get
+
+    def traced_get(url):
+        trace.append("home")
+        original_get(url)
+
+    browser.get = traced_get
+    with pytest.raises(type(stop)) as captured:
+        SessionStore(
+            path,
+            control=StopAfterCookieSafety(),
+            navigation_pacer=Pacer(),
+        ).restore(browser)
+
+    assert captured.value is stop
+    assert type(captured.value) is type(stop)
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert trace == ["guard:cancellation", "pace", "home", "guard:cancellation", "guard:safety"]
+    assert browser.refreshes == 0

@@ -9,6 +9,7 @@ from fb_crawl.core.exceptions import (
     BrowserNavigationError,
     SessionError,
 )
+from fb_crawl.services.execution_control import CrawlCancelled
 
 
 class Candidate:
@@ -43,8 +44,10 @@ class Browser:
 
         self.candidates = iter(candidates)
         self.scrolls = 0
+        self.get_calls = 0
 
     def get(self, url: str) -> None:
+        self.get_calls += 1
         self.current_url = url
 
     def get_cookies(self):
@@ -74,6 +77,35 @@ def test_phrase_list_is_valid_multilingual_unicode() -> None:
     assert "Ver más comentarios" in MORE_COMMENTS_TEXTS
 
     assert "Afficher plus de commentaires" in MORE_COMMENTS_TEXTS
+
+
+def test_comments_cancelled_before_navigation_does_not_scroll() -> None:
+    class Cancelled:
+        def is_cancel_requested(self): return True
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): return None
+    browser = Browser([])
+    with pytest.raises(CrawlCancelled):
+        CommentsCollector(BrowserSettings(), control=Cancelled()).collect(browser, "https://www.facebook.com/example/posts/1", steps=1, delay_seconds=0)
+    assert browser.get_calls == 0
+    assert browser.scrolls == 0
+
+
+def test_comments_cancel_after_progress_has_no_second_scroll() -> None:
+    class Control:
+        cancelled = False
+        events = []
+        def is_cancel_requested(self): return self.cancelled
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            self.events.append((event_type, dict(counters or {}))); self.cancelled = True
+        def check_account_safety(self, browser): return None
+    control = Control()
+    browser = Browser([])
+    with pytest.raises(CrawlCancelled):
+        CommentsCollector(BrowserSettings(), control=control, authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None).collect(browser, "https://www.facebook.com/example/posts/1", steps=2, delay_seconds=0)
+    assert browser.scrolls == 1
+    assert control.events == [("target_progress", {"steps_completed": 1})]
 
 
 def test_comments_collector_uses_one_wait_per_attempt_and_stops_early() -> None:

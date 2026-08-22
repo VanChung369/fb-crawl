@@ -1,4 +1,6 @@
 import pytest
+import functools
+import operator
 
 from fb_crawl.adapters.browser.login import (
     SessionManager,
@@ -6,6 +8,10 @@ from fb_crawl.adapters.browser.login import (
 )
 from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import SessionError
+from fb_crawl.adapters.browser.account_safety import SafetyCode, SafetySignal
+from fb_crawl.services.execution_control import AccountSafetyStop
+from fb_crawl.services.execution_control import CrawlCancelled
+from fb_crawl.adapters.browser import login as login_module
 
 
 class Browser:
@@ -380,3 +386,219 @@ def test_interactive_checkpoint_stops_at_verification_timeout() -> None:
         )
 
     assert len(messages) == 1
+
+
+def test_login_stops_after_navigation_before_any_dom_wait() -> None:
+    class Unsafe:
+        def is_cancel_requested(self): return False
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser):
+            return SafetySignal(SafetyCode.CHECKPOINT, "Facebook checkpoint requires manual review.", True)
+
+    class NoDomWait:
+        def __init__(self, browser, timeout): pytest.fail("DOM wait must not start")
+
+    browser = LoginBrowser()
+    with pytest.raises(AccountSafetyStop):
+        login_to_facebook(browser, "synthetic@example.test", "not-a-real-password",
+            settings=BrowserSettings(), wait_factory=NoDomWait, control=Unsafe())
+
+
+def test_manager_forwards_control_and_pacer_only_to_default_login(monkeypatch) -> None:
+    store = FakeStore(restored=False)
+    browser = Browser()
+    calls = []
+
+    def default_login(browser, email, password, **kwargs):
+        calls.append(kwargs)
+        browser.cookies = [{"name": "c_user", "value": "100"}]
+
+    class Control:
+        def is_cancel_requested(self): return False
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): return None
+    class Pacer:
+        def wait(self): return None
+    control = Control()
+    pacer = Pacer()
+    monkeypatch.setattr("fb_crawl.adapters.browser.login.login_to_facebook", default_login)
+    manager = SessionManager(store, BrowserSettings(headless=False),
+        credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"),
+        control=control, navigation_pacer=pacer)
+    manager.ensure_authenticated(browser)
+    assert calls == [{"settings": BrowserSettings(headless=False), "control": control, "navigation_pacer": pacer}]
+
+
+def test_manager_keeps_legacy_custom_login_signature() -> None:
+    calls = []
+    def legacy_login(browser, email, password, *, settings):
+        calls.append(settings)
+        browser.cookies = [{"name": "c_user", "value": "100"}]
+    manager = SessionManager(FakeStore(restored=False), BrowserSettings(headless=False),
+        credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"), login_func=legacy_login)
+    manager.ensure_authenticated(Browser())
+    assert calls == [BrowserSettings(headless=False)]
+
+
+def _control_and_pacer():
+    class Control:
+        def is_cancel_requested(self): return False
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): return None
+    class Pacer:
+        def wait(self): return None
+    return Control(), Pacer()
+
+
+def test_manager_does_not_keyword_forward_to_positional_only_controls() -> None:
+    received = []
+    def login(browser, email, password, control=None, navigation_pacer=None, /, *, settings):
+        received.append((control, navigation_pacer))
+        browser.cookies = [{"name": "c_user", "value": "100"}]
+    control, pacer = _control_and_pacer()
+    SessionManager(FakeStore(False), BrowserSettings(headless=False),
+        credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"),
+        login_func=login, control=control, navigation_pacer=pacer).ensure_authenticated(Browser())
+    assert received == [(None, None)]
+
+
+def test_manager_forwards_to_callable_object_and_partial_keyword_controls() -> None:
+    received = []
+    class CallableLogin:
+        def __call__(self, browser, email, password, *, settings, control=None, navigation_pacer=None):
+            received.append((control, navigation_pacer))
+            browser.cookies = [{"name": "c_user", "value": "100"}]
+    control, pacer = _control_and_pacer()
+    SessionManager(FakeStore(False), BrowserSettings(headless=False),
+        credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"), login_func=CallableLogin(), control=control, navigation_pacer=pacer).ensure_authenticated(Browser())
+    assert received == [(control, pacer)]
+
+    def partial_login(prefix, browser, email, password, *, settings, control=None, navigation_pacer=None):
+        received.append((prefix, control, navigation_pacer))
+        browser.cookies = [{"name": "c_user", "value": "100"}]
+    SessionManager(FakeStore(False), BrowserSettings(headless=False),
+        credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"),
+        login_func=functools.partial(partial_login, "partial"), control=control, navigation_pacer=pacer).ensure_authenticated(Browser())
+    assert received[-1] == ("partial", control, pacer)
+
+
+def test_manager_uninspectable_callable_keeps_legacy_settings_only() -> None:
+    control, pacer = _control_and_pacer()
+    manager = SessionManager(FakeStore(False), BrowserSettings(headless=False),
+        credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"), login_func=operator.attrgetter("x"), control=control, navigation_pacer=pacer)
+    assert manager._login_kwargs() == {"settings": BrowserSettings(headless=False)}
+
+
+def test_manager_does_not_mask_runtime_type_error_from_custom_login() -> None:
+    def login(browser, email, password, *, settings):
+        raise TypeError("runtime type failure")
+    with pytest.raises(TypeError, match="runtime type failure"):
+        SessionManager(FakeStore(False), BrowserSettings(headless=False),
+            credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"), login_func=login).ensure_authenticated(Browser())
+
+
+def test_login_polling_iteration_propagates_cancellation_unwrapped() -> None:
+    browser = Browser()
+    trace: list[str] = []
+
+    class CancelDuringPoll:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def is_cancel_requested(self):
+            trace.append("guard:cancellation")
+            return self.cancelled
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            trace.append("guard:safety")
+            return None
+
+    control = CancelDuringPoll()
+
+    def sleep_once(seconds):
+        trace.append("poll:sleep")
+        control.cancelled = True
+
+    with pytest.raises(CrawlCancelled) as captured:
+        login_module._wait_for_resolution(
+            browser,
+            1.0,
+            sleep_func=sleep_once,
+            monotonic_func=iter((0.0, 0.0, 0.1)).__next__,
+            control=control,
+        )
+
+    assert captured.value.__cause__ is None
+    assert trace == [
+        "guard:cancellation",
+        "guard:safety",
+        "poll:sleep",
+        "guard:cancellation",
+    ]
+
+
+def test_login_final_state_guard_propagates_account_safety_unwrapped() -> None:
+    browser = Browser()
+    stop = AccountSafetyStop(
+        SafetySignal(
+            SafetyCode.CHECKPOINT,
+            "Facebook checkpoint requires manual review.",
+            True,
+        )
+    )
+    trace: list[str] = []
+
+    class UnsafeFinalState:
+        def is_cancel_requested(self):
+            trace.append("guard:cancellation")
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            trace.append("guard:safety")
+            raise stop
+
+    with pytest.raises(AccountSafetyStop) as captured:
+        login_module._wait_for_resolution(
+            browser,
+            0.5,
+            sleep_func=lambda seconds: pytest.fail("polling must not begin"),
+            monotonic_func=iter((0.0, 0.5)).__next__,
+            control=UnsafeFinalState(),
+        )
+
+    assert captured.value is stop
+    assert captured.value.__cause__ is None
+    assert trace == ["guard:cancellation", "guard:safety"]
+
+
+def test_manager_forwards_exact_control_and_pacer_to_kwargs_custom_login() -> None:
+    received: list[dict[str, object]] = []
+    control, pacer = _control_and_pacer()
+
+    def kwargs_login(browser, email, password, **kwargs):
+        received.append(kwargs)
+        browser.cookies = [{"name": "c_user", "value": "100"}]
+
+    settings = BrowserSettings(headless=False)
+    SessionManager(
+        FakeStore(restored=False),
+        settings,
+        credentials_provider=lambda: ("synthetic@example.test", "not-a-real-password"),
+        login_func=kwargs_login,
+        control=control,
+        navigation_pacer=pacer,
+    ).ensure_authenticated(Browser())
+
+    assert received == [
+        {
+            "settings": settings,
+            "control": control,
+            "navigation_pacer": pacer,
+        }
+    ]

@@ -19,6 +19,7 @@ from fb_crawl.core.models import (
 from fb_crawl.services.authenticated import (
     AuthenticatedService,
 )
+from fb_crawl.services.execution_control import CrawlCancelled
 
 
 class Session:
@@ -1090,3 +1091,184 @@ def test_inspect_action_returns_sanitized_diagnostics() -> None:
     assert result.records[0].target_action == "profile"
     assert result.records[0].visible_profile_links == 5
     assert result.stats.failed == 0
+
+
+def test_service_checks_cancellation_between_prepared_targets() -> None:
+    first = "https://www.facebook.com/groups/1/members"
+    second = "https://www.facebook.com/groups/2/members"
+
+    class StopAfterFirst:
+        def __init__(self): self.cancelled = False
+        def is_cancel_requested(self): return self.cancelled
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): return None
+
+    class CancellingCollector(Collector):
+        def collect(self, browser, url, **kwargs):
+            value = super().collect(browser, url, **kwargs)
+            control.cancelled = True
+            return value
+
+    control = StopAfterFirst()
+    members = CancellingCollector({first: "100:First", second: "200:Second"})
+    service = AuthenticatedService(Session(), members, Collector({}), Parser(), control=control)
+    with pytest.raises(CrawlCancelled):
+        service.run(request(AuthenticatedAction.MEMBERS, first, second), object())
+    assert members.calls == [first]
+
+
+def test_service_control_guards_bootstrap_uid_and_enrichment_boundaries() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+    class Tracking:
+        def __init__(self): self.checks = 0
+        def is_cancel_requested(self): return False
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): self.checks += 1; return None
+    class Resolver:
+        def __init__(self): self.calls = 0
+        def resolve(self, browser, record, *, force=False): self.calls += 1; return "100000000000001"
+    class Enricher:
+        def __init__(self): self.calls = 0
+        def enrich(self, browser, record, fields, **kwargs): self.calls += 1; return ProfileDetails()
+    control = Tracking()
+    resolver = Resolver()
+    enricher = Enricher()
+    service = AuthenticatedService(Session(), Collector({target: "synthetic.user:Name"}), Collector({}), Parser(), enricher,
+        uid_resolver=resolver, control=control)
+    service.run(request(AuthenticatedAction.MEMBERS, target, enrich_profiles=True), object())
+    assert resolver.calls == 1
+    assert enricher.calls == 1
+    assert control.checks >= 4
+
+
+def test_service_control_trace_orders_bootstrap_target_uid_and_enrichment() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+    trace: list[str] = []
+
+    class TraceControl:
+        def is_cancel_requested(self):
+            trace.append("guard:cancellation")
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            trace.append("guard:safety")
+            return None
+
+    class TraceSession(Session):
+        def ensure_authenticated(self, browser):
+            trace.append("bootstrap")
+            super().ensure_authenticated(browser)
+
+    class TraceMembers(Collector):
+        def collect(self, browser, url, **kwargs):
+            trace.append("target")
+            return super().collect(browser, url, **kwargs)
+
+    class Resolver:
+        def resolve(self, browser, record, *, force=False):
+            trace.append("uid")
+            return "100000000000001"
+
+    class Enricher:
+        def enrich(self, browser, record, fields, **kwargs):
+            trace.append("enrichment")
+            return ProfileDetails()
+
+    service = AuthenticatedService(
+        TraceSession(),
+        TraceMembers({target: "synthetic.user:Synthetic User"}),
+        Collector({}),
+        Parser(),
+        Enricher(),
+        uid_resolver=Resolver(),
+        control=TraceControl(),
+    )
+
+    service.run(
+        request(AuthenticatedAction.MEMBERS, target, enrich_profiles=True),
+        object(),
+    )
+
+    assert trace == [
+        "guard:cancellation",
+        "bootstrap",
+        "guard:cancellation",
+        "guard:safety",
+        "target",
+        "guard:cancellation",
+        "guard:safety",
+        "guard:cancellation",
+        "guard:safety",
+        "uid",
+        "guard:cancellation",
+        "guard:safety",
+        "enrichment",
+    ]
+
+
+def test_relationship_nodes_each_have_their_immediate_full_guard_trace() -> None:
+    root = "https://www.facebook.com/synthetic.user/friends"
+    child = "https://www.facebook.com/profile.php?id=200&sk=friends"
+    trace: list[str] = []
+
+    class TraceControl:
+        def is_cancel_requested(self):
+            trace.append("guard:cancellation")
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            trace.append("guard:safety")
+            return None
+
+    class RelationshipCollector(Collector):
+        def collect(self, browser, url, **kwargs):
+            trace.append(f"node:{url}")
+            return super().collect(browser, url, **kwargs)
+
+    class RelationshipParser:
+        def parse(self, html, *, source, source_url):
+            return (
+                UserRecord(
+                    user_id=html,
+                    name=f"User {html}",
+                    profile_url=f"https://www.facebook.com/profile.php?id={html}",
+                    source=source,
+                    source_url=source_url,
+                ),
+            )
+
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        relationships=RelationshipCollector({root: "200", child: "300"}),
+        relationship_parser=RelationshipParser(),
+        control=TraceControl(),
+    )
+
+    service.run(
+        request(
+            AuthenticatedAction.FRIENDS,
+            "https://www.facebook.com/synthetic.user",
+            depth=2,
+            max_nodes=2,
+        ),
+        object(),
+    )
+
+    assert trace == [
+        "guard:cancellation",
+        "guard:cancellation",
+        "guard:safety",
+        f"node:{root}",
+        "guard:cancellation",
+        "guard:safety",
+        f"node:{child}",
+    ]

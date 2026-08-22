@@ -8,6 +8,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Protocol
 
+from fb_crawl.core.atomic import atomic_text_writer
 from fb_crawl.core.exceptions import ValidationError
 from fb_crawl.core.models import (
     AuthenticatedAction,
@@ -25,7 +26,11 @@ from fb_crawl.core.models import (
     UidResolutionStats,
     UserRecord,
 )
-from fb_crawl.exporters.atomic import atomic_text_writer
+from fb_crawl.services.execution_control import (
+    CrawlCancelled,
+    JobBudgetReached,
+    attach_checkpoint_persistence_failure,
+)
 from fb_crawl.services.authenticated import _merge_record, _prepared_targets
 
 
@@ -361,6 +366,38 @@ class CheckpointingService:
                     target_rate_limited,
                     retryable_failure,
                 ) = self._run_with_retry(single, browser)
+            except (CrawlCancelled, JobBudgetReached) as error:
+                if store is not None:
+                    payload = {
+                        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+                        "action": str(request.action),
+                        "target_keys": list(_target_keys(request)),
+                        "request_options": _request_options(request),
+                        "completed_targets": sorted(completed),
+                        "users": [asdict(item) for item in known_users.values()],
+                        "messages": [asdict(item) for item in known_messages.values()],
+                        "inspect": [asdict(item) for item in known_inspect.values()],
+                        "issues": [asdict(item) for item in stored_issues],
+                    }
+                    try:
+                        store.save(payload)
+                    except Exception:
+                        issue = ScrapeIssue(
+                            code="authenticated_checkpoint_save_failed",
+                            message="Authenticated checkpoint persistence failed.",
+                            target=normalized_target,
+                            mode=ScrapeMode.AUTHENTICATED,
+                            action=str(request.action),
+                            retryable=True,
+                        )
+                        output_issues.append(issue)
+                        stored_issues.append(issue)
+                        attach_checkpoint_persistence_failure(
+                            error,
+                            issue,
+                            payload,
+                        )
+                raise
             except KeyboardInterrupt:
                 interrupted = 1
                 pending += len(pending_targets) - target_index

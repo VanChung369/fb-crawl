@@ -2,6 +2,7 @@ import pytest
 
 from pathlib import Path
 
+from fb_crawl.composition.authenticated import AuthenticatedComponents
 from fb_crawl.cli.app import main
 from fb_crawl.cli.authenticated import (
     AuthenticatedPersistenceRuntime,
@@ -29,6 +30,7 @@ from fb_crawl.core.models import (
     ScrapeStats,
     UserRecord,
 )
+from fb_crawl.config import BrowserSettings
 from fb_data_pipeline.repositories.errors import DatabaseError
 from fb_data_pipeline.services.ingestion import IngestionReport
 from fb_data_pipeline.services.persistence import (
@@ -304,6 +306,183 @@ def test_authenticated_command_writes_output_and_quits(
     assert browser.quit_calls == 1
 
 
+def test_authenticated_cli_uses_shared_component_builder(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Break caught: CLI reintroduces browser/service wiring outside composition."""
+    browser = Browser()
+    service = Service()
+    received: list[object] = []
+
+    def build_components(settings, credentials_provider):
+        received.append(settings)
+        received.append(credentials_provider)
+        return AuthenticatedComponents(
+            create_browser=lambda ignored: browser,
+            create_service=lambda: service,
+        )
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated.build_authenticated_components",
+        build_components,
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--output",
+            str(tmp_path / "members.csv"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(received) == 2
+    assert callable(received[1])
+    assert browser.quit_calls == 1
+
+
+def test_cli_runtime_defers_exporter_import_until_output_is_requested(
+    monkeypatch,
+) -> None:
+    """Break caught: persistence-only CLI jobs load exporter code needlessly."""
+    import sys
+
+    from fb_crawl.cli import authenticated
+
+    for name in tuple(sys.modules):
+        if name == "fb_crawl.exporters" or name.startswith("fb_crawl.exporters."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+    authenticated._load_runtime()
+
+    assert not any(
+        name == "fb_crawl.exporters" or name.startswith("fb_crawl.exporters.")
+        for name in sys.modules
+    )
+
+
+def test_builder_path_validates_before_browser_creation(monkeypatch) -> None:
+    """Break caught: shared production wiring starts Firefox before validation."""
+    browser_creations: list[object] = []
+
+    class InvalidService(Service):
+        def validate(self, request) -> None:
+            raise ValidationError("An unsupported members target was provided.")
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated.build_authenticated_components",
+        lambda settings, credentials: AuthenticatedComponents(
+            create_browser=lambda received: browser_creations.append(received),
+            create_service=InvalidService,
+        ),
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+        ]
+    )
+
+    assert exit_code == 2
+    assert browser_creations == []
+
+
+def test_builder_path_retains_exact_interactive_credentials(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Break caught: moving to shared composition changes CLI prompt behavior."""
+    browser = Browser()
+    captured: list[tuple[str, str]] = []
+
+    class PromptingService(Service):
+        def run(self, request, received_browser):
+            captured.append(credentials_provider())
+            return super().run(request, received_browser)
+
+    def build_components(settings, provider):
+        nonlocal credentials_provider
+        credentials_provider = provider
+        return AuthenticatedComponents(
+            create_browser=lambda ignored: browser,
+            create_service=PromptingService,
+        )
+
+    credentials_provider = None
+    monkeypatch.setattr("builtins.input", lambda prompt: "person@example.test")
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "correct-horse")
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated.build_authenticated_components",
+        build_components,
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--output",
+            str(tmp_path / "members.csv"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == [("person@example.test", "correct-horse")]
+
+
+def test_builder_path_persists_without_output_and_closes_both_runtimes(
+    monkeypatch,
+    capsys,
+) -> None:
+    """Break caught: production composition loses persistence-only CLI behavior."""
+    trace: list[str] = []
+
+    class ClosingBrowser(Browser):
+        def quit(self) -> None:
+            trace.append("browser.close")
+            raise RuntimeError("browser close")
+
+    browser = ClosingBrowser()
+    service = Service()
+    persistence = AuthenticatedPersistenceRuntime(
+        ingest_result=lambda result: (trace.append("ingest"), empty_ingestion_report())[1],
+        close=lambda: (
+            trace.append("provider.close"),
+            (_ for _ in ()).throw(RuntimeError("provider close")),
+        )[-1],
+    )
+
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated.build_authenticated_components",
+        lambda settings, credentials: AuthenticatedComponents(
+            create_browser=lambda ignored: browser,
+            create_service=lambda: service,
+        ),
+    )
+    monkeypatch.setattr(
+        "fb_crawl.cli.authenticated._load_persistence_runtime",
+        lambda: persistence,
+    )
+
+    exit_code = main(
+        [
+            "authenticated",
+            "members",
+            "https://www.facebook.com/groups/1",
+            "--persist",
+        ]
+    )
+
+    assert exit_code == 0
+    assert trace == ["ingest", "provider.close", "browser.close"]
+    assert "output=not_requested" in capsys.readouterr().out
+
+
 def test_session_failure_returns_three_and_still_quits(
     monkeypatch,
 ) -> None:
@@ -449,11 +628,13 @@ def test_missing_browser_extra_is_sanitized(
         blocked_import,
     )
 
-    with pytest.raises(
-        ConfigurationError,
-        match="browser",
-    ):
-        authenticated._load_runtime()
+    runtime = authenticated._load_runtime()
+
+    with pytest.raises(ConfigurationError, match="browser"):
+        runtime.create_components(
+            BrowserSettings(),
+            lambda: ("email", "password"),
+        )
 
 
 def test_enrichment_summary_is_printed_and_browser_quits(

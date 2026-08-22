@@ -34,6 +34,7 @@ from fb_crawl.core.urls import (
     normalize_facebook_url,
     profile_enrichment_urls,
 )
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
 
 
 def _ordered_union(first: tuple[str, ...], later: tuple[str, ...]) -> tuple[str, ...]:
@@ -188,6 +189,8 @@ class ProfileEnricher:
         sleep_func: Callable[[float], None] = time.sleep,
         jitter_func: Callable[[float, float], float] = random.uniform,
         monotonic_func: Callable[[], float] = time.monotonic,
+        control: ExecutionControl = NOOP_EXECUTION_CONTROL,
+        navigation_pacer: NavigationPacer = NOOP_NAVIGATION_PACER,
     ) -> None:
         self._settings = settings
         self._parser = parser or ProfileParser()
@@ -197,6 +200,8 @@ class ProfileEnricher:
         self._sleep = sleep_func
         self._jitter = jitter_func
         self._monotonic = monotonic_func
+        self._control = control
+        self._navigation_pacer = navigation_pacer
 
     def enrich(
         self,
@@ -251,8 +256,11 @@ class ProfileEnricher:
             section = _route_section(route)
 
             try:
+                guard_cancellation(self._control)
+                self._navigation_pacer.wait()
                 browser.get(route)
                 self._ready(browser, self._settings.browser_timeout_seconds)
+                guard_execution(self._control, browser)
 
                 if not self._authenticated(browser):
                     raise SessionError(
@@ -268,7 +276,7 @@ class ProfileEnricher:
                 if content_ready is False:
                     unavailable_sections.add(section)
 
-            except (SessionError, RateLimitError):
+            except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                 raise
 
             except Exception:
@@ -277,6 +285,7 @@ class ProfileEnricher:
                 critical_navigation_failure |= route_index == 0
                 continue
 
+            guard_execution(self._control, browser)
             html = str(browser.page_source)
             resolved_profile_url = _resolved_profile_url(browser, record, html)
 
@@ -306,6 +315,8 @@ class ProfileEnricher:
                         name=_browser_profile_name(browser),
                     )
 
+            except (CrawlCancelled, JobBudgetReached, AccountSafetyStop):
+                raise
             except Exception:
                 parse_failures += 1
                 unavailable_sections.add(section)
@@ -317,8 +328,11 @@ class ProfileEnricher:
 
         if ProfileField.PHONE in requested_set and route_profile_url:
             try:
+                guard_cancellation(self._control)
+                self._navigation_pacer.wait()
                 browser.get(route_profile_url)
                 self._ready(browser, self._settings.browser_timeout_seconds)
+                guard_execution(self._control, browser)
 
                 if not self._authenticated(browser):
                     raise SessionError(
@@ -330,6 +344,7 @@ class ProfileEnricher:
                     self._settings.browser_timeout_seconds,
                     route_profile_url,
                 )
+                guard_execution(self._control, browser)
                 timeline_details = self._parser.parse(
                     str(browser.page_source),
                     source_url=route_profile_url,
@@ -342,6 +357,7 @@ class ProfileEnricher:
                 )
 
                 if scan_more_posts:
+                    guard_execution(self._control, browser)
                     previous_height = int(
                         browser.execute_script(
                             "return document.body.scrollHeight"
@@ -357,10 +373,12 @@ class ProfileEnricher:
                     )
 
                     while budget.allows(attempts):
+                        guard_execution(self._control, browser)
                         browser.execute_script(
                             "window.scrollTo(0, document.body.scrollHeight)"
                         )
                         attempts += 1
+                        self._control.emit("target_progress", counters={"steps_completed": attempts})
                         jitter_limit = min(
                             phone_post_delay_seconds * 0.15,
                             0.5,
@@ -378,12 +396,14 @@ class ProfileEnricher:
                                 "is no longer valid."
                             )
 
+                        guard_execution(self._control, browser)
                         loaded_details = self._parser.parse(
                             str(browser.page_source),
                             source_url=route_profile_url,
                             requested_fields=(ProfileField.PHONE,),
                         )
                         details = _merge_details(details, loaded_details)
+                        guard_execution(self._control, browser)
                         current_height = int(
                             browser.execute_script(
                                 "return document.body.scrollHeight"
@@ -395,7 +415,7 @@ class ProfileEnricher:
 
                         previous_height = current_height
 
-            except (SessionError, RateLimitError):
+            except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                 raise
 
             except Exception:

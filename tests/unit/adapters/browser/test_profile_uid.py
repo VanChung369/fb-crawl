@@ -12,6 +12,9 @@ from fb_crawl.core.exceptions import (
     UidResolutionError,
 )
 from fb_crawl.core.models import UidResolution, UserRecord
+from fb_crawl.services.execution_control import AccountSafetyStop
+from fb_crawl.adapters.browser.account_safety import SafetySignal
+from fb_crawl.core.jobs import SafetyCode
 
 
 def _html(payload: object) -> str:
@@ -143,3 +146,22 @@ def test_resolver_preserves_session_failure() -> None:
 
     with pytest.raises(SessionError):
         resolver.resolve(Browser(""), _record())
+
+
+def test_resolver_stops_after_navigation_before_page_source() -> None:
+    class Unsafe:
+        def is_cancel_requested(self): return False
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser):
+            return SafetySignal(SafetyCode.CHECKPOINT, "Facebook checkpoint requires manual review.", True)
+    class NoPageSourceBrowser(Browser):
+        @property
+        def page_source(self):
+            raise AssertionError("page source must not be read after safety stop")
+        @page_source.setter
+        def page_source(self, value): self._html = value
+    browser = NoPageSourceBrowser(_html({"userVanity": "synthetic.user", "userID": "100015374200952"}))
+    resolver = ProfileUidResolver(BrowserSettings(), authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None, control=Unsafe())
+    with pytest.raises(AccountSafetyStop):
+        resolver.resolve(browser, _record())

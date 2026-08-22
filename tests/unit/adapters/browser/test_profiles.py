@@ -8,6 +8,9 @@ from fb_crawl.core.exceptions import (
     SessionError,
 )
 from fb_crawl.core.models import ProfileDetails, ProfileField, UserRecord
+from fb_crawl.services.execution_control import CrawlCancelled
+from fb_crawl.services.execution_control import AccountSafetyStop
+from fb_crawl.adapters.browser.account_safety import SafetyCode, SafetySignal
 
 
 class Browser:
@@ -73,6 +76,81 @@ def routes() -> tuple[str, str]:
             "/directory_links"
         ),
     )
+
+
+def test_profile_enrichment_cancelled_before_first_route_does_not_navigate() -> None:
+    class Cancelled:
+        def is_cancel_requested(self): return True
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): return None
+    personal, links = routes()
+    browser = Browser({personal: "personal", links: "links"})
+    with pytest.raises(CrawlCancelled):
+        ProfileEnricher(BrowserSettings(), control=Cancelled()).enrich(browser, record(), (ProfileField.WEBSITE,))
+    assert browser.get_calls == []
+
+
+def test_profile_safety_after_readiness_never_reads_or_parses_source() -> None:
+    class Unsafe:
+        def is_cancel_requested(self): return False
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser):
+            return SafetySignal(SafetyCode.CHECKPOINT, "Facebook checkpoint requires manual review.", True)
+    personal, links = routes()
+    browser = Browser({personal: "must-not-read", links: "unused"})
+    parser = Parser({personal: pytest.fail, links: pytest.fail})
+    with pytest.raises(AccountSafetyStop):
+        ProfileEnricher(BrowserSettings(), parser, control=Unsafe(), authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None).enrich(browser, record(), (ProfileField.WEBSITE,))
+    assert parser.calls == []
+
+
+def test_profile_readiness_safety_stops_before_page_source_getter_or_parser() -> None:
+    class SourceSentinelBrowser:
+        title = "Facebook"
+
+        def __init__(self) -> None:
+            self.current_url = "https://www.facebook.com/"
+            self.get_calls: list[str] = []
+
+        def get(self, url: str) -> None:
+            self.get_calls.append(url)
+            self.current_url = url
+
+        @property
+        def page_source(self):
+            pytest.fail("page source must not be read after readiness safety stop")
+
+    class ParserSentinel:
+        def parse(self, *args, **kwargs):
+            pytest.fail("profile parser must not run after readiness safety stop")
+
+    class Unsafe:
+        def is_cancel_requested(self):
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            return SafetySignal(
+                SafetyCode.CHECKPOINT,
+                "Facebook checkpoint requires manual review.",
+                True,
+            )
+
+    _, links = routes()
+    browser = SourceSentinelBrowser()
+    with pytest.raises(AccountSafetyStop):
+        ProfileEnricher(
+            BrowserSettings(),
+            ParserSentinel(),  # type: ignore[arg-type]
+            control=Unsafe(),
+            authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None,
+        ).enrich(browser, record(), (ProfileField.WEBSITE,))
+
+    assert browser.get_calls == [links]
 
 
 def work_route() -> str:
@@ -530,6 +608,224 @@ def test_phone_timeline_scrolling_stops_when_height_is_stable() -> None:
     )
 
     assert browser.scroll_calls == 1
+
+
+def test_phone_timeline_cancellation_after_first_progress_has_no_second_scroll() -> None:
+    personal, _ = routes()
+    timeline = "https://www.facebook.com/synthetic.user"
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        ["<main></main>", "<main></main>", "<main></main>"],
+        [100, 200, 300],
+    )
+    parser = Parser(
+        {
+            personal: ProfileDetails(),
+            timeline: ProfileDetails(),
+        }
+    )
+
+    class CancelAfterProgress:
+        def __init__(self) -> None:
+            self.cancelled = False
+            self.events: list[tuple[str, dict[str, int]]] = []
+
+        def is_cancel_requested(self):
+            return self.cancelled
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            self.events.append((event_type, dict(counters or {})))
+            self.cancelled = True
+
+        def check_account_safety(self, browser):
+            return None
+
+    control = CancelAfterProgress()
+    with pytest.raises(CrawlCancelled):
+        ProfileEnricher(
+            BrowserSettings(),
+            parser,  # type: ignore[arg-type]
+            control=control,
+            authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None,
+            content_ready_func=lambda browser, timeout, route: True,
+            sleep_func=lambda seconds: None,
+            jitter_func=lambda start, end: 0,
+        ).enrich(
+            browser,
+            record(),
+            (ProfileField.PHONE,),
+            phone_post_steps=2,
+            phone_post_delay_seconds=0,
+        )
+
+    assert browser.scroll_calls == 1
+    assert control.events == [("target_progress", {"steps_completed": 1})]
+
+
+def test_phone_timeline_first_scroll_full_guard_stops_before_scroll_or_progress() -> None:
+    personal, _ = routes()
+    timeline = "https://www.facebook.com/synthetic.user"
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        ["<main></main>", "<main></main>"],
+        [100, 200],
+    )
+    parser = Parser(
+        {
+            personal: ProfileDetails(),
+            timeline: ProfileDetails(),
+        }
+    )
+
+    class UnsafeAtFirstScrollGuard:
+        def __init__(self) -> None:
+            self.safety_checks = 0
+            self.events: list[tuple[str, dict[str, int]]] = []
+
+        def is_cancel_requested(self):
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            self.events.append((event_type, dict(counters or {})))
+
+        def check_account_safety(self, browser):
+            self.safety_checks += 1
+            if self.safety_checks == 6:
+                return SafetySignal(
+                    SafetyCode.CHECKPOINT,
+                    "Facebook checkpoint requires manual review.",
+                    True,
+                )
+            return None
+
+    control = UnsafeAtFirstScrollGuard()
+    with pytest.raises(AccountSafetyStop):
+        ProfileEnricher(
+            BrowserSettings(),
+            parser,  # type: ignore[arg-type]
+            control=control,
+            authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None,
+            content_ready_func=lambda browser, timeout, route: True,
+            sleep_func=lambda seconds: None,
+            jitter_func=lambda start, end: 0,
+        ).enrich(
+            browser,
+            record(),
+            (ProfileField.PHONE,),
+            phone_post_steps=1,
+            phone_post_delay_seconds=0,
+        )
+
+    assert control.safety_checks == 6
+    assert browser.scroll_calls == 0
+    assert control.events == []
+    assert [call[1] for call in parser.calls] == [personal, timeline]
+
+
+def test_phone_timeline_one_step_has_exact_full_guard_and_browser_trace() -> None:
+    personal, _ = routes()
+    timeline = "https://www.facebook.com/synthetic.user"
+    trace: list[str] = []
+
+    class TraceBrowser:
+        title = "Facebook"
+
+        def __init__(self) -> None:
+            self.current_url = "https://www.facebook.com/"
+            self._page_source = ""
+            self.scroll_calls = 0
+            self._outcomes = {personal: "personal", timeline: "timeline"}
+            self._heights = iter((100, 200))
+
+        def get(self, url: str) -> None:
+            trace.append(f"navigation:{url}")
+            self.current_url = url
+            self._page_source = self._outcomes[url]
+
+        @property
+        def page_source(self) -> str:
+            trace.append("source")
+            return self._page_source
+
+        def execute_script(self, script: str, *args):
+            if "scrollTo" in script:
+                trace.append("scroll")
+                self.scroll_calls += 1
+                self._page_source = "scrolled"
+                return None
+            if "scrollHeight" in script:
+                trace.append("height")
+                return next(self._heights)
+            return True
+
+    class TraceParser:
+        def parse(self, html: str, *, source_url: str, requested_fields=()):
+            trace.append(f"parse:{source_url}")
+            return ProfileDetails()
+
+    class RecordingControl:
+        def __init__(self) -> None:
+            self.safety_checks = 0
+            self.events: list[tuple[str, dict[str, int]]] = []
+
+        def is_cancel_requested(self):
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            event = (event_type, dict(counters or {}))
+            self.events.append(event)
+            trace.append(f"progress:{event[0]}:{event[1]}")
+
+        def check_account_safety(self, browser):
+            self.safety_checks += 1
+            trace.append(f"safety:{self.safety_checks}")
+            return None
+
+    browser = TraceBrowser()
+    control = RecordingControl()
+    ProfileEnricher(
+        BrowserSettings(),
+        TraceParser(),  # type: ignore[arg-type]
+        control=control,
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda start, end: 0,
+    ).enrich(
+        browser,
+        record(),
+        (ProfileField.PHONE,),
+        phone_post_steps=1,
+        phone_post_delay_seconds=0,
+    )
+
+    assert trace == [
+        f"navigation:{personal}",
+        "safety:1",
+        "safety:2",
+        "source",
+        f"parse:{personal}",
+        f"navigation:{timeline}",
+        "safety:3",
+        "safety:4",
+        "source",
+        f"parse:{timeline}",
+        "safety:5",
+        "height",
+        "safety:6",
+        "scroll",
+        "progress:target_progress:{'steps_completed': 1}",
+        "safety:7",
+        "source",
+        f"parse:{timeline}",
+        "safety:8",
+        "height",
+    ]
+    assert browser.scroll_calls == 1
+    assert control.events == [("target_progress", {"steps_completed": 1})]
 
 
 def test_phone_timeline_scrolling_accepts_a_duration_only_budget() -> None:

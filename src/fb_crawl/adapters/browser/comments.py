@@ -24,6 +24,7 @@ from fb_crawl.core.exceptions import (
     RateLimitError,
     SessionError,
 )
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
 
 MORE_COMMENTS_TEXTS = (
     "Xem thêm bình luận",
@@ -77,6 +78,8 @@ class CommentsCollector:
             None,
         ] = time.sleep,
         monotonic_func: Callable[[], float] = time.monotonic,
+        control: ExecutionControl = NOOP_EXECUTION_CONTROL,
+        navigation_pacer: NavigationPacer = NOOP_NAVIGATION_PACER,
     ) -> None:
         self._settings = settings
         self._authenticated = authenticated_func
@@ -84,6 +87,8 @@ class CommentsCollector:
         self._wait_factory = wait_factory
         self._sleep = sleep_func
         self._monotonic = monotonic_func
+        self._control = control
+        self._navigation_pacer = navigation_pacer
 
     def collect(
         self,
@@ -95,6 +100,8 @@ class CommentsCollector:
         max_duration_seconds: float | None = None,
     ) -> tuple[str, int]:
         try:
+            guard_cancellation(self._control)
+            self._navigation_pacer.wait()
             browser.get(url)
 
             self._ready(
@@ -102,6 +109,7 @@ class CommentsCollector:
                 self._settings.browser_timeout_seconds,
             )
 
+            guard_execution(self._control, browser)
             if not self._authenticated(browser):
                 raise SessionError(
                     "The authenticated Facebook " "session is no longer valid."
@@ -115,13 +123,16 @@ class CommentsCollector:
             )
 
             while budget.allows(attempts):
+                guard_execution(self._control, browser)
                 browser.execute_script(
                     "window.scrollTo(" "0, document.body.scrollHeight" ")"
                 )
 
                 attempts += 1
+                self._control.emit("target_progress", counters={"steps_completed": attempts})
 
                 try:
+                    guard_execution(self._control, browser)
                     candidate = self._wait_factory(
                         browser,
                         budget.wait_timeout(
@@ -135,17 +146,19 @@ class CommentsCollector:
                 if not candidate:
                     break
 
+                guard_execution(self._control, browser)
                 candidate.click()
 
                 if delay_seconds:
                     self._sleep(delay_seconds)
 
+            guard_execution(self._control, browser)
             return (
                 str(browser.page_source),
                 attempts,
             )
 
-        except (SessionError, RateLimitError):
+        except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
             raise
 
         except Exception as error:

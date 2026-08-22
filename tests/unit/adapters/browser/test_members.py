@@ -10,6 +10,25 @@ from fb_crawl.core.exceptions import (
     RateLimitError,
     SessionError,
 )
+from fb_crawl.services.execution_control import CrawlCancelled
+
+
+class RecordingControl:
+    def __init__(self, *, cancelled: bool = False, cancel_after_progress: bool = False):
+        self.cancelled = cancelled
+        self.cancel_after_progress = cancel_after_progress
+        self.events = []
+
+    def is_cancel_requested(self) -> bool:
+        return self.cancelled
+
+    def check_account_safety(self, browser):
+        return None
+
+    def emit(self, event_type, *, counters=None, safe_message=""):
+        self.events.append((event_type, dict(counters or {})))
+        if self.cancel_after_progress:
+            self.cancelled = True
 
 
 class FakeBrowser:
@@ -179,3 +198,24 @@ def test_members_collector_preserves_rate_limit_signal() -> None:
             steps=1,
             delay_seconds=0,
         )
+
+
+def test_members_cancellation_prevents_navigation_and_second_scroll() -> None:
+    control = RecordingControl(cancelled=True)
+    browser = FakeBrowser([100, 200, 300])
+    collector = MembersCollector(BrowserSettings(), control=control)
+
+    with pytest.raises(CrawlCancelled):
+        collector.collect(browser, "https://www.facebook.com/groups/1/members", steps=2, delay_seconds=0)
+    assert browser.visited == []
+
+    control = RecordingControl(cancel_after_progress=True)
+    collector = MembersCollector(
+        BrowserSettings(), control=control, authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None, sleep_func=lambda seconds: None,
+        jitter_func=lambda low, high: 0,
+    )
+    with pytest.raises(CrawlCancelled):
+        collector.collect(browser, "https://www.facebook.com/groups/1/members", steps=2, delay_seconds=0)
+    assert browser.scrolls == 1
+    assert control.events == [("target_progress", {"steps_completed": 1})]

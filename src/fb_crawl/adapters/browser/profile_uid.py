@@ -17,6 +17,7 @@ from fb_crawl.core.exceptions import (
     UidResolutionError,
 )
 from fb_crawl.core.models import UidResolution, UserRecord
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
 
 
 NUMERIC_UID = re.compile(r"[1-9]\d{4,19}")
@@ -142,11 +143,15 @@ class ProfileUidResolver:
         *,
         authenticated_func: Callable[[object], bool] = is_authenticated,
         ready_func: Callable[[object, float], None] = wait_for_document_ready,
+        control: ExecutionControl = NOOP_EXECUTION_CONTROL,
+        navigation_pacer: NavigationPacer = NOOP_NAVIGATION_PACER,
     ) -> None:
         self._settings = settings
         self._parser = parser or ProfileUidParser()
         self._authenticated = authenticated_func
         self._ready = ready_func
+        self._control = control
+        self._navigation_pacer = navigation_pacer
 
     def resolve(
         self,
@@ -159,15 +164,18 @@ class ProfileUidResolver:
             return UidResolution(record.user_id)
 
         try:
+            guard_cancellation(self._control)
+            self._navigation_pacer.wait()
             browser.get(record.profile_url)
             self._ready(browser, self._settings.browser_timeout_seconds)
+            guard_execution(self._control, browser)
 
             if not self._authenticated(browser):
                 raise SessionError(
                     "The authenticated Facebook session is no longer valid."
                 )
 
-        except (SessionError, RateLimitError):
+        except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
             raise
 
         except Exception as error:
@@ -181,6 +189,7 @@ class ProfileUidResolver:
         if redirected_uid is not None:
             return UidResolution(redirected_uid)
 
+        guard_execution(self._control, browser)
         resolved = self._parser.parse(
             str(browser.page_source),
             expected_username=(record.username or record.user_id),

@@ -16,6 +16,7 @@ from fb_crawl.core.exceptions import (
     RateLimitError,
     SessionError,
 )
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
 
 
 REACTIONS_XPATH = (
@@ -73,6 +74,8 @@ class ReactionsCollector:
         wait_factory=WebDriverWait,
         sleep_func: Callable[[float], None] = time.sleep,
         monotonic_func: Callable[[], float] = time.monotonic,
+        control: ExecutionControl = NOOP_EXECUTION_CONTROL,
+        navigation_pacer: NavigationPacer = NOOP_NAVIGATION_PACER,
     ) -> None:
         self._settings = settings
         self._authenticated = authenticated_func
@@ -80,6 +83,8 @@ class ReactionsCollector:
         self._wait_factory = wait_factory
         self._sleep = sleep_func
         self._monotonic = monotonic_func
+        self._control = control
+        self._navigation_pacer = navigation_pacer
 
     def collect(
         self,
@@ -91,18 +96,24 @@ class ReactionsCollector:
         max_duration_seconds: float | None = None,
     ) -> tuple[str, int]:
         try:
+            guard_cancellation(self._control)
+            self._navigation_pacer.wait()
             browser.get(url)
             self._ready(browser, self._settings.browser_timeout_seconds)
+            guard_execution(self._control, browser)
 
             if not self._authenticated(browser):
                 raise SessionError(
                     "The authenticated Facebook session is no longer valid."
                 )
 
+            guard_execution(self._control, browser)
             candidate = self._wait_factory(
                 browser, self._settings.browser_timeout_seconds
             ).until(_clickable_reactions)
+            guard_execution(self._control, browser)
             candidate.click()
+            guard_execution(self._control, browser)
             self._wait_factory(
                 browser, self._settings.browser_timeout_seconds
             ).until(_visible_dialog)
@@ -116,12 +127,14 @@ class ReactionsCollector:
             )
 
             while budget.allows(attempts):
+                guard_execution(self._control, browser)
                 height = browser.execute_script(REACTIONS_SCROLL_SCRIPT)
 
                 if height is None:
                     break
 
                 attempts += 1
+                self._control.emit("target_progress", counters={"steps_completed": attempts})
 
                 if delay_seconds:
                     self._sleep(delay_seconds)
@@ -131,6 +144,7 @@ class ReactionsCollector:
                     break
                 previous = current
 
+            guard_execution(self._control, browser)
             html = browser.execute_script(REACTIONS_CONTENT_SCRIPT)
 
             if not html:
@@ -140,7 +154,7 @@ class ReactionsCollector:
 
             return str(html), attempts
 
-        except (SessionError, RateLimitError):
+        except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
             raise
         except BrowserNavigationError:
             raise

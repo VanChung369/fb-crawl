@@ -3,6 +3,7 @@ import pytest
 from fb_crawl.adapters.browser.relationships import RelationshipCollector
 from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import BrowserNavigationError, SessionError
+from fb_crawl.services.execution_control import CrawlCancelled
 
 
 class Browser:
@@ -76,3 +77,32 @@ def test_relationship_collector_sanitizes_navigation_failure() -> None:
         )
 
     assert "private DOM" not in captured.value.safe_message
+
+
+def test_relationship_cancelled_before_navigation_does_not_visit_target() -> None:
+    class Cancelled:
+        def is_cancel_requested(self): return True
+        def emit(self, event_type, *, counters=None, safe_message=""): return None
+        def check_account_safety(self, browser): return None
+    browser = Browser([100])
+    with pytest.raises(CrawlCancelled):
+        RelationshipCollector(BrowserSettings(), control=Cancelled()).collect(browser, "https://www.facebook.com/synthetic.user/friends", steps=1, delay_seconds=0)
+    assert browser.visited == []
+
+
+def test_relationship_cancel_after_progress_has_no_second_scroll() -> None:
+    class Control:
+        cancelled = False
+        events = []
+        def is_cancel_requested(self): return self.cancelled
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            self.events.append((event_type, dict(counters or {}))); self.cancelled = True
+        def check_account_safety(self, browser): return None
+    control = Control()
+    browser = Browser([100, 200])
+    with pytest.raises(CrawlCancelled):
+        RelationshipCollector(BrowserSettings(), control=control, authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None, sleep_func=lambda seconds: None,
+            jitter_func=lambda low, high: 0).collect(browser, "https://www.facebook.com/synthetic.user/friends", steps=2, delay_seconds=0)
+    assert browser.scrolls == 1
+    assert control.events == [("target_progress", {"steps_completed": 1})]

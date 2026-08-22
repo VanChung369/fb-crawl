@@ -123,6 +123,7 @@ def test_migrations_are_idempotent_on_postgresql() -> None:
             assert cursor.fetchall() == [
                 ("001_initial",),
                 ("002_profile_attributes",),
+                ("003_job_orchestration",),
             ]
 
 

@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Protocol
 
+from fb_crawl.core.atomic import atomic_text_writer
 from fb_crawl.core.models import UidResolution, UserRecord
-from fb_crawl.exporters.atomic import atomic_text_writer
 
 
 CACHE_SCHEMA_VERSION = 1

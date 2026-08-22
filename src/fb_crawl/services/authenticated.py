@@ -48,6 +48,7 @@ from fb_crawl.core.urls import (
     normalize_reactions_url,
     profile_identity_url,
 )
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NOOP_EXECUTION_CONTROL, guard_cancellation, guard_execution
 
 
 class SessionPort(Protocol):
@@ -512,6 +513,7 @@ class AuthenticatedService:
         message_parser: MessageParserPort | None = None,
         inspector: InspectorPort | None = None,
         sleep_func: Callable[[float], None] = time.sleep,
+        control: ExecutionControl = NOOP_EXECUTION_CONTROL,
     ) -> None:
         self._session = session
         self._members = members
@@ -527,6 +529,7 @@ class AuthenticatedService:
         self._message_parser = message_parser
         self._inspector = inspector
         self._sleep = sleep_func
+        self._control = control
 
     def _resolve_uid_record(
         self,
@@ -611,6 +614,7 @@ class AuthenticatedService:
                 continue
 
             visited.add(url)
+            guard_execution(self._control, browser)
             self._session.assert_authenticated(browser)
 
             try:
@@ -630,13 +634,15 @@ class AuthenticatedService:
                     )
                 except BrowserParseError:
                     raise
+                except (CrawlCancelled, JobBudgetReached, AccountSafetyStop):
+                    raise
                 except Exception as error:
                     raise BrowserParseError(
                         "Authenticated user parsing failed.",
                         target=url,
                     ) from error
 
-            except SessionError:
+            except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                 raise
             except (BrowserNavigationError, BrowserParseError) as error:
                 issues.append(
@@ -671,12 +677,13 @@ class AuthenticatedService:
                     uid_selected += 1
 
                     try:
+                        guard_execution(self._control, browser)
                         record, cached = self._resolve_uid_record(
                             browser,
                             record,
                             force=request.force_uid_refresh,
                         )
-                    except SessionError:
+                    except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                         raise
                     except (BrowserNavigationError, BrowserParseError) as error:
                         uid_failed += 1
@@ -799,6 +806,7 @@ class AuthenticatedService:
             return self._run_messages(request, browser, prepared, issues)
 
         if prepared:
+            guard_cancellation(self._control)
             self._session.ensure_authenticated(browser)
 
         records_by_id: dict[
@@ -825,6 +833,7 @@ class AuthenticatedService:
             )
 
         for action, url in (() if relationship_graph else prepared):
+            guard_execution(self._control, browser)
             self._session.assert_authenticated(browser)
 
             if action is AuthenticatedAction.PROFILE:
@@ -897,6 +906,9 @@ class AuthenticatedService:
                     except BrowserParseError:
                         raise
 
+                    except (CrawlCancelled, JobBudgetReached, AccountSafetyStop):
+                        raise
+
                     except Exception as error:
                         raise BrowserParseError(
                             "Authenticated user parsing failed.",
@@ -942,7 +954,7 @@ class AuthenticatedService:
                             else _merge_record(existing, record)
                         )
 
-                except SessionError:
+                except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                     raise
 
                 except (
@@ -981,17 +993,19 @@ class AuthenticatedService:
             uid_failed = 0
 
             for index, record in enumerate(unresolved):
+                guard_execution(self._control, browser)
                 self._session.assert_authenticated(browser)
                 cached = False
 
                 try:
+                    guard_execution(self._control, browser)
                     resolved, cached = self._resolve_uid_record(
                         browser,
                         record,
                         force=request.force_uid_refresh,
                     )
 
-                except SessionError:
+                except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                     raise
 
                 except (
@@ -1058,6 +1072,7 @@ class AuthenticatedService:
                 attempted += 1
 
                 try:
+                    guard_execution(self._control, browser)
                     enrichment_kwargs = {}
 
                     if (
@@ -1081,7 +1096,7 @@ class AuthenticatedService:
                         **enrichment_kwargs,
                     )
 
-                except SessionError:
+                except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                     raise
 
                 except (
@@ -1361,16 +1376,18 @@ class AuthenticatedService:
         issues: list[ScrapeIssue],
     ) -> ScrapeResult[InspectRecord]:
         if prepared:
+            guard_cancellation(self._control)
             self._session.ensure_authenticated(browser)
 
         records: dict[str, InspectRecord] = {}
 
         for action, url in prepared:
+            guard_execution(self._control, browser)
             self._session.assert_authenticated(browser)
             try:
                 record = self._inspector.inspect(browser, url)
                 records[url] = record
-            except SessionError:
+            except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                 raise
             except BrowserNavigationError as error:
                 issues.append(
@@ -1403,12 +1420,14 @@ class AuthenticatedService:
         issues: list[ScrapeIssue],
     ) -> ScrapeResult[MessageRecord]:
         if prepared:
+            guard_cancellation(self._control)
             self._session.ensure_authenticated(browser)
 
         records_by_id: dict[str, MessageRecord] = {}
         discovered = 0
 
         for action, url in prepared:
+            guard_execution(self._control, browser)
             self._session.assert_authenticated(browser)
 
             try:
@@ -1423,6 +1442,8 @@ class AuthenticatedService:
                 try:
                     parsed = self._message_parser.parse(html, source_url=url)
                 except BrowserParseError:
+                    raise
+                except (CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                     raise
                 except Exception as error:
                     raise BrowserParseError(
@@ -1439,7 +1460,7 @@ class AuthenticatedService:
                     )
                     records_by_id.setdefault(record.message_id, record)
 
-            except SessionError:
+            except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                 raise
             except (BrowserNavigationError, BrowserParseError) as error:
                 issues.append(

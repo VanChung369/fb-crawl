@@ -7,6 +7,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
     assert [item.version for item in migrations] == [
         "001_initial",
         "002_profile_attributes",
+        "003_job_orchestration",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql
@@ -18,6 +19,18 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
     assert "CREATE OR REPLACE VIEW facebook_user_phone_slots" in (
         migrations[1].sql
     )
+    assert "CREATE TABLE crawl_jobs" in migrations[2].sql
+    assert "CREATE TABLE crawl_targets" in migrations[2].sql
+    assert "CREATE TABLE crawl_job_events" in migrations[2].sql
+    assert "CREATE TABLE crawler_account_state" in migrations[2].sql
+    assert "crawl_jobs_one_active_authenticated_account_idx" in (
+        migrations[2].sql
+    )
+    assert "crawl_job_events_job_id_idx" in migrations[2].sql
+    assert "facebook_users_updated_cursor_idx" in migrations[2].sql
+    assert "facebook_users_username_prefix_idx" in migrations[2].sql
+    assert "facebook_users_display_name_prefix_idx" in migrations[2].sql
+    assert "VALUES ('default', 'ready')" in migrations[2].sql
 
 
 def test_migrations_are_sorted_by_version() -> None:

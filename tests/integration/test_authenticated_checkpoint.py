@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,6 +16,9 @@ from fb_crawl.core.models import (
     UserRecord,
 )
 from fb_crawl.services.checkpoint import CheckpointingService
+from fb_crawl.services.execution_control import CrawlCancelled, JobBudgetReached
+from fb_crawl.services.execution_control import AccountSafetyStop
+from fb_crawl.adapters.browser.account_safety import SafetyCode, SafetySignal
 
 
 def record(user_id: str, source_url: str) -> UserRecord:
@@ -311,7 +315,8 @@ def test_rate_limit_issue_is_counted_across_attempts() -> None:
 
 def test_keyboard_interrupt_returns_completed_targets_and_pending_count() -> None:
     first = "https://www.facebook.com/groups/100"
-    second = "https://www.facebook.com/groups/200"
+    second = "https://www.facebook.com/groups/150"
+    third = "https://www.facebook.com/groups/200"
     service = OutcomeService(
         {
             first: [result(record("100", first))],
@@ -378,3 +383,158 @@ def test_interrupted_inspect_keeps_issue_for_json_export() -> None:
     assert outcome.retry.interrupted == 1
     assert outcome.stats.failed == 1
     assert outcome.issues[0].code == "authenticated_interrupted"
+
+
+@pytest.mark.parametrize("stop", [CrawlCancelled(), JobBudgetReached()])
+def test_checkpoint_saves_completed_records_then_reraises_typed_stop(tmp_path: Path, stop: RuntimeError) -> None:
+    checkpoint = tmp_path / "typed-stop.json"
+    first = "https://www.facebook.com/groups/100"
+    second = "https://www.facebook.com/groups/200"
+    service = OutcomeService({first: [result(record("100", first))], second: [stop]})
+    with pytest.raises(type(stop)):
+        CheckpointingService(service).run(request(checkpoint, first, second), object())
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert payload["completed_targets"]
+    assert payload["users"][0]["user_id"] == "100"
+
+
+@pytest.mark.parametrize("stop", [CrawlCancelled(), JobBudgetReached()])
+def test_checkpoint_save_failure_does_not_replace_typed_stop(tmp_path: Path, stop: RuntimeError, monkeypatch) -> None:
+    target = "https://www.facebook.com/groups/100"
+    service = OutcomeService({target: [stop]})
+    monkeypatch.setattr("fb_crawl.services.checkpoint.JsonCheckpointStore.save", lambda self, payload: (_ for _ in ()).throw(OSError("private path")))
+    with pytest.raises(type(stop)) as captured:
+        CheckpointingService(service).run(request(tmp_path / "failed-save.json", target), object())
+    assert captured.value.checkpoint_issue.code == "authenticated_checkpoint_save_failed"
+    assert captured.value.checkpoint_snapshot.payload["users"] == ()
+    assert "private path" not in str(captured.value.checkpoint_issue)
+
+
+@pytest.mark.parametrize("stop", [CrawlCancelled(), JobBudgetReached()])
+def test_checkpoint_failure_snapshot_is_immutable_and_retains_known_state(tmp_path: Path, stop: RuntimeError, monkeypatch) -> None:
+    first = "https://www.facebook.com/groups/100"
+    second = "https://www.facebook.com/groups/150"
+    third = "https://www.facebook.com/groups/200"
+    original_save = __import__("fb_crawl.services.checkpoint", fromlist=["JsonCheckpointStore"]).JsonCheckpointStore.save
+    calls = 0
+    def save_then_fail(store, payload):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            return original_save(store, payload)
+        raise OSError("private checkpoint detail")
+    monkeypatch.setattr("fb_crawl.services.checkpoint.JsonCheckpointStore.save", save_then_fail)
+    issue = issue_result(second, retryable=False)
+    second_result = replace(result(record("150", second)), issues=issue.issues)
+    service = OutcomeService({first: [result(record("100", first))], second: [second_result], third: [stop]})
+    request_value = request(tmp_path / "retained.json", first, second, third)
+    with pytest.raises(type(stop)) as captured:
+        CheckpointingService(service).run(request_value, object())
+    assert captured.value is stop
+    snapshot = stop.checkpoint_snapshot.payload
+    assert len(snapshot["completed_targets"]) == 1
+    assert [user["user_id"] for user in snapshot["users"]] == ["100", "150"]
+    assert snapshot["issues"][0]["code"] == "authenticated_navigation_failed"
+    with pytest.raises(TypeError): snapshot["new"] = "value"
+    with pytest.raises(TypeError): snapshot["issues"][0]["code"] = "changed"
+    assert "private checkpoint detail" not in str(stop)
+    assert "private checkpoint detail" not in repr(stop.__dict__)
+
+
+@pytest.mark.parametrize("stop", [CrawlCancelled(), JobBudgetReached()])
+def test_checkpoint_failed_save_preserves_exact_sanitized_stop_snapshot(
+    tmp_path: Path, stop: RuntimeError, monkeypatch
+) -> None:
+    first = "https://www.facebook.com/groups/100"
+    issue_target = "https://www.facebook.com/groups/150"
+    stopped = "https://www.facebook.com/groups/200"
+    raw_error = "raw persistence error must never escape"
+    original_save = __import__(
+        "fb_crawl.services.checkpoint", fromlist=["JsonCheckpointStore"]
+    ).JsonCheckpointStore.save
+    save_calls = 0
+
+    def save_then_fail(store, payload):
+        nonlocal save_calls
+        save_calls += 1
+        if save_calls < 3:
+            return original_save(store, payload)
+        raise OSError(raw_error)
+
+    monkeypatch.setattr(
+        "fb_crawl.services.checkpoint.JsonCheckpointStore.save", save_then_fail
+    )
+    known_issue = issue_result(issue_target, retryable=False).issues[0]
+    issue_result_value = replace(
+        result(record("150", issue_target)), issues=(known_issue,)
+    )
+    first_record = replace(
+        record("100", first),
+        phone_evidence=(
+            PhoneEvidence(
+                value="0912 345 678",
+                source="facebook:post_text",
+                source_url="https://www.facebook.com/example/posts/1",
+                captured_at="2026-08-21T00:00:00+00:00",
+            ),
+        ),
+    )
+    service = OutcomeService(
+        {
+            first: [result(first_record)],
+            issue_target: [issue_result_value],
+            stopped: [stop],
+        }
+    )
+
+    with pytest.raises(type(stop)) as captured:
+        CheckpointingService(service).run(
+            request(tmp_path / "interrupted.json", first, issue_target, stopped),
+            object(),
+        )
+
+    assert captured.value is stop
+    assert type(captured.value) is type(stop)
+    assert stop.__cause__ is None
+    assert stop.__context__ is None
+    assert stop.checkpoint_issue.code == "authenticated_checkpoint_save_failed"
+    assert stop.checkpoint_issue.target == (
+        "https://www.facebook.com/groups/200/members"
+    )
+    assert stop.checkpoint_issue.retryable is True
+    payload = stop.checkpoint_snapshot.payload
+    assert payload["completed_targets"] == (
+        "members:https://www.facebook.com/groups/100/members",
+    )
+    assert [item["user_id"] for item in payload["users"]] == ["100", "150"]
+    assert payload["issues"] == (
+        {
+            "code": "authenticated_navigation_failed",
+            "message": "Authenticated target failed.",
+            "target": issue_target,
+            "mode": ScrapeMode.AUTHENTICATED,
+            "action": AuthenticatedAction.MEMBERS.value,
+            "retryable": False,
+        },
+    )
+    with pytest.raises(TypeError):
+        payload["completed_targets"] = ()
+    with pytest.raises(TypeError):
+        payload["users"][0]["user_id"] = "changed"
+    with pytest.raises(TypeError):
+        payload["users"][0]["phone_evidence"][0]["value"] = "changed"
+    with pytest.raises(TypeError):
+        payload["issues"][0]["code"] = "changed"
+    assert raw_error not in str(stop)
+    assert raw_error not in repr(stop)
+    assert raw_error not in repr(stop.checkpoint_snapshot)
+    assert all(raw_error not in repr(value) for value in vars(stop).values())
+
+
+def test_checkpoint_reraises_account_safety_without_retry_issue(tmp_path: Path) -> None:
+    target = "https://www.facebook.com/groups/100"
+    stop = AccountSafetyStop(SafetySignal(SafetyCode.CHECKPOINT, "Facebook checkpoint requires manual review.", True))
+    service = OutcomeService({target: [stop]})
+    with pytest.raises(AccountSafetyStop):
+        CheckpointingService(service).run(request(tmp_path / "safety.json", target), object())
+    assert service.calls == [target]
