@@ -39,9 +39,16 @@ def add_worker_parser(
         dest="worker_command",
         required=True,
     )
-    commands.add_parser(
+    run_parser = commands.add_parser(
         "run",
         help="Poll and execute authenticated crawl jobs.",
+    )
+    run_parser.add_argument(
+        "--concurrency",
+        "-c",
+        type=int,
+        default=1,
+        help="Number of concurrent worker processes to run (default: 1)",
     )
     return parser
 
@@ -138,9 +145,43 @@ def execute_worker(
             f"Unsupported worker command: {args.worker_command}"
         )
 
+    concurrency = getattr(args, "concurrency", 1) or 1
+    if concurrency > 1:
+        return _execute_multiprocess_workers(concurrency, sleep=sleep)
+
     try:
         return _execute_worker_process(sleep=sleep)
     except KeyboardInterrupt:
+        return 130
+
+
+def _execute_multiprocess_workers(
+    concurrency: int,
+    *,
+    sleep: Callable[[float], None] | None = None,
+) -> int:
+    import multiprocessing
+    print(f"[INFO] Khởi chạy {concurrency} Worker tiến trình song song (Concurrency = {concurrency})...")
+    processes: list[multiprocessing.Process] = []
+
+    for i in range(concurrency):
+        p = multiprocessing.Process(
+            target=_execute_worker_process,
+            kwargs={"sleep": sleep},
+            name=f"WorkerProcess-{i+1}",
+        )
+        p.start()
+        processes.append(p)
+
+    try:
+        for p in processes:
+            p.join()
+        return 0
+    except KeyboardInterrupt:
+        print("\n[INFO] Đang dừng tất cả các Worker song song...")
+        for p in processes:
+            p.terminate()
+            p.join(timeout=2.0)
         return 130
 
 

@@ -75,6 +75,36 @@ class DashboardApp {
     this.btnOpenImportSession = document.getElementById('btn-open-import-session');
     this.btnOpenExtractSession = document.getElementById('btn-open-extract-session');
     this.btnOpenAddProxies = document.getElementById('btn-open-add-proxies');
+
+    // Pagination States
+    this.jobsPagination = {
+      limit: 50,
+      pageIndex: 0,
+      cursorHistory: [null],
+      nextCursor: null,
+      hasMore: false,
+    };
+
+    this.leadsPagination = {
+      limit: 50,
+      pageIndex: 0,
+      cursorHistory: [null],
+      nextCursor: null,
+      hasMore: false,
+      filters: {},
+    };
+
+    this.sessionsPagination = {
+      limit: 25,
+      pageIndex: 0,
+      allItems: [],
+    };
+
+    this.proxiesPagination = {
+      limit: 25,
+      pageIndex: 0,
+      allItems: [],
+    };
   }
 
   bindEvents() {
@@ -128,6 +158,128 @@ class DashboardApp {
     if (this.formImportSession) this.formImportSession.addEventListener('submit', (e) => this.handleImportSession(e));
     if (this.formExtractSession) this.formExtractSession.addEventListener('submit', (e) => this.handleExtractSession(e));
     if (this.formAddProxies) this.formAddProxies.addEventListener('submit', (e) => this.handleAddProxies(e));
+
+    // Pagination Listeners: Jobs
+    const jobsLimit = document.getElementById('jobs-page-limit');
+    if (jobsLimit) {
+      jobsLimit.addEventListener('change', (e) => {
+        this.jobsPagination.limit = parseInt(e.target.value, 10) || 50;
+        this.jobsPagination.pageIndex = 0;
+        this.jobsPagination.cursorHistory = [null];
+        this.loadJobsData();
+      });
+    }
+    const btnJobsPrev = document.getElementById('btn-jobs-prev');
+    if (btnJobsPrev) {
+      btnJobsPrev.addEventListener('click', () => {
+        if (this.jobsPagination.pageIndex > 0) {
+          this.jobsPagination.pageIndex--;
+          this.loadJobsData(this.jobsPagination.cursorHistory[this.jobsPagination.pageIndex]);
+        }
+      });
+    }
+    const btnJobsNext = document.getElementById('btn-jobs-next');
+    if (btnJobsNext) {
+      btnJobsNext.addEventListener('click', () => {
+        if (this.jobsPagination.nextCursor) {
+          this.jobsPagination.pageIndex++;
+          if (this.jobsPagination.cursorHistory.length <= this.jobsPagination.pageIndex) {
+            this.jobsPagination.cursorHistory.push(this.jobsPagination.nextCursor);
+          }
+          this.loadJobsData(this.jobsPagination.nextCursor);
+        }
+      });
+    }
+
+    // Pagination Listeners: Leads
+    const leadsLimit = document.getElementById('leads-page-limit');
+    if (leadsLimit) {
+      leadsLimit.addEventListener('change', (e) => {
+        this.leadsPagination.limit = parseInt(e.target.value, 10) || 50;
+        this.leadsPagination.pageIndex = 0;
+        this.leadsPagination.cursorHistory = [null];
+        this.loadLeadsData();
+      });
+    }
+    const btnLeadsPrev = document.getElementById('btn-leads-prev');
+    if (btnLeadsPrev) {
+      btnLeadsPrev.addEventListener('click', () => {
+        if (this.leadsPagination.pageIndex > 0) {
+          this.leadsPagination.pageIndex--;
+          this.loadLeadsData(this.leadsPagination.cursorHistory[this.leadsPagination.pageIndex]);
+        }
+      });
+    }
+    const btnLeadsNext = document.getElementById('btn-leads-next');
+    if (btnLeadsNext) {
+      btnLeadsNext.addEventListener('click', () => {
+        if (this.leadsPagination.nextCursor) {
+          this.leadsPagination.pageIndex++;
+          if (this.leadsPagination.cursorHistory.length <= this.leadsPagination.pageIndex) {
+            this.leadsPagination.cursorHistory.push(this.leadsPagination.nextCursor);
+          }
+          this.loadLeadsData(this.leadsPagination.nextCursor);
+        }
+      });
+    }
+
+    // Pagination Listeners: Sessions
+    const sessionsLimit = document.getElementById('sessions-page-limit');
+    if (sessionsLimit) {
+      sessionsLimit.addEventListener('change', (e) => {
+        this.sessionsPagination.limit = parseInt(e.target.value, 10) || 25;
+        this.sessionsPagination.pageIndex = 0;
+        this.renderSessionsTable();
+      });
+    }
+    const btnSessionsPrev = document.getElementById('btn-sessions-prev');
+    if (btnSessionsPrev) {
+      btnSessionsPrev.addEventListener('click', () => {
+        if (this.sessionsPagination.pageIndex > 0) {
+          this.sessionsPagination.pageIndex--;
+          this.renderSessionsTable();
+        }
+      });
+    }
+    const btnSessionsNext = document.getElementById('btn-sessions-next');
+    if (btnSessionsNext) {
+      btnSessionsNext.addEventListener('click', () => {
+        const maxPages = Math.ceil(this.sessionsPagination.allItems.length / this.sessionsPagination.limit);
+        if (this.sessionsPagination.pageIndex < maxPages - 1) {
+          this.sessionsPagination.pageIndex++;
+          this.renderSessionsTable();
+        }
+      });
+    }
+
+    // Pagination Listeners: Proxies
+    const proxiesLimit = document.getElementById('proxies-page-limit');
+    if (proxiesLimit) {
+      proxiesLimit.addEventListener('change', (e) => {
+        this.proxiesPagination.limit = parseInt(e.target.value, 10) || 25;
+        this.proxiesPagination.pageIndex = 0;
+        this.renderProxiesTable();
+      });
+    }
+    const btnProxiesPrev = document.getElementById('btn-proxies-prev');
+    if (btnProxiesPrev) {
+      btnProxiesPrev.addEventListener('click', () => {
+        if (this.proxiesPagination.pageIndex > 0) {
+          this.proxiesPagination.pageIndex--;
+          this.renderProxiesTable();
+        }
+      });
+    }
+    const btnProxiesNext = document.getElementById('btn-proxies-next');
+    if (btnProxiesNext) {
+      btnProxiesNext.addEventListener('click', () => {
+        const maxPages = Math.ceil(this.proxiesPagination.allItems.length / this.proxiesPagination.limit);
+        if (this.proxiesPagination.pageIndex < maxPages - 1) {
+          this.proxiesPagination.pageIndex++;
+          this.renderProxiesTable();
+        }
+      });
+    }
 
     // FBNumber Settings Form & Token Test
     const formSettings = document.getElementById('form-update-settings');
@@ -319,13 +471,23 @@ class DashboardApp {
   // ==========================================
   // VIEW 2: JOBS
   // ==========================================
-  async loadJobsData() {
+  async loadJobsData(cursor = null) {
     if (!this.tableAllJobs) return;
-    const data = await this.fetchApi('/api/v1/jobs?limit=50');
+    const limit = this.jobsPagination.limit;
+    const url = cursor
+      ? `/api/v1/jobs?limit=${limit}&cursor=${encodeURIComponent(cursor)}`
+      : `/api/v1/jobs?limit=${limit}`;
+
+    const data = await this.fetchApi(url);
     if (!data || !data.items || data.items.length === 0) {
       this.tableAllJobs.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:30px;">Chưa có Crawl Job nào. Bấm "+ Tạo Job Mới" để bắt đầu quét.</td></tr>`;
+      this.updateJobsPaginationUI(0, false);
       return;
     }
+
+    this.jobsPagination.nextCursor = data.next_cursor || null;
+    this.jobsPagination.hasMore = !!data.has_more;
+    this.updateJobsPaginationUI(data.items.length, data.has_more);
 
     this.tableAllJobs.innerHTML = data.items.map(job => {
       const isRunning = (job.status || '').toLowerCase() === 'running';
@@ -350,6 +512,17 @@ class DashboardApp {
         </tr>
       `;
     }).join('');
+  }
+
+  updateJobsPaginationUI(count, hasMore) {
+    const pageNum = this.jobsPagination.pageIndex + 1;
+    const info = document.getElementById('jobs-pagination-info');
+    const btnPrev = document.getElementById('btn-jobs-prev');
+    const btnNext = document.getElementById('btn-jobs-next');
+
+    if (info) info.textContent = `Trang ${pageNum} (${count} jobs)`;
+    if (btnPrev) btnPrev.disabled = this.jobsPagination.pageIndex === 0;
+    if (btnNext) btnNext.disabled = !hasMore;
   }
 
   async handleCreateJob(e) {
@@ -484,15 +657,23 @@ class DashboardApp {
   // ==========================================
   // VIEW 3: LEADS & USERS EXPLORER
   // ==========================================
-  async loadLeadsData(filters = {}) {
+  async loadLeadsData(cursor = null) {
     if (!this.tableAllLeads) return;
-    const params = new URLSearchParams({ limit: 50, ...filters });
+    const limit = this.leadsPagination.limit;
+    const params = new URLSearchParams({ limit, ...this.leadsPagination.filters });
+    if (cursor) params.set('cursor', cursor);
+
     const data = await this.fetchApi(`/api/v1/users?${params.toString()}`);
 
     if (!data || !data.items || data.items.length === 0) {
       this.tableAllLeads.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:30px;">Không tìm thấy khách hàng nào phù hợp với bộ lọc.</td></tr>`;
+      this.updateLeadsPaginationUI(0, false);
       return;
     }
+
+    this.leadsPagination.nextCursor = data.next_cursor || null;
+    this.leadsPagination.hasMore = !!data.has_more;
+    this.updateLeadsPaginationUI(data.items.length, data.has_more);
 
     this.tableAllLeads.innerHTML = data.items.map(u => {
       const p1 = u.phone_1 ? `<span class="pill success">📞 ${u.phone_1}</span>` : '<span style="color:var(--text-muted);">N/A</span>';
@@ -518,6 +699,17 @@ class DashboardApp {
     }).join('');
   }
 
+  updateLeadsPaginationUI(count, hasMore) {
+    const pageNum = this.leadsPagination.pageIndex + 1;
+    const info = document.getElementById('leads-pagination-info');
+    const btnPrev = document.getElementById('btn-leads-prev');
+    const btnNext = document.getElementById('btn-leads-next');
+
+    if (info) info.textContent = `Trang ${pageNum} (${count} khách hàng)`;
+    if (btnPrev) btnPrev.disabled = this.leadsPagination.pageIndex === 0;
+    if (btnNext) btnNext.disabled = !hasMore;
+  }
+
   handleFilterLeads(e) {
     e.preventDefault();
     const q = document.getElementById('filter-q').value.trim();
@@ -531,7 +723,10 @@ class DashboardApp {
     if (phone) filters.phone = phone;
     if (hasPhone) filters.has_phone = hasPhone;
 
-    this.loadLeadsData(filters);
+    this.leadsPagination.filters = filters;
+    this.leadsPagination.pageIndex = 0;
+    this.leadsPagination.cursorHistory = [null];
+    this.loadLeadsData();
   }
 
   async viewPhoneEvidence(userId) {
@@ -567,12 +762,28 @@ class DashboardApp {
   async loadSessionsData() {
     if (!this.tableAllSessions) return;
     const data = await this.fetchApi('/api/v1/sessions');
-    if (!data || !data.items || data.items.length === 0) {
+    this.sessionsPagination.allItems = (data && data.items) || [];
+    this.sessionsPagination.pageIndex = 0;
+    this.renderSessionsTable();
+  }
+
+  renderSessionsTable() {
+    if (!this.tableAllSessions) return;
+    const items = this.sessionsPagination.allItems;
+    if (items.length === 0) {
       this.tableAllSessions.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:30px;">Chưa có session nào trong SessionPool. Bấm "+ Import Cookie" để thêm nick.</td></tr>`;
+      this.updateSessionsPaginationUI(0, 1, 1);
       return;
     }
 
-    this.tableAllSessions.innerHTML = data.items.map(s => {
+    const limit = this.sessionsPagination.limit;
+    const pageIndex = this.sessionsPagination.pageIndex;
+    const totalPages = Math.ceil(items.length / limit) || 1;
+    const paginated = items.slice(pageIndex * limit, (pageIndex + 1) * limit);
+
+    this.updateSessionsPaginationUI(items.length, pageIndex + 1, totalPages);
+
+    this.tableAllSessions.innerHTML = paginated.map(s => {
       const statusClass = s.status === 'healthy' ? 'success' : s.status === 'cooldown' ? 'warning' : 'danger';
       return `
         <tr>
@@ -585,6 +796,16 @@ class DashboardApp {
         </tr>
       `;
     }).join('');
+  }
+
+  updateSessionsPaginationUI(totalCount, currentPage, totalPages) {
+    const info = document.getElementById('sessions-pagination-info');
+    const btnPrev = document.getElementById('btn-sessions-prev');
+    const btnNext = document.getElementById('btn-sessions-next');
+
+    if (info) info.textContent = `Trang ${currentPage} / ${totalPages} (${totalCount} sessions)`;
+    if (btnPrev) btnPrev.disabled = currentPage <= 1;
+    if (btnNext) btnNext.disabled = currentPage >= totalPages;
   }
 
   async handleImportSession(e) {
@@ -687,12 +908,28 @@ class DashboardApp {
   async loadProxiesData() {
     if (!this.tableAllProxies) return;
     const data = await this.fetchApi('/api/v1/proxies');
-    if (!data || !data.items || data.items.length === 0) {
+    this.proxiesPagination.allItems = (data && data.items) || [];
+    this.proxiesPagination.pageIndex = 0;
+    this.renderProxiesTable();
+  }
+
+  renderProxiesTable() {
+    if (!this.tableAllProxies) return;
+    const items = this.proxiesPagination.allItems;
+    if (items.length === 0) {
       this.tableAllProxies.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:30px;">Chưa có proxy nào trong ProxyPool. Bấm "+ Thêm Danh Sách Proxy".</td></tr>`;
+      this.updateProxiesPaginationUI(0, 1, 1);
       return;
     }
 
-    this.tableAllProxies.innerHTML = data.items.map(p => {
+    const limit = this.proxiesPagination.limit;
+    const pageIndex = this.proxiesPagination.pageIndex;
+    const totalPages = Math.ceil(items.length / limit) || 1;
+    const paginated = items.slice(pageIndex * limit, (pageIndex + 1) * limit);
+
+    this.updateProxiesPaginationUI(items.length, pageIndex + 1, totalPages);
+
+    this.tableAllProxies.innerHTML = paginated.map(p => {
       const statusClass = p.status === 'active' ? 'success' : p.status === 'cooldown' ? 'warning' : 'danger';
       return `
         <tr>
@@ -707,6 +944,16 @@ class DashboardApp {
         </tr>
       `;
     }).join('');
+  }
+
+  updateProxiesPaginationUI(totalCount, currentPage, totalPages) {
+    const info = document.getElementById('proxies-pagination-info');
+    const btnPrev = document.getElementById('btn-proxies-prev');
+    const btnNext = document.getElementById('btn-proxies-next');
+
+    if (info) info.textContent = `Trang ${currentPage} / ${totalPages} (${totalCount} proxies)`;
+    if (btnPrev) btnPrev.disabled = currentPage <= 1;
+    if (btnNext) btnNext.disabled = currentPage >= totalPages;
   }
 
   async handleAddProxies(e) {

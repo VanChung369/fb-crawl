@@ -11,10 +11,33 @@ from fb_data_pipeline.config import PipelineSettings
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
     PhoneEvidence,
+    ProfileData,
     ProviderResult,
     ProviderStatus,
 )
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
+
+
+def _extract_profile_data(payload: Any, checked_at: datetime) -> tuple[ProfileData, str]:
+    if not isinstance(payload, Mapping):
+        return ProfileData(), ""
+
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else payload
+
+    gender = str(data.get("gender") or data.get("sex") or "").strip()
+    birthday = str(data.get("birthday") or data.get("birth_date") or data.get("birthDate") or data.get("dob") or "").strip()
+    location = str(data.get("location") or data.get("address") or data.get("city") or data.get("current_city") or "").strip()
+    name = str(data.get("name") or data.get("display_name") or data.get("fullname") or "").strip()
+
+    profile = ProfileData(
+        address=location,
+        birth_date=birthday,
+        gender=gender,
+        source_url="external:fbnumber",
+        observed_at=checked_at,
+    )
+    return profile, name
+
 
 
 PHONE_KEYS = frozenset(
@@ -234,16 +257,21 @@ class FBNumberProvider:
                     )
                 )
 
+            profile, extracted_name = _extract_profile_data(response_body, checked_at)
+            has_data = bool(evidence or not profile.is_empty or extracted_name)
+
             return ProviderResult(
                 provider=self.name,
                 status=(
                     ProviderStatus.FOUND
-                    if evidence
+                    if has_data
                     else ProviderStatus.NOT_FOUND
                 ),
                 evidence=tuple(evidence),
                 checked_at=checked_at,
                 correlation_id=correlation_id,
+                profile=profile,
+                name=extracted_name,
             )
 
         raise AssertionError("Provider retry loop exhausted unexpectedly.")

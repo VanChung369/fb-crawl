@@ -32,8 +32,11 @@ Open your browser at: **`http://localhost:8000/`** (or `http://localhost:8000/do
 # Terminal 1: Start API Server & Web Dashboard
 python -m fb_crawl api serve --host 127.0.0.1 --port 8000
 
-# Terminal 2: Start Background Crawl Worker
+# Terminal 2: Start Background Crawl Worker (Default: 1 Worker)
 python -m fb_crawl worker run
+
+# Hoặc chạy nhiều Worker song song cùng lúc (Ví dụ: 3 Workers xử lý 3 Job đồng thời)
+python -m fb_crawl worker run --concurrency 3
 ```
 
 ### Web Dashboard Features:

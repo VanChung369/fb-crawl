@@ -180,3 +180,6 @@ class ProviderResult:
     checked_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     correlation_id: str = ""
     error_code: str = ""
+    profile: ProfileData = field(default_factory=ProfileData)
+    name: str = ""
+

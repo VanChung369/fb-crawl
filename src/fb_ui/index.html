@@ -248,6 +248,24 @@
               </tbody>
             </table>
           </div>
+          <!-- Jobs Pagination Bar -->
+          <div class="pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-top: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted);">
+              <span>Hiển thị</span>
+              <select class="form-control" id="jobs-page-limit" style="width: 75px; padding: 4px 8px; height: 32px; font-size: 0.82rem;">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+              </select>
+              <span>dòng / trang</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span id="jobs-pagination-info" style="font-size: 0.82rem; color: var(--text-muted);">Trang 1</span>
+              <button class="btn btn-secondary btn-sm" id="btn-jobs-prev" disabled style="padding: 6px 12px; font-size: 0.8rem;">◀ Trang trước</button>
+              <button class="btn btn-secondary btn-sm" id="btn-jobs-next" disabled style="padding: 6px 12px; font-size: 0.8rem;">Trang sau ▶</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -322,6 +340,24 @@
               </tbody>
             </table>
           </div>
+          <!-- Leads Pagination Bar -->
+          <div class="pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-top: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted);">
+              <span>Hiển thị</span>
+              <select class="form-control" id="leads-page-limit" style="width: 75px; padding: 4px 8px; height: 32px; font-size: 0.82rem;">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+              </select>
+              <span>dòng / trang</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span id="leads-pagination-info" style="font-size: 0.82rem; color: var(--text-muted);">Trang 1</span>
+              <button class="btn btn-secondary btn-sm" id="btn-leads-prev" disabled style="padding: 6px 12px; font-size: 0.8rem;">◀ Trang trước</button>
+              <button class="btn btn-secondary btn-sm" id="btn-leads-next" disabled style="padding: 6px 12px; font-size: 0.8rem;">Trang sau ▶</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -364,6 +400,23 @@
               </tbody>
             </table>
           </div>
+          <!-- Sessions Pagination Bar -->
+          <div class="pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-top: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted);">
+              <span>Hiển thị</span>
+              <select class="form-control" id="sessions-page-limit" style="width: 75px; padding: 4px 8px; height: 32px; font-size: 0.82rem;">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+              </select>
+              <span>dòng / trang</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span id="sessions-pagination-info" style="font-size: 0.82rem; color: var(--text-muted);">Trang 1</span>
+              <button class="btn btn-secondary btn-sm" id="btn-sessions-prev" disabled style="padding: 6px 12px; font-size: 0.8rem;">◀ Trang trước</button>
+              <button class="btn btn-secondary btn-sm" id="btn-sessions-next" disabled style="padding: 6px 12px; font-size: 0.8rem;">Trang sau ▶</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -402,6 +455,23 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+          <!-- Proxies Pagination Bar -->
+          <div class="pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-top: 1px solid var(--border-color); background: rgba(255,255,255,0.02);">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted);">
+              <span>Hiển thị</span>
+              <select class="form-control" id="proxies-page-limit" style="width: 75px; padding: 4px 8px; height: 32px; font-size: 0.82rem;">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+              </select>
+              <span>dòng / trang</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span id="proxies-pagination-info" style="font-size: 0.82rem; color: var(--text-muted);">Trang 1</span>
+              <button class="btn btn-secondary btn-sm" id="btn-proxies-prev" disabled style="padding: 6px 12px; font-size: 0.8rem;">◀ Trang trước</button>
+              <button class="btn btn-secondary btn-sm" id="btn-proxies-next" disabled style="padding: 6px 12px; font-size: 0.8rem;">Trang sau ▶</button>
+            </div>
           </div>
         </div>
       </section>

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from fb_crawl.core.models import PageRecord, ScrapeResult, UserRecord
 from fb_data_pipeline.core.models import (
+    FacebookIdentity,
+    ProfileData,
     ProviderResult,
     ProviderStatus,
     UserBundle,
@@ -69,13 +71,34 @@ class EnrichmentPipeline:
             else:
                 provider_failed += 1
 
+            # Merge profile data if provider returned gender, birthday, location
+            merged_profile = original.profile
+            if hasattr(provider_result, "profile") and not provider_result.profile.is_empty:
+                merged_profile = ProfileData(
+                    address=original.profile.address or provider_result.profile.address,
+                    birth_date=original.profile.birth_date or provider_result.profile.birth_date,
+                    gender=original.profile.gender or provider_result.profile.gender,
+                    source_url=original.profile.source_url or provider_result.profile.source_url,
+                    observed_at=original.profile.observed_at or provider_result.profile.observed_at,
+                )
+
+            # Merge name if original identity was missing name or had default
+            merged_identity = original.identity
+            if (not merged_identity.name or merged_identity.name.startswith("User_")) and hasattr(provider_result, "name") and provider_result.name:
+                merged_identity = FacebookIdentity(
+                    uid=merged_identity.uid,
+                    username=merged_identity.username,
+                    name=provider_result.name,
+                    profile_url=merged_identity.profile_url,
+                )
+
             combined = UserBundle(
-                identity=original.identity,
+                identity=merged_identity,
                 evidence=merge_evidence(
                     original.evidence,
                     provider_result.evidence,
                 ),
-                profile=original.profile,
+                profile=merged_profile,
             )
             enriched.append(
                 EnrichedUser(
@@ -83,6 +106,7 @@ class EnrichmentPipeline:
                     provider_result=provider_result,
                 )
             )
+
 
         return PipelineRun(
             users=tuple(enriched),
