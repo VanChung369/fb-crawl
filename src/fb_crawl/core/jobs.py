@@ -178,6 +178,7 @@ _RELATIONSHIP_ACTIONS = frozenset(
 _COMMON_OPTION_NAMES = frozenset(
     {
         "steps",
+        "max_users",
         "max_duration_seconds",
         "navigation_delay_seconds",
         "max_retries",
@@ -192,7 +193,7 @@ _COMMON_OPTION_NAMES = frozenset(
 )
 
 
-_RELATIONSHIP_OPTION_NAMES = frozenset({"depth", "max_users"})
+_RELATIONSHIP_OPTION_NAMES = frozenset({"depth"})
 
 
 def _integer(value: object, *, option: str, minimum: int, maximum: int) -> int:
@@ -218,14 +219,42 @@ def _seconds(
     return result
 
 
+_PROFILE_FIELD_ALIASES = {
+    "work": ProfileField.WORKPLACE,
+    "workplace": ProfileField.WORKPLACE,
+    "location": ProfileField.CURRENT_CITY,
+    "address": ProfileField.ADDRESS,
+    "city": ProfileField.CURRENT_CITY,
+    "current_city": ProfileField.CURRENT_CITY,
+    "hometown": ProfileField.HOMETOWN,
+    "birthday": ProfileField.BIRTH_DATE,
+    "birth_date": ProfileField.BIRTH_DATE,
+    "gender": ProfileField.GENDER,
+    "sex": ProfileField.GENDER,
+    "phone": ProfileField.PHONE,
+    "bio": ProfileField.BIO,
+    "education": ProfileField.EDUCATION,
+    "website": ProfileField.WEBSITE,
+    "languages": ProfileField.LANGUAGES,
+    "relationship_status": ProfileField.RELATIONSHIP_STATUS,
+}
+
+
 def _profile_fields(value: object) -> tuple[ProfileField, ...]:
     if not isinstance(value, (list, tuple)):
         raise ValidationError("profile_fields must be a list.")
-    try:
-        fields = tuple(ProfileField(item) for item in value)
-    except (TypeError, ValueError) as error:
-        raise ValidationError("An unsupported profile field was provided.") from error
+    fields: list[ProfileField] = []
+    for item in value:
+        key = str(item).lower()
+        if key in _PROFILE_FIELD_ALIASES:
+            fields.append(_PROFILE_FIELD_ALIASES[key])
+        else:
+            try:
+                fields.append(ProfileField(item))
+            except (TypeError, ValueError) as error:
+                raise ValidationError("An unsupported profile field was provided.") from error
     return tuple(dict.fromkeys(fields))
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,7 +274,7 @@ class SafeJobOptions:
 
 
     def __post_init__(self) -> None:
-        _integer(self.steps, option="steps", minimum=1, maximum=20)
+        _integer(self.steps, option="steps", minimum=0, maximum=100)
         _seconds(
             self.max_duration_seconds,
             option="max_duration_seconds",
@@ -260,7 +289,7 @@ class SafeJobOptions:
         )
         _integer(self.max_retries, option="max_retries", minimum=0, maximum=1)
         _integer(self.depth, option="depth", minimum=1, maximum=2)
-        _integer(self.max_users, option="max_users", minimum=1, maximum=1000)
+        _integer(self.max_users, option="max_users", minimum=0, maximum=100000)
         _integer(self.profile_limit, option="profile_limit", minimum=1, maximum=50)
         _integer(
             self.phone_post_steps,
@@ -317,7 +346,7 @@ class SafeJobOptions:
         fields = _profile_fields(values["profile_fields"]) if "profile_fields" in values else ()
         duration = values.get("phone_post_duration_seconds")
         return cls(
-            steps=_integer(values.get("steps", 10), option="steps", minimum=1, maximum=20),
+            steps=_integer(values.get("steps", 10), option="steps", minimum=0, maximum=100),
             max_duration_seconds=_seconds(
                 values.get("max_duration_seconds", 300),
                 option="max_duration_seconds",
@@ -335,7 +364,7 @@ class SafeJobOptions:
             ),
             depth=_integer(values.get("depth", 1), option="depth", minimum=1, maximum=2),
             max_users=_integer(
-                values.get("max_users", 1000), option="max_users", minimum=1, maximum=1000
+                values.get("max_users", 1000), option="max_users", minimum=0, maximum=100000
             ),
             call_fbnumber=bool(values.get("call_fbnumber", values.get("enrich_phone", True))),
             enrich_profiles=values.get("enrich_profiles", False),

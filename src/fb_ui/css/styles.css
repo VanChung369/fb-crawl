@@ -535,16 +535,17 @@ body {
   bottom: 0;
   background-color: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(10px);
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 9999;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--transition-normal);
+  transition: opacity 0.25s ease;
 }
 
 .modal-backdrop.open {
+  display: flex;
   opacity: 1;
   pointer-events: auto;
 }

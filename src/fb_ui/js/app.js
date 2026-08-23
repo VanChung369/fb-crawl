@@ -105,6 +105,14 @@ class DashboardApp {
       pageIndex: 0,
       allItems: [],
     };
+
+    // Force all modals to hidden state on init (prevents CSS conflicts)
+    document.querySelectorAll('.modal-backdrop').forEach(m => {
+      m.style.display = 'none';
+      m.style.opacity = '0';
+      m.style.pointerEvents = 'none';
+      m.classList.remove('open');
+    });
   }
 
   bindEvents() {
@@ -298,6 +306,13 @@ class DashboardApp {
     const btnTestToken = document.getElementById('btn-test-fbnumber-token');
     if (btnTestToken) btnTestToken.addEventListener('click', () => this.handleTestFBNumberToken());
 
+    // Action Type Selector (Dynamic Form Options & Placeholders)
+    const jobActionSelect = document.getElementById('job-action');
+    if (jobActionSelect) {
+      jobActionSelect.addEventListener('change', (e) => this.handleJobActionChange(e.target.value));
+      this.handleJobActionChange(jobActionSelect.value || 'members');
+    }
+
     // Toggle sub-options for Profile Enrichment
     const enrichCheckbox = document.getElementById('job-opt-enrich-profiles');
     const subOptionsEnrich = document.getElementById('sub-options-enrich');
@@ -310,6 +325,54 @@ class DashboardApp {
     // Export Triggers
     if (this.btnExportCsv) this.btnExportCsv.addEventListener('click', () => this.exportLeads('csv'));
     if (this.btnExportJson) this.btnExportJson.addEventListener('click', () => this.exportLeads('json'));
+  }
+
+  handleJobActionChange(action) {
+    const targets = document.getElementById('job-targets');
+    const targetsHint = document.getElementById('hint-job-targets');
+    const groupDepth = document.getElementById('group-opt-depth');
+    const rowSafetyParams = document.getElementById('row-safety-params');
+    const rowUsersSteps = document.getElementById('row-users-steps');
+    const enrichCheckbox = document.getElementById('job-opt-enrich-profiles');
+    const subOptionsEnrich = document.getElementById('sub-options-enrich');
+
+    if (!targets) return;
+
+    if (action === 'members') {
+      targets.placeholder = 'https://www.facebook.com/groups/782850425639223\nhttps://www.facebook.com/groups/example_group/members';
+      if (targetsHint) targetsHint.innerHTML = '💡 <strong>Mục tiêu:</strong> Nhập đường link Nhóm (Group URL) hoặc link trang Thành viên Nhóm.';
+      if (groupDepth) groupDepth.style.display = 'none';
+      if (rowSafetyParams) rowSafetyParams.style.gridTemplateColumns = '1fr 1fr';
+      if (rowUsersSteps) rowUsersSteps.style.display = 'grid';
+    } else if (action === 'comments') {
+      targets.placeholder = 'https://www.facebook.com/permalink.php?story_fbid=123456789&id=1000000\nhttps://www.facebook.com/page_name/posts/123456789';
+      if (targetsHint) targetsHint.innerHTML = '💡 <strong>Mục tiêu:</strong> Nhập đường link bài viết hoặc video / Reels cần quét danh sách bình luận.';
+      if (groupDepth) groupDepth.style.display = 'none';
+      if (rowSafetyParams) rowSafetyParams.style.gridTemplateColumns = '1fr 1fr';
+      if (rowUsersSteps) rowUsersSteps.style.display = 'grid';
+    } else if (action === 'reactions') {
+      targets.placeholder = 'https://www.facebook.com/permalink.php?story_fbid=123456789&id=1000000\nhttps://www.facebook.com/page_name/posts/123456789';
+      if (targetsHint) targetsHint.innerHTML = '💡 <strong>Mục tiêu:</strong> Nhập đường link bài viết cần quét danh sách người thả cảm xúc (Like, Tim, Haha...).';
+      if (groupDepth) groupDepth.style.display = 'none';
+      if (rowSafetyParams) rowSafetyParams.style.gridTemplateColumns = '1fr 1fr';
+      if (rowUsersSteps) rowUsersSteps.style.display = 'grid';
+    } else if (action === 'friends' || action === 'followers') {
+      targets.placeholder = 'https://www.facebook.com/username\nhttps://www.facebook.com/profile.php?id=100006631544225';
+      if (targetsHint) targetsHint.innerHTML = '💡 <strong>Mục tiêu:</strong> Nhập đường link trang cá nhân (Profile URL) để quét danh sách bạn bè / người theo dõi.';
+      if (groupDepth) groupDepth.style.display = 'block';
+      if (rowSafetyParams) rowSafetyParams.style.gridTemplateColumns = '1fr 1fr 1fr';
+      if (rowUsersSteps) rowUsersSteps.style.display = 'grid';
+    } else if (action === 'profile') {
+      targets.placeholder = 'https://www.facebook.com/username\nhttps://www.facebook.com/profile.php?id=100006631544225';
+      if (targetsHint) targetsHint.innerHTML = '💡 <strong>Mục tiêu:</strong> Nhập đường link trang cá nhân (Profile URL) để bóc tách thông tin hồ sơ chi tiết.';
+      if (groupDepth) groupDepth.style.display = 'none';
+      if (rowSafetyParams) rowSafetyParams.style.gridTemplateColumns = '1fr 1fr';
+      if (rowUsersSteps) rowUsersSteps.style.display = 'none';
+      if (enrichCheckbox) {
+        enrichCheckbox.checked = true;
+        if (subOptionsEnrich) subOptionsEnrich.style.display = 'block';
+      }
+    }
   }
 
   handleRouting() {
@@ -434,15 +497,18 @@ class DashboardApp {
     const jobsData = await this.fetchApi('/api/v1/jobs?limit=5');
     if (jobsData && jobsData.items && this.tableRecentJobs) {
       if (jobsData.items.length === 0) {
-        this.tableRecentJobs.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">Chưa có Job nào.</td></tr>`;
+        this.tableRecentJobs.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:20px;">Chưa có Job nào.</td></tr>`;
       } else {
         this.tableRecentJobs.innerHTML = jobsData.items.map(job => `
           <tr>
-            <td><span style="font-family:monospace; color:var(--accent-secondary);">${job.id.substring(0, 8)}...</span></td>
+            <td><span style="font-family:monospace; color:var(--accent-secondary); font-weight:600;">${job.id.substring(0, 8)}...</span></td>
             <td><strong>${job.action}</strong></td>
             <td>${this.getStatusPill(job.status)}</td>
             <td>${job.completed_targets || 0}/${job.requested_targets || 0} (${job.discovered_users || 0} leads)</td>
             <td>${new Date(job.created_at).toLocaleTimeString('vi-VN')}</td>
+            <td>
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewJobDetails('${job.id}')">Chi tiết</button>
+            </td>
           </tr>
         `).join('');
       }
@@ -536,8 +602,12 @@ class DashboardApp {
       return;
     }
 
-    const maxUsers = parseInt(document.getElementById('job-opt-max-users')?.value, 10) || 1000;
-    const steps = parseInt(document.getElementById('job-opt-steps')?.value, 10) || 20;
+    const rawMaxUsers = parseInt(document.getElementById('job-opt-max-users')?.value, 10);
+    const maxUsers = isNaN(rawMaxUsers) ? 1000 : rawMaxUsers;
+
+    const rawSteps = parseInt(document.getElementById('job-opt-steps')?.value, 10);
+    const steps = isNaN(rawSteps) ? 20 : rawSteps;
+
     const maxDuration = parseInt(document.getElementById('job-opt-duration')?.value, 10) || 1800;
     const navDelay = parseInt(document.getElementById('job-opt-delay')?.value, 10) || 8;
     const depth = parseInt(document.getElementById('job-opt-depth')?.value, 10) || 1;
@@ -551,7 +621,8 @@ class DashboardApp {
     const callFbnumber = document.getElementById('job-opt-call-fbnumber') ? !!document.getElementById('job-opt-call-fbnumber').checked : true;
 
     const options = {
-      steps: Math.min(Math.max(steps, 1), 20),
+      steps: steps <= 0 ? 0 : Math.min(Math.max(steps, 1), 100),
+      max_users: maxUsers <= 0 ? 0 : Math.min(Math.max(maxUsers, 1), 100000),
       max_duration_seconds: Math.min(Math.max(maxDuration, 1), 1800),
       navigation_delay_seconds: Math.min(Math.max(navDelay, 8), 1800),
       call_fbnumber: callFbnumber,
@@ -560,7 +631,6 @@ class DashboardApp {
 
     if (action.includes('friends') || action.includes('followers') || action.includes('relationships')) {
       options.depth = depth;
-      options.max_users = Math.min(Math.max(maxUsers, 1), 1000);
     }
 
     if (enrichProfiles) {
@@ -614,26 +684,52 @@ class DashboardApp {
   }
 
   async viewJobDetails(jobId) {
-    const job = await this.fetchApi(`/api/v1/jobs/${jobId}`);
-    if (!job) return;
-
-    document.getElementById('modal-job-title').textContent = `Job: ${job.id}`;
-    document.getElementById('job-detail-status').innerHTML = this.getStatusPill(job.status);
-    document.getElementById('job-detail-targets').textContent = `${job.completed_targets || 0}/${job.requested_targets || 0}`;
-    document.getElementById('job-detail-discovered').textContent = `${job.discovered_users || 0}`;
-    document.getElementById('job-detail-persisted').textContent = `${job.persisted_users || 0}`;
-
-    const eventsContainer = document.getElementById('job-detail-events');
-    eventsContainer.textContent = 'Đang nạp events...';
+    if (!jobId) return;
     this.openModal(this.modalJobDetails);
 
-    const eventsData = await this.fetchApi(`/api/v1/jobs/${jobId}/events?limit=50`);
-    if (eventsData && eventsData.items && eventsData.items.length > 0) {
-      eventsContainer.innerHTML = eventsData.items.map(ev => `
-        <div>[${new Date(ev.created_at).toLocaleTimeString('vi-VN')}] [${ev.event_type}] ${ev.safe_message || ''}</div>
-      `).join('');
-    } else {
-      eventsContainer.textContent = 'Chưa có sự kiện nào được ghi nhận cho Job này.';
+    const titleEl = document.getElementById('modal-job-title');
+    const statusEl = document.getElementById('job-detail-status');
+    const targetsEl = document.getElementById('job-detail-targets');
+    const discoveredEl = document.getElementById('job-detail-discovered');
+    const persistedEl = document.getElementById('job-detail-persisted');
+    const eventsContainer = document.getElementById('job-detail-events');
+
+    if (titleEl) titleEl.textContent = `Chi Tiết Job: ${jobId.substring(0, 8)}...`;
+    if (statusEl) statusEl.innerHTML = `<span class="pill info">Đang tải...</span>`;
+    if (targetsEl) targetsEl.textContent = '...';
+    if (discoveredEl) discoveredEl.textContent = '...';
+    if (persistedEl) persistedEl.textContent = '...';
+    if (eventsContainer) eventsContainer.textContent = '⏳ Đang nạp dòng sự kiện thời gian thực...';
+
+    try {
+      const [job, eventsData] = await Promise.all([
+        this.fetchApi(`/api/v1/jobs/${jobId}`),
+        this.fetchApi(`/api/v1/jobs/${jobId}/events?limit=50`)
+      ]);
+
+      if (job) {
+        if (titleEl) titleEl.textContent = `Job: ${job.id} (${job.action})`;
+        if (statusEl) statusEl.innerHTML = this.getStatusPill(job.status);
+        if (targetsEl) targetsEl.textContent = `${job.completed_targets || 0}/${job.requested_targets || 0}`;
+        if (discoveredEl) discoveredEl.textContent = `${job.discovered_users || 0}`;
+        if (persistedEl) persistedEl.textContent = `${job.persisted_users || 0}`;
+      } else {
+        if (statusEl) statusEl.innerHTML = `<span class="pill danger">Không tìm thấy</span>`;
+      }
+
+      if (eventsData && eventsData.items && eventsData.items.length > 0) {
+        eventsContainer.innerHTML = eventsData.items.map(ev => `
+          <div style="padding: 2px 0; border-bottom: 1px dashed rgba(255,255,255,0.06);">
+            <span style="color: var(--accent-secondary);">[${new Date(ev.created_at).toLocaleTimeString('vi-VN')}]</span>
+            <strong style="color: var(--accent-primary);">[${ev.event_type}]</strong>
+            <span>${ev.safe_message || 'OK'}</span>
+          </div>
+        `).join('');
+      } else {
+        eventsContainer.textContent = 'Chưa có sự kiện (events) nào được ghi nhận cho Job này.';
+      }
+    } catch (err) {
+      if (eventsContainer) eventsContainer.textContent = 'Lỗi nạp dữ liệu chi tiết: ' + err.message;
     }
   }
 
@@ -730,24 +826,35 @@ class DashboardApp {
   }
 
   async viewPhoneEvidence(userId) {
-    const data = await this.fetchApi(`/api/v1/users/${userId}/phone-evidence`);
-    const tableBody = document.getElementById('table-evidence-body');
+    if (!userId) return;
     this.openModal(this.modalPhoneEvidence);
+    const tableBody = document.getElementById('table-evidence-body');
+    const titleEl = document.getElementById('modal-evidence-title');
 
-    if (!data || !data.items || data.items.length === 0) {
-      tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">Không có bản ghi bằng chứng SĐT nào cho user này.</td></tr>`;
-      return;
+    if (titleEl) titleEl.textContent = `Lịch Sử & Bằng Chứng SĐT (User #${userId})`;
+    if (tableBody) {
+      tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">⏳ Đang nạp danh sách bằng chứng số điện thoại...</td></tr>`;
     }
 
-    tableBody.innerHTML = data.items.map(ev => `
-      <tr>
-        <td><strong>${ev.display_phone || ev.normalized_phone}</strong></td>
-        <td><span class="pill info">${ev.origin}</span></td>
-        <td>${ev.confidence || 'high'}</td>
-        <td>${ev.provider || 'fbnumber'}</td>
-        <td>${new Date(ev.first_captured_at).toLocaleString('vi-VN')}</td>
-      </tr>
-    `).join('');
+    try {
+      const data = await this.fetchApi(`/api/v1/users/${userId}/phone-evidence`);
+      if (!data || !data.items || data.items.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">Không có bản ghi bằng chứng SĐT nào cho user này.</td></tr>`;
+        return;
+      }
+
+      tableBody.innerHTML = data.items.map(ev => `
+        <tr>
+          <td><strong style="color:var(--accent-success);">${ev.display_phone || ev.normalized_phone}</strong></td>
+          <td><span class="pill info">${ev.origin}</span></td>
+          <td>${ev.confidence || 'provider'}</td>
+          <td>${ev.provider || 'fbnumber'}</td>
+          <td>${new Date(ev.first_captured_at).toLocaleString('vi-VN')}</td>
+        </tr>
+      `).join('');
+    } catch (err) {
+      if (tableBody) tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--accent-danger); padding:20px;">Lỗi tải bằng chứng: ${err.message}</td></tr>`;
+    }
   }
 
   exportLeads(format) {
@@ -771,7 +878,7 @@ class DashboardApp {
     if (!this.tableAllSessions) return;
     const items = this.sessionsPagination.allItems;
     if (items.length === 0) {
-      this.tableAllSessions.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:30px;">Chưa có session nào trong SessionPool. Bấm "+ Import Cookie" để thêm nick.</td></tr>`;
+      this.tableAllSessions.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:30px;">Chưa có session nào trong SessionPool. Bấm "+ Import Cookie" để thêm nick.</td></tr>`;
       this.updateSessionsPaginationUI(0, 1, 1);
       return;
     }
@@ -793,9 +900,30 @@ class DashboardApp {
           <td><span style="color:var(--accent-success); font-weight:600;">${s.success_count || 0}</span></td>
           <td><span style="color:var(--accent-danger); font-weight:600;">${s.failure_count || 0}</span></td>
           <td>${s.is_available ? '✅ Sẵn sàng' : '⏳ Tạm khóa/Nghỉ'}</td>
+          <td>
+            <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.launchSessionBrowser('${s.name}')" title="Mở trình duyệt đăng nhập sẵn nick này">
+              🚀 Vào FB Ngay
+            </button>
+          </td>
         </tr>
       `;
     }).join('');
+  }
+
+  async launchSessionBrowser(sessionName) {
+    this.showToast(`⏳ Đang khởi động trình duyệt cho ${sessionName}...`);
+    try {
+      const res = await this.fetchApi(`/api/v1/sessions/${encodeURIComponent(sessionName)}/launch`, {
+        method: 'POST'
+      });
+      if (res && res.status === 'success') {
+        this.showToast(`✅ Đã mở trình duyệt đăng nhập nick ${sessionName}!`);
+      } else {
+        alert(res?.detail || 'Không thể mở trình duyệt.');
+      }
+    } catch (err) {
+      alert('Lỗi khởi động trình duyệt: ' + err.message);
+    }
   }
 
   updateSessionsPaginationUI(totalCount, currentPage, totalPages) {
@@ -1100,11 +1228,27 @@ class DashboardApp {
   }
 
   openModal(modal) {
-    if (modal) modal.classList.add('open');
+    // Close any other open modals first to prevent stacking
+    document.querySelectorAll('.modal-backdrop.open').forEach(m => {
+      m.classList.remove('open');
+      m.style.display = 'none';
+    });
+    const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
+    if (!el) return;
+    el.style.display = 'flex';
+    el.style.opacity = '1';
+    el.style.pointerEvents = 'auto';
+    el.style.zIndex = '9999';
+    el.classList.add('open');
   }
 
   closeModal(modal) {
-    if (modal) modal.classList.remove('open');
+    const el = typeof modal === 'string' ? document.getElementById(modal) : modal;
+    if (!el) return;
+    el.classList.remove('open');
+    el.style.display = 'none';
+    el.style.opacity = '0';
+    el.style.pointerEvents = 'none';
   }
 
   saveSettings() {

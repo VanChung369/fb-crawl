@@ -27,7 +27,7 @@ class CrawlBudget:
         max_duration_seconds: float | None,
         monotonic_func: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._steps = steps
+        self._steps = None if (steps is not None and steps <= 0) else steps
         self._monotonic = monotonic_func
         self._deadline = (
             monotonic_func() + max_duration_seconds

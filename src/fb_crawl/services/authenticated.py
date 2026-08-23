@@ -986,6 +986,9 @@ class AuthenticatedService:
                                 continue
 
                         existing = records_by_id.get(record.user_id)
+                        max_users_limit = getattr(request, "max_nodes", None) or getattr(request, "limit", None)
+                        if max_users_limit and len(records_by_id) >= max_users_limit and existing is None:
+                            break
 
                         records_by_id[record.user_id] = (
                             record

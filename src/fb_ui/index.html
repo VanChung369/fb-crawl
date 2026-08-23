@@ -168,11 +168,12 @@
                     <th>Trạng thái</th>
                     <th>Tiến độ</th>
                     <th>Thời gian</th>
+                    <th>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody id="table-recent-jobs-body">
                   <tr>
-                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">
                       Đang nạp dữ liệu...
                     </td>
                   </tr>
@@ -389,11 +390,12 @@
                   <th>Thành Công</th>
                   <th>Thất Bại</th>
                   <th>Khả Dụng</th>
+                  <th>Thao Tác (Fast Access)</th>
                 </tr>
               </thead>
               <tbody id="table-all-sessions-body">
                 <tr>
-                  <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                  <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">
                     Đang nạp danh sách Session...
                   </td>
                 </tr>
@@ -582,9 +584,12 @@
           </select>
         </div>
 
-        <div class="form-group">
-          <label for="job-targets">Danh sách URL Mục tiêu (Mỗi dòng 1 liên kết Facebook)</label>
-          <textarea id="job-targets" class="form-control" rows="3" placeholder="https://www.facebook.com/groups/example&#10;https://www.facebook.com/groups/another_group" required></textarea>
+        <div class="form-group" id="group-job-targets">
+          <label for="job-targets" id="label-job-targets">Danh sách URL Mục tiêu (Mỗi dòng 1 liên kết Facebook)</label>
+          <textarea id="job-targets" class="form-control" rows="3" placeholder="https://www.facebook.com/groups/782850425639223&#10;https://www.facebook.com/groups/example_group/members" required></textarea>
+          <div id="hint-job-targets" style="font-size: 0.75rem; color: var(--accent-secondary); margin-top: 4px; font-weight: 500;">
+            💡 Nhập đường link Nhóm (Group URL) hoặc link trang Thành viên Nhóm.
+          </div>
         </div>
 
         <!-- Tùy chọn Tra Cứu Số Điện Thoại (FBNumber API) -->
@@ -603,46 +608,49 @@
         </div>
 
         <!-- 2. Giới hạn & An toàn chống ban -->
-        <div style="font-weight: 600; color: var(--accent-secondary); margin: 16px 0 10px 0; font-size: 0.9rem;">
-          🛡️ 2. Giới Hạn Quét & An Toàn Chống Ban (Anti-Ban Safety)
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-          <div class="form-group">
-            <label for="job-opt-max-users">Số User tối đa (max_users)</label>
-            <input type="number" id="job-opt-max-users" class="form-control" value="1000" min="1" max="1000">
-            <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 1000 users (Tối đa 1 chu kỳ)</div>
+        <div id="section-crawl-limits">
+          <div style="font-weight: 600; color: var(--accent-secondary); margin: 16px 0 10px 0; font-size: 0.9rem;">
+            🛡️ 2. Giới Hạn Quét & An Toàn Chống Ban (Anti-Ban Safety)
           </div>
-          <div class="form-group">
-            <label for="job-opt-steps">Số bước cuộn trang (steps)</label>
-            <input type="number" id="job-opt-steps" class="form-control" value="20" min="1" max="20">
-            <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 20 bước (Cuộn tối đa)</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" id="row-users-steps">
+            <div class="form-group" id="group-opt-max-users">
+              <label for="job-opt-max-users">Số User tối đa (max_users)</label>
+              <input type="number" id="job-opt-max-users" class="form-control" value="1000" min="0" max="100000">
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Nhập <strong>0</strong> để cào toàn bộ không giới hạn (Mặc định: 1000)</div>
+            </div>
+            <div class="form-group" id="group-opt-steps">
+              <label for="job-opt-steps">Số bước cuộn trang (steps)</label>
+              <input type="number" id="job-opt-steps" class="form-control" value="20" min="0" max="100">
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Nhập <strong>0</strong> để cuộn liên tục đến khi hết trang (Mặc định: 20)</div>
+            </div>
           </div>
-        </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
-          <div class="form-group">
-            <label for="job-opt-duration">Thời lượng tối đa (giây)</label>
-            <input type="number" id="job-opt-duration" class="form-control" value="1800" min="1" max="1800">
-            <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 1800s (30 phút)</div>
-          </div>
-          <div class="form-group">
-            <label for="job-opt-delay">Độ trễ giãn cách (giây)</label>
-            <input type="number" id="job-opt-delay" class="form-control" value="8" min="8" max="1800">
-            <div style="font-size: 0.72rem; color: var(--text-muted);">Tránh checkpoint (>= 8s)</div>
-          </div>
-          <div class="form-group">
-            <label for="job-opt-depth">Độ sâu quét (depth)</label>
-            <select id="job-opt-depth" class="form-control">
-              <option value="1">Cấp 1 (Chỉ trang này)</option>
-              <option value="2">Cấp 2 (Đệ quy liên kết)</option>
-            </select>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;" id="row-safety-params">
+            <div class="form-group" id="group-opt-duration">
+              <label for="job-opt-duration">Thời lượng tối đa (giây)</label>
+              <input type="number" id="job-opt-duration" class="form-control" value="1800" min="1" max="1800">
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 1800s (30 phút)</div>
+            </div>
+            <div class="form-group" id="group-opt-delay">
+              <label for="job-opt-delay">Độ trễ giãn cách (giây)</label>
+              <input type="number" id="job-opt-delay" class="form-control" value="8" min="8" max="1800">
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Tránh checkpoint (>= 8s)</div>
+            </div>
+            <div class="form-group" id="group-opt-depth">
+              <label for="job-opt-depth">Độ sâu quét (depth)</label>
+              <select id="job-opt-depth" class="form-control">
+                <option value="1">Cấp 1 (Chỉ trang này)</option>
+                <option value="2">Cấp 2 (Đệ quy liên kết)</option>
+              </select>
+            </div>
           </div>
         </div>
 
         <!-- 3. Đào sâu Profile & Quét bài viết -->
-        <div style="font-weight: 600; color: var(--accent-secondary); margin: 18px 0 10px 0; font-size: 0.9rem;">
-          🔍 3. Tùy Chọn Đào Sâu Vào Từng Trang Cá Nhân (Profile Enrichment)
-        </div>
+        <div id="section-profile-enrichment">
+          <div style="font-weight: 600; color: var(--accent-secondary); margin: 18px 0 10px 0; font-size: 0.9rem;">
+            🔍 3. Tùy Chọn Đào Sâu Vào Từng Trang Cá Nhân (Profile Enrichment)
+          </div>
 
         <div style="margin-bottom: 12px;">
           <label style="display: flex; align-items: flex-start; gap: 12px; background: rgba(59, 130, 246, 0.08); padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(59, 130, 246, 0.25); cursor: pointer;">
@@ -675,19 +683,22 @@
                 <input type="checkbox" name="profile_fields" value="bio" checked> 📝 Tiểu sử
               </label>
               <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                <input type="checkbox" name="profile_fields" value="work" checked> 💼 Công việc
+                <input type="checkbox" name="profile_fields" value="workplace" checked> 💼 Công việc
               </label>
               <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
                 <input type="checkbox" name="profile_fields" value="education" checked> 🎓 Học vấn
               </label>
               <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                <input type="checkbox" name="profile_fields" value="location" checked> 📍 Nơi ở
+                <input type="checkbox" name="profile_fields" value="current_city" checked> 📍 Nơi ở
               </label>
               <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
                 <input type="checkbox" name="profile_fields" value="gender" checked> ⚧ Giới tính
               </label>
               <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
                 <input type="checkbox" name="profile_fields" value="birth_date"> 🎂 Ngày sinh
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="address"> 🏠 Địa chỉ
               </label>
             </div>
           </div>
@@ -705,6 +716,7 @@
             </div>
           </div>
         </div>
+      </div>
 
         <div class="modal-actions" style="margin-top: 24px;">
           <button type="button" class="btn btn-secondary" data-close>Hủy</button>

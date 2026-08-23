@@ -97,14 +97,56 @@ def create_app(
         ui_dir = Path(__file__).parent / "static"
 
     if ui_dir.is_dir():
+        from fastapi import APIRouter
+        from fastapi.responses import FileResponse, Response
         from fastapi.staticfiles import StaticFiles
-        from fastapi.responses import FileResponse
-        app.mount("/static", StaticFiles(directory=str(ui_dir)), name="static")
 
-        @app.get("/", include_in_schema=False)
-        @app.get("/dashboard", include_in_schema=False)
+        # Use a router registered BEFORE the StaticFiles mount so these routes
+        # take priority and return fresh content with no-cache headers.
+        _no_cache_router = APIRouter()
+
+        @_no_cache_router.get("/static/js/app.js")
+        def serve_app_js():
+            path = ui_dir / "js" / "app.js"
+            if not path.is_file():
+                return Response(status_code=404)
+            return Response(
+                content=path.read_bytes(),
+                media_type="application/javascript",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
+
+        @_no_cache_router.get("/static/css/styles.css")
+        def serve_styles_css():
+            path = ui_dir / "css" / "styles.css"
+            if not path.is_file():
+                return Response(status_code=404)
+            return Response(
+                content=path.read_bytes(),
+                media_type="text/css",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
+
+        @_no_cache_router.get("/")
+        @_no_cache_router.get("/dashboard")
         def serve_dashboard():
-            return FileResponse(str(ui_dir / "index.html"))
+            response = FileResponse(str(ui_dir / "index.html"))
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+
+        app.include_router(_no_cache_router)
+        # Mount remaining static files (images, fonts, etc.) - JS/CSS handled above
+        app.mount("/static", StaticFiles(directory=str(ui_dir)), name="static")
 
     return app
 

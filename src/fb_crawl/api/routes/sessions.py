@@ -102,5 +102,43 @@ def create_sessions_router(session_pool: SessionPool, sessions_dir: Path, auth: 
             is_available=managed.is_available,
         )
 
+    @router.post("/{session_name}/launch")
+    def launch_session_browser(session_name: str):
+        import subprocess
+        import threading
+        from fastapi import HTTPException
+        from fb_crawl.config import load_browser_settings
+        from fb_crawl.adapters.browser.driver import create_firefox_driver
+        from fb_crawl.adapters.browser.session import SessionStore
+
+        clean_name = session_name if session_name.endswith(".json") else f"{session_name}.json"
+        session_file = sessions_dir / clean_name
+        if not session_file.is_file():
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy file session '{clean_name}'.")
+
+        # Find proxy for this session if configured
+        managed = next((s for s in session_pool._sessions if s.path.name == clean_name), None)
+        proxy_url = managed.proxy if managed else None
+
+        def _open_interactive_browser():
+            settings = load_browser_settings()
+            # Non-headless, interactive window
+            object.__setattr__(settings, "headless", False)
+            if proxy_url:
+                object.__setattr__(settings, "proxy", proxy_url)
+            driver = None
+            try:
+                driver = create_firefox_driver(settings)
+                store = SessionStore(session_file)
+                store.restore(driver)
+                # Keep browser open for user interaction
+            except Exception as err:
+                print(f"[ERROR] Launch browser failed: {err}")
+
+        thread = threading.Thread(target=_open_interactive_browser, daemon=True)
+        thread.start()
+
+        return {"status": "success", "message": f"Đang khởi động trình duyệt cho nick {clean_name}..."}
+
     return router
 
