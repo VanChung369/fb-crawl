@@ -4,7 +4,7 @@ import random
 import time
 from collections.abc import Callable
 
-from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
+from fb_crawl.adapters.browser.crawl_budget import CrawlBudget, CrawlCollection
 from fb_crawl.adapters.browser.driver import (
     wait_for_document_ready,
 )
@@ -17,7 +17,7 @@ from fb_crawl.core.exceptions import (
     RateLimitError,
     SessionError,
 )
-from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, cooperative_wait, guard_cancellation, guard_execution
 
 
 class MembersCollector:
@@ -62,8 +62,13 @@ class MembersCollector:
         steps: int | None,
         delay_seconds: float,
         max_duration_seconds: float | None = None,
-    ) -> tuple[str, int]:
+    ) -> CrawlCollection:
         try:
+            budget = CrawlBudget(
+                steps=steps,
+                max_duration_seconds=max_duration_seconds,
+                monotonic_func=self._monotonic,
+            )
             guard_cancellation(self._control)
             self._navigation_pacer.wait()
             browser.get(url)
@@ -83,11 +88,8 @@ class MembersCollector:
             previous = int(browser.execute_script("return document.body.scrollHeight"))
 
             attempts = 0
-            budget = CrawlBudget(
-                steps=steps,
-                max_duration_seconds=max_duration_seconds,
-                monotonic_func=self._monotonic,
-            )
+            natural_complete = False
+            wait_exhausted = False
 
             while budget.allows(attempts):
                 guard_execution(self._control, browser)
@@ -103,13 +105,19 @@ class MembersCollector:
                     0.5,
                 )
 
-                self._sleep(
+                if not cooperative_wait(
                     delay_seconds
                     + self._jitter(
                         0.0,
                         jitter_limit,
-                    )
-                )
+                    ),
+                    control=self._control,
+                    sleep=self._sleep,
+                    monotonic=self._monotonic,
+                    deadline_monotonic=budget.deadline_monotonic,
+                ):
+                    wait_exhausted = True
+                    break
 
                 guard_execution(self._control, browser)
                 current = int(
@@ -117,14 +125,19 @@ class MembersCollector:
                 )
 
                 if current <= previous:
+                    natural_complete = True
                     break
 
                 previous = current
 
             guard_execution(self._control, browser)
-            return (
+            return CrawlCollection(
                 str(browser.page_source),
                 attempts,
+                budget_exhausted=(
+                    wait_exhausted
+                    or (not natural_complete and budget.exhausted(attempts))
+                ),
             )
 
         except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):

@@ -16,14 +16,20 @@ SCHEMAS_PATH = ROOT / "src" / "fb_crawl" / "api" / "schemas.py"
 ACCOUNT_ROUTE_PATH = ROOT / "src" / "fb_crawl" / "api" / "routes" / "account.py"
 
 try:
+    import fastapi
+    import pydantic
+except ModuleNotFoundError as error:
+    if error.name not in {"fastapi", "pydantic"}:
+        raise
+    FASTAPI_AVAILABLE = False
+else:
+    FASTAPI_AVAILABLE = True
+
+if FASTAPI_AVAILABLE:
     from fastapi.testclient import TestClient
 
     from fb_crawl.api.app import create_app
     from fb_crawl.api.config import ApiSettings
-
-    FASTAPI_AVAILABLE = True
-except ModuleNotFoundError:
-    FASTAPI_AVAILABLE = False
 
 
 def _account(**updates: object) -> CrawlerAccountState:

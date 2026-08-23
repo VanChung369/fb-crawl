@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 _FACEBOOK_RATE_LIMIT = "facebook_rate_limited"
+_BUDGET_EXHAUSTED = "authenticated_budget_exhausted"
 
 
 class LeaseLost(RuntimeError):
@@ -185,6 +186,10 @@ class JobExecutionControl:
             deadline_monotonic if deadline_monotonic is not None else monotonic() + timeout_seconds
         )
         self._now = now or (lambda: datetime.now(UTC))
+        self._active_target_id: object | None = None
+
+    def set_active_target(self, target_id: object | None) -> None:
+        self._active_target_id = target_id
 
     def is_cancel_requested(self) -> bool:
         self._raise_if_lease_lost_or_deadline()
@@ -209,12 +214,43 @@ class JobExecutionControl:
         counters: Mapping[str, int] | None = None,
         safe_message: str = "",
     ) -> None:
+        self.guard_deadline_and_lease()
+        if event_type == "target_progress":
+            if self._active_target_id is None:
+                raise LeaseLost()
+            values = dict(counters or {})
+            progress_values = {
+                key: values[key]
+                for key in (
+                    "steps_completed",
+                    "items_discovered",
+                    "users_persisted",
+                    "provider_retries_required",
+                )
+                if key in values
+            }
+            changed = self._repository.update_target_progress(
+                self._job.id,
+                self._active_target_id,
+                self._job.worker_id or "",
+                **progress_values,
+            )
+            if changed is not True:
+                self.guard_deadline_and_lease()
+                raise LeaseLost()
+            return
+        event_values: dict[str, object] = {}
+        if self._active_target_id is not None:
+            event_values["target_id"] = self._active_target_id
+        if safe_message:
+            event_values["safe_message"] = safe_message
+        if counters is not None:
+            event_values["counters"] = counters
         self._repository.append_event(
             self._job.id,
             event_type,
             "info",
-            safe_message=safe_message,
-            counters=counters,
+            **event_values,
         )
 
     def check_account_safety(self, browser: object) -> SafetySignal | None:
@@ -308,6 +344,8 @@ def _status_for_result(result: ScrapeResult[UserRecord], report: IngestionReport
     if report.has_database_failures:
         return TargetStatus.FAILED
     if report.has_provider_retries:
+        return TargetStatus.PARTIAL
+    if any(issue.code == _BUDGET_EXHAUSTED for issue in result.issues):
         return TargetStatus.PARTIAL
     if result.issues or result.stats.failed:
         return TargetStatus.PARTIAL if result.records else TargetStatus.FAILED
@@ -425,11 +463,13 @@ class CrawlWorker:
                     control.guard_deadline_and_lease()
                     pacer = SafeNavigationPacer(self._policy.navigation_interval_seconds, control)
                     with self._runtime_factory(control, pacer) as session:
+                        control.emit("browser_started")
                         for target in sorted(claim.targets, key=lambda item: (item.position, item.id)):
                             control.guard_deadline_and_lease()
                             if self._repository.start_target(job.id, target.id, self._worker_id) is not True:
                                 _reclassify_rejected_target_write(control)
                             active_target = target
+                            control.set_active_target(target.id)
                             request = request_for_target(job, target, self._policy)
                             control.guard_deadline_and_lease()
                             session.validate(request)
@@ -438,12 +478,20 @@ class CrawlWorker:
                             promote_facebook_safety_issues(result)
                             control.guard_before_persistence()
                             report = session.ingest(result)
+                            control.emit(
+                                "provider_progress",
+                                counters={
+                                    "users_persisted": report.persistence.persisted,
+                                    "provider_retries_required": (
+                                        report.persistence.provider_retries_required
+                                    ),
+                                },
+                            )
                             control.guard_before_persistence()
                             if self._repository.update_target_progress(
                                 job.id,
                                 target.id,
                                 self._worker_id,
-                                steps_completed=result.stats.succeeded,
                                 items_discovered=result.stats.discovered,
                                 users_persisted=report.persistence.persisted,
                                 provider_retries_required=report.persistence.provider_retries_required,
@@ -462,6 +510,7 @@ class CrawlWorker:
                                 _reclassify_rejected_target_write(control)
                             completed.append(status)
                             active_target = None
+                            control.set_active_target(None)
                             control.guard_deadline_and_lease()
                 except BaseException as error:
                     if isinstance(error, LeaseLost):

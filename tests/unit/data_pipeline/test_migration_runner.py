@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import psycopg
 import pytest
 
 from fb_data_pipeline.migrations import Migration
-from fb_data_pipeline.repositories.errors import MigrationChecksumError
+from fb_data_pipeline.repositories.errors import DatabaseError, MigrationChecksumError
 from fb_data_pipeline.repositories.migrations import MigrationRunner
 
 
@@ -15,9 +16,11 @@ class RecordingCursor:
         existing: tuple[tuple[str, str], ...] = (),
         *,
         fail_sql: str = "",
+        one: tuple[object, ...] | None = None,
     ) -> None:
         self.existing = existing
         self.fail_sql = fail_sql
+        self.one = one
         self.commands: list[tuple[str, tuple[object, ...] | None]] = []
 
     def __enter__(self) -> RecordingCursor:
@@ -37,6 +40,9 @@ class RecordingCursor:
 
     def fetchall(self) -> list[tuple[str, str]]:
         return list(self.existing)
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        return self.one
 
 
 class RecordingConnection:
@@ -143,3 +149,43 @@ def test_runner_rolls_back_and_does_not_record_failed_migration() -> None:
         "INSERT INTO schema_migrations" in command[0]
         for command in cursor.commands
     )
+
+
+@pytest.mark.parametrize(("row", "expected"), [((True,), True), ((False,), False)])
+def test_runner_checks_a_parameterized_migration_version_without_schema_mutation(
+    row: tuple[object, ...],
+    expected: bool,
+) -> None:
+    """Break caught: API readiness interpolates SQL or applies migrations."""
+    cursor = RecordingCursor(one=row)
+    runner = MigrationRunner(
+        "postgresql://hidden",
+        connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+
+    assert runner.is_applied("003_job_orchestration") is expected
+
+    assert len(cursor.commands) == 1
+    sql, params = cursor.commands[0]
+    assert "schema_migrations" in sql
+    assert "CREATE" not in sql.upper()
+    assert "INSERT" not in sql.upper()
+    assert params == ("003_job_orchestration",)
+
+
+def test_runner_readiness_maps_database_failure_without_leaking_url() -> None:
+    """Break caught: readiness exposes connection details or raw driver errors."""
+
+    def fail_connect(_database_url: str):
+        raise psycopg.OperationalError("postgresql://user:secret@private/database")
+
+    runner = MigrationRunner(
+        "postgresql://user:secret@private/database",
+        connect_factory=fail_connect,
+    )
+
+    with pytest.raises(DatabaseError) as captured:
+        runner.is_applied("003_job_orchestration")
+
+    assert captured.value.safe_message == "Database readiness check failed."
+    assert "secret" not in captured.value.safe_message

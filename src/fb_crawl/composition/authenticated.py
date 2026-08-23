@@ -104,7 +104,11 @@ def _build_authenticated_components(
     def create_service() -> CheckpointingService:
         service = AuthenticatedService(
             SessionManager(
-                SessionStore(settings.session_path),
+                SessionStore(
+                    settings.session_path,
+                    control=control,
+                    navigation_pacer=navigation_pacer,
+                ),
                 settings,
                 credentials_provider,
                 control=control,

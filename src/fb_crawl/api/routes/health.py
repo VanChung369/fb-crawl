@@ -6,6 +6,8 @@ from collections.abc import Callable
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from fb_crawl.api.safe_logging import log_readiness_failure
+
 
 REQUIRED_MIGRATION = "003_job_orchestration"
 NOT_READY_BODY = {
@@ -30,7 +32,7 @@ def create_health_router(readiness: ReadinessCheck) -> APIRouter:
         try:
             is_ready = readiness(REQUIRED_MIGRATION)
         except Exception:
-            logger.warning("API readiness check failed.", exc_info=True)
+            log_readiness_failure(logger)
             is_ready = False
         if not is_ready:
             return JSONResponse(status_code=503, content=NOT_READY_BODY)

@@ -48,6 +48,10 @@ class FakeBrowser:
         self.cookies = list(self.added)
 
 
+def valid_session_path() -> Path:
+    return Path(__file__).parents[3] / "fixtures" / "authenticated" / "session-valid.json"
+
+
 def test_authentication_requires_c_user_cookie() -> None:
     authenticated = FakeBrowser(
         [
@@ -198,7 +202,7 @@ def test_restore_propagates_cancellation_before_home_navigation(tmp_path: Path) 
     assert browser.visited == []
 
 
-def test_restore_paces_home_and_refresh_and_stops_after_cookie_safety_check(tmp_path: Path) -> None:
+def test_restore_paces_home_and_refresh_then_checks_page_safety(tmp_path: Path) -> None:
     path = tmp_path / "session.json"
     path.write_text(json.dumps([{"name": "c_user", "value": "100"}]), encoding="utf-8")
     calls = []
@@ -212,11 +216,59 @@ def test_restore_paces_home_and_refresh_and_stops_after_cookie_safety_check(tmp_
         def wait(self): calls.append("pace")
     browser = FakeBrowser()
     assert SessionStore(path, control=Control(), navigation_pacer=Pacer()).restore(browser) is True
-    assert calls == ["pace", (1, 0), "pace", (1, 1)]
+    assert calls == ["pace", "pace", (1, 1)]
+
+
+def test_restore_accepts_valid_cookie_when_anonymous_home_starts_on_login(
+) -> None:
+    """The anonymous landing page must not invalidate freshly installed cookies."""
+    path = valid_session_path()
+    trace: list[str] = []
+
+    class LoginBeforeRefreshBrowser(FakeBrowser):
+        def get(self, url: str) -> None:
+            self.visited.append(url)
+            self.current_url = "https://www.facebook.com/login"
+
+        def refresh(self) -> None:
+            trace.append("refresh")
+            super().refresh()
+            self.current_url = "https://www.facebook.com/"
+
+    class Control:
+        def is_cancel_requested(self):
+            trace.append("cooperative")
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            trace.append(f"safety:{browser.current_url}")
+            return None
+
+    class Pacer:
+        def wait(self):
+            trace.append("pace")
+
+    browser = LoginBeforeRefreshBrowser()
+    assert SessionStore(
+        path,
+        control=Control(),
+        navigation_pacer=Pacer(),
+    ).restore(browser) is True
+    assert trace == [
+        "cooperative",
+        "pace",
+        "cooperative",
+        "pace",
+        "refresh",
+        "cooperative",
+        "safety:https://www.facebook.com/",
+    ]
 
 
 def test_restore_rechecks_cancellation_immediately_before_refresh(
-    tmp_path: Path,
 ) -> None:
     class CancelBeforeRefresh:
         def __init__(self, trace) -> None:
@@ -232,7 +284,6 @@ def test_restore_rechecks_cancellation_immediately_before_refresh(
 
         def check_account_safety(self, browser):
             self.trace.append("guard:safety")
-            self.cancelled = True
             return None
 
     class Pacer:
@@ -242,11 +293,7 @@ def test_restore_rechecks_cancellation_immediately_before_refresh(
         def wait(self):
             self.trace.append("pace")
 
-    path = tmp_path / "session.json"
-    path.write_text(
-        json.dumps([{"name": "c_user", "value": "100"}]),
-        encoding="utf-8",
-    )
+    path = valid_session_path()
     trace: list[str] = []
     browser = FakeBrowser()
     original_get = browser.get
@@ -254,12 +301,14 @@ def test_restore_rechecks_cancellation_immediately_before_refresh(
     def traced_get(url):
         trace.append("home")
         original_get(url)
+        control.cancelled = True
 
     browser.get = traced_get
+    control = CancelBeforeRefresh(trace)
     with pytest.raises(CrawlCancelled) as captured:
         SessionStore(
             path,
-            control=CancelBeforeRefresh(trace),
+            control=control,
             navigation_pacer=Pacer(trace),
         ).restore(browser)
 
@@ -269,32 +318,23 @@ def test_restore_rechecks_cancellation_immediately_before_refresh(
         "pace",
         "home",
         "guard:cancellation",
-        "guard:safety",
-        "guard:cancellation",
     ]
     assert browser.refreshes == 0
 
-@pytest.mark.parametrize(
-    "stop",
-    [
-        AccountSafetyStop(
-            SafetySignal(
-                SafetyCode.CHECKPOINT,
-                "Facebook checkpoint requires manual review.",
-                True,
-            )
-        ),
-        JobBudgetReached(),
-    ],
-)
-def test_restore_propagates_typed_guard_stop_before_refresh_unwrapped(
-    tmp_path: Path, stop: RuntimeError
+def test_restore_propagates_account_safety_stop_after_refresh_unwrapped(
 ) -> None:
-    path = tmp_path / "session.json"
-    path.write_text(json.dumps([{"name": "c_user", "value": "100"}]), encoding="utf-8")
+    path = valid_session_path()
     trace: list[str] = []
 
-    class StopAfterCookieSafety:
+    stop = AccountSafetyStop(
+        SafetySignal(
+            SafetyCode.CHECKPOINT,
+            "Facebook checkpoint requires manual review.",
+            True,
+        )
+    )
+
+    class StopAfterRefreshSafety:
         def is_cancel_requested(self):
             trace.append("guard:cancellation")
             return False
@@ -321,7 +361,7 @@ def test_restore_propagates_typed_guard_stop_before_refresh_unwrapped(
     with pytest.raises(type(stop)) as captured:
         SessionStore(
             path,
-            control=StopAfterCookieSafety(),
+            control=StopAfterRefreshSafety(),
             navigation_pacer=Pacer(),
         ).restore(browser)
 
@@ -329,5 +369,69 @@ def test_restore_propagates_typed_guard_stop_before_refresh_unwrapped(
     assert type(captured.value) is type(stop)
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
-    assert trace == ["guard:cancellation", "pace", "home", "guard:cancellation", "guard:safety"]
+    assert trace == [
+        "guard:cancellation",
+        "pace",
+        "home",
+        "guard:cancellation",
+        "pace",
+        "guard:cancellation",
+        "guard:safety",
+    ]
+    assert browser.refreshes == 1
+
+
+def test_restore_propagates_budget_stop_before_refresh_unwrapped() -> None:
+    path = valid_session_path()
+
+    class BudgetAfterCookies:
+        def __init__(self) -> None:
+            self.checks = 0
+
+        def is_cancel_requested(self):
+            self.checks += 1
+            if self.checks == 2:
+                raise JobBudgetReached()
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            pytest.fail("page safety must not run before refresh")
+
+    browser = FakeBrowser()
+    with pytest.raises(JobBudgetReached):
+        SessionStore(path, control=BudgetAfterCookies()).restore(browser)
+    assert browser.refreshes == 0
+
+
+def test_restore_does_not_swallow_cooperative_lease_stop_before_refresh() -> None:
+    path = valid_session_path()
+
+    class LeaseStop(RuntimeError):
+        pass
+
+    stop = LeaseStop("lease is no longer owned")
+
+    class LeaseLostAfterCookies:
+        def __init__(self) -> None:
+            self.checks = 0
+
+        def is_cancel_requested(self):
+            self.checks += 1
+            if self.checks == 2:
+                raise stop
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            pytest.fail("page safety must not run before refresh")
+
+    browser = FakeBrowser()
+    with pytest.raises(LeaseStop) as captured:
+        SessionStore(path, control=LeaseLostAfterCookies()).restore(browser)
+    assert captured.value is stop
     assert browser.refreshes == 0

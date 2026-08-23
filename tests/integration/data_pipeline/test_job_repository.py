@@ -266,7 +266,11 @@ def test_request_cancel_changes_queued_and_running_jobs_once_and_leaves_terminal
     assert terminal_after.cancel_requested_at == terminal_before.cancel_requested_at
     assert repository.request_cancel(uuid4()) is None
     assert [target.status.value for target in repository.list_targets(queued.id).items] == ["cancelled"]
-    assert [event.event_type for event in repository.list_events(queued.id).items] == ["job_created", "cancel_requested"]
+    assert [event.event_type for event in repository.list_events(queued.id).items] == [
+        "job_created",
+        "cancel_requested",
+        "job_cancelled",
+    ]
     assert [event.event_type for event in repository.list_events(running.id).items] == ["job_created", "cancel_requested"]
     assert [event.event_type for event in repository.list_events(terminal.id).items] == ["job_created"]
 
@@ -375,6 +379,7 @@ def test_atomic_finalizer_turns_cancelling_work_into_cancelled_and_preserves_blo
     assert cancelled_target.status is TargetStatus.CANCELLED
     assert (cancelled_target.error_code, cancelled_target.error_message) == ("crawl_cancelled", "")
     assert repository.get_account("default").status is AccountStatus.COOLDOWN  # type: ignore[union-attr]
+    assert [event.event_type for event in repository.list_events(job.id).items][-1] == "job_cancelled"
 
     repository.set_account_state(account_key="default", status=AccountStatus.READY, now=datetime.now(UTC))
     blocked, _ = repository.create_job(
@@ -669,6 +674,91 @@ def test_stale_recovery_requeues_unstarted_work_and_blocks_uncertain_work_once()
     assert [event.event_type for event in repository.list_events(uncertain.id).items].count("account_warning") == 1
 
 
+def test_stale_recovery_treats_browser_started_as_uncertain_before_target_start() -> None:
+    """A browser crash after its durable event must never replay the account work."""
+    repository = JobRepository(TEST_DATABASE_URL)
+    job, _ = repository.create_job(
+        command(
+            "https://www.facebook.com/groups/100",
+            "https://www.facebook.com/groups/200",
+        ),
+        idempotency_key="stale-browser-started",
+        request_fingerprint="stale-browser-started",
+    )
+    claim = repository.claim_next(
+        "browser-worker",
+        lease_duration=timedelta(minutes=1),
+    )
+    assert claim is not None
+    repository.append_event(job.id, "browser_started", "info")
+    with psycopg.connect(TEST_DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE crawl_jobs SET lease_expires_at = now() - interval '1 minute' WHERE id = %s",
+                (job.id,),
+            )
+
+    assert repository.recover_stale_jobs() == (job.id,)
+
+    stored = repository.get_job(job.id)
+    account = repository.get_account("default")
+    events = repository.list_events(job.id).items
+    assert stored is not None
+    assert stored.status is JobStatus.BLOCKED
+    assert stored.failed_targets == 2
+    assert [item.status for item in repository.list_targets(job.id).items] == [
+        TargetStatus.BLOCKED,
+        TargetStatus.BLOCKED,
+    ]
+    assert account is not None
+    assert account.status is AccountStatus.MANUAL_REVIEW
+    assert account.last_finished_at is not None
+    assert [item.event_type for item in events][-2:] == [
+        "account_warning",
+        "job_blocked",
+    ]
+    assert events[-2].safe_message == "Lease expired during target execution."
+    assert events[-1].safe_message == ""
+
+
+def test_stale_browser_recovery_is_single_winner_across_connections() -> None:
+    """Concurrent recovery emits one warning/block sequence and returns one winner."""
+    repository = JobRepository(TEST_DATABASE_URL)
+    job, _ = repository.create_job(
+        command("https://www.facebook.com/groups/100"),
+        idempotency_key="stale-browser-race",
+        request_fingerprint="stale-browser-race",
+    )
+    assert repository.claim_next(
+        "browser-race-worker",
+        lease_duration=timedelta(minutes=1),
+    ) is not None
+    repository.append_event(job.id, "browser_started", "info")
+    with psycopg.connect(TEST_DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE crawl_jobs SET lease_expires_at = now() - interval '1 minute' WHERE id = %s",
+                (job.id,),
+            )
+
+    barrier = Barrier(2)
+
+    def recover() -> tuple[UUID, ...]:
+        barrier.wait()
+        return JobRepository(TEST_DATABASE_URL).recover_stale_jobs(limit=1)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = [future.result(timeout=10) for future in (
+            executor.submit(recover),
+            executor.submit(recover),
+        )]
+
+    assert sorted(len(item) for item in results) == [0, 1]
+    event_types = [item.event_type for item in repository.list_events(job.id).items]
+    assert event_types.count("account_warning") == 1
+    assert event_types.count("job_blocked") == 1
+
+
 def test_service_retry_preserves_retryable_checkpoint_and_account_policy_is_conservative() -> None:
     """Break caught: retries overwrite checkpoints or account safety holds are cleared too early."""
     repository = JobRepository(TEST_DATABASE_URL)
@@ -778,6 +868,52 @@ def test_atomic_account_policy_keeps_stronger_holds_and_resets_old_rate_history(
     assert service.get_account().status is AccountStatus.READY
     repository.set_account_state(account_key="default", status=AccountStatus.MANUAL_REVIEW, now=clock[0])
     assert service.acknowledge_account(acknowledged=True).status is AccountStatus.READY
+
+
+def test_repeated_rate_limit_renews_six_hour_cooldown_before_acknowledgement() -> None:
+    """Break caught: the second signal enters review with an expired cooldown."""
+    repository = JobRepository(TEST_DATABASE_URL)
+    clock = [datetime(2026, 8, 21, tzinfo=UTC)]
+    service = JobService(repository, now=lambda: clock[0])
+
+    first = service.record_account_signal(signal="facebook_rate_limited")
+    clock[0] += timedelta(hours=1)
+    second = service.record_account_signal(signal="facebook_rate_limited")
+    acknowledged = service.acknowledge_account(acknowledged=True)
+
+    assert first.cooldown_until == datetime(2026, 8, 21, 6, tzinfo=UTC)
+    assert second.status is AccountStatus.MANUAL_REVIEW
+    assert second.cooldown_until is not None
+    assert second.cooldown_until >= clock[0] + timedelta(hours=6)
+    assert acknowledged.status is AccountStatus.COOLDOWN
+    assert acknowledged.cooldown_until == second.cooldown_until
+
+
+def test_blocked_finalization_records_finished_time_and_rate_limit_event() -> None:
+    """Break caught: blocked work omits account completion metadata and rate-limit audit."""
+    repository = JobRepository(TEST_DATABASE_URL)
+    job, _ = repository.create_job(
+        command("https://www.facebook.com/groups/100"),
+        idempotency_key="blocked-finished-metadata",
+        request_fingerprint="blocked-finished-metadata",
+    )
+    claim = repository.claim_next("blocked-worker", lease_duration=timedelta(minutes=2))
+    assert claim is not None
+
+    assert repository.finish_job(
+        job.id,
+        "blocked-worker",
+        status=JobStatus.BLOCKED,
+        account_signal="facebook_rate_limited",
+    )
+
+    account = repository.get_account()
+    events = repository.list_events(job.id).items
+    assert account is not None and account.last_finished_at is not None
+    assert [event.event_type for event in events][-2:] == [
+        "facebook_rate_limited",
+        "job_blocked",
+    ]
 
 
 def test_two_real_connections_race_to_claim_only_one_default_account_job() -> None:

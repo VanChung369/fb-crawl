@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, Header, Query, status
 from fb_crawl.api.dependencies import ApiKeyAuth
 from fb_crawl.api.schemas import (
     ApiErrorResponse,
+    EVENT_COUNTER_NAMES,
+    EventCountersResponse,
     JobCreateRequest,
     JobEventPageResponse,
     JobEventResponse,
@@ -121,7 +123,7 @@ def create_jobs_router(
     )
     def list_events(
         job_id: UUID,
-        after_id: Annotated[int, Query(ge=0)] = 0,
+        after_id: Annotated[int, Query(ge=0, le=9223372036854775807)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 100,
     ) -> JobEventPageResponse:
         _require_job(job_repository, job_id)
@@ -210,6 +212,16 @@ def _target_response(target: CrawlTarget) -> JobTargetResponse:
 
 
 def _event_response(event: CrawlEvent) -> JobEventResponse:
+    counters = {
+        key: value
+        for key, value in event.counters.items()
+        if (
+            key in EVENT_COUNTER_NAMES
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        )
+    }
     return JobEventResponse(
         id=event.id,
         job_id=event.job_id,
@@ -218,5 +230,5 @@ def _event_response(event: CrawlEvent) -> JobEventResponse:
         created_at=event.created_at,
         target_id=event.target_id,
         safe_message=event.safe_message,
-        counters=dict(event.counters),
+        counters=EventCountersResponse(**counters),
     )

@@ -13,6 +13,7 @@ from fb_crawl.cli.authenticated import (
     execute_authenticated,
 )
 from fb_crawl.cli.data import add_data_parser, execute_data
+from fb_crawl.cli.api import add_api_parser, execute_api
 from fb_crawl.cli.pipeline import add_pipeline_parser, execute_pipeline
 from fb_crawl.cli.worker import add_worker_parser, execute_worker
 from fb_crawl.core.exceptions import FbCrawlError
@@ -33,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_data_parser(modes)
 
     add_pipeline_parser(modes)
+
+    add_api_parser(modes)
 
     add_worker_parser(modes)
 
@@ -58,6 +61,9 @@ def main(
 
         if args.mode == "pipeline":
             return execute_pipeline(args)
+
+        if args.mode == "api":
+            return execute_api(args)
 
         if args.mode == "worker":
             return execute_worker(args)

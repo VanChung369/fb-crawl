@@ -176,6 +176,34 @@ waits 24 hours after a retryable failure, and serializes runs per database.
 `--force` bypasses only the cooldown; `--dry-run` calls neither FBNumber nor the
 persistence writer.
 
+## Job API and background worker
+
+The authenticated job API stores queue, target, event, account-safety, and user
+state in PostgreSQL. The API process never starts Selenium; a separate
+non-interactive worker uses the configured saved session and processes one
+target at a time. API jobs persist directly to PostgreSQL and do not create CSV
+or JSON output artifacts.
+
+Install all phase-one development extras, apply migration 003, and start the
+two processes in separate terminals:
+
+```powershell
+python -m pip install -e ".[browser,api,dev]"
+$env:DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@localhost:5432/fb_pipeline"
+$env:FB_CRAWL_API_KEY = "replace-with-at-least-32-random-characters"
+$env:FB_NUMBER_API_TOKEN = "replace-with-secret"
+$env:FB_CRAWL_SESSION_PATH = "runtime/session.json"
+fb-crawl pipeline migrate
+fb-crawl api serve --host 127.0.0.1 --port 8000
+fb-crawl worker run
+```
+
+`.env.example` is documentation only. The application does not load `.env`
+automatically; export real secrets as process variables or configure them in a
+process manager/IDE. See [docs/job-api.md](docs/job-api.md) for a complete
+members request, polling, cancellation, account acknowledgement, user search,
+fixed account-safety limits, and recovery behavior.
+
 ## Merge crawl output
 
 Combine unified public/authenticated user CSV files and produce a quality gate

@@ -374,6 +374,7 @@ class JobRepository:
                         (job_id,),
                     )
                     self._insert_event(cursor, job_id, "cancel_requested", "info")
+                    self._insert_event(cursor, job_id, "job_cancelled", "info")
                     return self._job_from_row(changed)
             elif job.status is JobStatus.RUNNING:
                 cursor.execute(
@@ -746,6 +747,25 @@ class JobRepository:
                     now=policy_now,
                     rate_limit_cooldown=rate_limit_cooldown,
                 )
+                cursor.execute(
+                    """UPDATE crawler_account_state
+                    SET last_finished_at = %s, updated_at = %s
+                    WHERE account_key = 'default'""",
+                    (policy_now, policy_now),
+                )
+                self._insert_event(
+                    cursor,
+                    job_id,
+                    (
+                        "facebook_rate_limited"
+                        if account_signal in {
+                            "facebook_rate_limited",
+                            "authenticated_rate_limited",
+                        }
+                        else "account_warning"
+                    ),
+                    "warning",
+                )
             elif effective_status in {
                 JobStatus.SUCCEEDED,
                 JobStatus.PARTIAL,
@@ -760,7 +780,13 @@ class JobRepository:
             self._insert_event(
                 cursor,
                 job_id,
-                "job_blocked" if effective_status is JobStatus.BLOCKED else "job_completed",
+                (
+                    "job_blocked"
+                    if effective_status is JobStatus.BLOCKED
+                    else "job_cancelled"
+                    if effective_status is JobStatus.CANCELLED
+                    else "job_completed"
+                ),
                 "info",
             )
             return True
@@ -791,15 +817,64 @@ class JobRepository:
             if row is None:
                 return None
             job = self._job_from_row(row)
-            cursor.execute("SELECT count(*) FROM crawl_targets WHERE job_id = %s AND (attempt > 0 OR started_at IS NOT NULL OR status = 'running')", (job.id,))
-            uncertain = cursor.fetchone()[0] > 0
+            cursor.execute(
+                """
+                SELECT
+                    EXISTS (
+                        SELECT 1 FROM crawl_targets
+                        WHERE job_id = %s
+                          AND (attempt > 0 OR started_at IS NOT NULL OR status = 'running')
+                    ),
+                    EXISTS (
+                        SELECT 1 FROM crawl_job_events
+                        WHERE job_id = %s AND event_type = 'browser_started'
+                    )
+                """,
+                (job.id, job.id),
+            )
+            target_activity, browser_started = cursor.fetchone()
+            uncertain = bool(target_activity or browser_started)
             if not uncertain:
                 cursor.execute("UPDATE crawl_jobs SET status = 'queued', worker_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, current_target_id = NULL, updated_at = now() WHERE id = %s AND status IN ('running', 'cancelling')", (job.id,))
             else:
-                cursor.execute("UPDATE crawl_jobs SET status = 'blocked', finished_at = now(), lease_expires_at = NULL, current_target_id = NULL, error_code = 'lease_recovery', error_message = 'Lease expired during target execution.', updated_at = now() WHERE id = %s AND status IN ('running', 'cancelling')", (job.id,))
                 cursor.execute("UPDATE crawl_targets SET status = 'blocked', finished_at = now(), updated_at = now() WHERE job_id = %s AND (attempt > 0 OR status IN ('pending', 'running'))", (job.id,))
-                cursor.execute("UPDATE crawler_account_state SET status = CASE WHEN status = 'blocked' THEN 'blocked' ELSE 'manual_review' END, last_warning_code = 'account_recovery', last_warning_at = now(), block_reason = 'lease_recovery', updated_at = now() WHERE account_key = 'default'")
+                cursor.execute(
+                    """
+                    UPDATE crawl_jobs
+                    SET status = 'blocked', finished_at = now(),
+                        lease_expires_at = NULL, current_target_id = NULL,
+                        error_code = 'lease_recovery',
+                        error_message = 'Lease expired during target execution.',
+                        completed_targets = (
+                            SELECT count(*) FROM crawl_targets
+                            WHERE job_id = %s AND status = 'succeeded'
+                        ),
+                        failed_targets = (
+                            SELECT count(*) FROM crawl_targets
+                            WHERE job_id = %s
+                              AND status IN ('partial', 'failed', 'cancelled', 'blocked')
+                        ),
+                        updated_at = now()
+                    WHERE id = %s AND status IN ('running', 'cancelling')
+                    """,
+                    (job.id, job.id, job.id),
+                )
+                cursor.execute(
+                    """
+                    UPDATE crawler_account_state
+                    SET status = CASE
+                            WHEN status = 'blocked' THEN 'blocked'
+                            ELSE 'manual_review'
+                        END,
+                        last_finished_at = now(),
+                        last_warning_code = 'account_recovery',
+                        last_warning_at = now(), block_reason = 'lease_recovery',
+                        updated_at = now()
+                    WHERE account_key = 'default'
+                    """
+                )
                 self._insert_event(cursor, job.id, "account_warning", "warning", safe_message="Lease expired during target execution.")
+                self._insert_event(cursor, job.id, "job_blocked", "info")
             return job.id
 
     def get_account(self, account_key: str = "default") -> CrawlerAccountState | None:
@@ -1003,9 +1078,10 @@ class JobRepository:
             )
             count = account.rate_limit_count_24h + 1 if recent else 1
             status = AccountStatus.MANUAL_REVIEW if count >= 2 else AccountStatus.COOLDOWN
-            cooldown = account.cooldown_until
-            if status is AccountStatus.COOLDOWN:
-                cooldown = max(cooldown or now, now + rate_limit_cooldown)
+            cooldown = max(
+                account.cooldown_until or now,
+                now + rate_limit_cooldown,
+            )
             cursor.execute(
                 f"""UPDATE crawler_account_state
                 SET status = CASE WHEN status IN ('manual_review', 'blocked') THEN status ELSE %s END,

@@ -9,6 +9,7 @@ from fb_crawl.services.execution_control import (
     NoOpExecutionControl,
     NoOpNavigationPacer,
     SafeNavigationPacer,
+    cooperative_wait,
     guard_cancellation,
     guard_execution,
 )
@@ -90,6 +91,61 @@ def test_account_safety_stop_rejects_a_bypassed_signal_without_stringifying_it()
 def test_noop_navigation_pacer_returns_immediately() -> None:
     """Break caught: the interactive CLI receives a mandatory worker delay."""
     assert NoOpNavigationPacer().wait() is None
+
+
+def test_cooperative_wait_clips_local_deadline_and_reports_exhaustion() -> None:
+    """Break caught: a 30-minute delay overruns a one-second local crawl budget."""
+    now = [0.0]
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    completed = cooperative_wait(
+        1800,
+        control=NoOpExecutionControl(),
+        sleep=sleep,
+        monotonic=lambda: now[0],
+        deadline_monotonic=1.0,
+    )
+
+    assert completed is False
+    assert sleeps == [1.0]
+    assert now[0] == 1.0
+
+
+def test_cooperative_wait_observes_cancellation_between_bounded_slices() -> None:
+    """Break caught: cancellation waits for the entire configured delay."""
+    now = [0.0]
+
+    class Control(SignallingControl):
+        cancelled = False
+
+        def is_cancel_requested(self) -> bool:
+            return self.cancelled
+
+    control = Control(
+        SafetySignal(
+            SafetyCode.CAPTCHA,
+            "Facebook CAPTCHA requires manual review.",
+            True,
+        )
+    )
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+        control.cancelled = True
+
+    with pytest.raises(CrawlCancelled):
+        cooperative_wait(
+            1800,
+            control=control,
+            sleep=sleep,
+            monotonic=lambda: now[0],
+        )
+
+    assert now[0] <= 1.0
 
 
 def test_safe_navigation_pacer_waits_remaining_interval_in_cancellable_slices() -> None:

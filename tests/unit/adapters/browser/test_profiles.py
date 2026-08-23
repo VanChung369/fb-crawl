@@ -8,7 +8,7 @@ from fb_crawl.core.exceptions import (
     SessionError,
 )
 from fb_crawl.core.models import ProfileDetails, ProfileField, UserRecord
-from fb_crawl.services.execution_control import CrawlCancelled
+from fb_crawl.services.execution_control import CrawlCancelled, JobBudgetReached
 from fb_crawl.services.execution_control import AccountSafetyStop
 from fb_crawl.adapters.browser.account_safety import SafetyCode, SafetySignal
 
@@ -592,7 +592,7 @@ def test_phone_timeline_scrolling_stops_when_height_is_stable() -> None:
         [100, 100],
     )
 
-    ProfileEnricher(
+    details = ProfileEnricher(
         BrowserSettings(),
         authenticated_func=lambda browser: True,
         ready_func=lambda browser, timeout: None,
@@ -608,6 +608,162 @@ def test_phone_timeline_scrolling_stops_when_height_is_stable() -> None:
     )
 
     assert browser.scroll_calls == 1
+    assert details.budget_exhausted is False
+
+
+def test_phone_timeline_reports_step_exhaustion_when_more_content_remains() -> None:
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        ["<main></main>", "<main></main>"],
+        [100, 200],
+    )
+
+    details = ProfileEnricher(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda start, end: 0,
+    ).enrich(
+        browser,
+        record(),
+        (ProfileField.PHONE,),
+        phone_post_steps=1,
+        phone_post_delay_seconds=0,
+    )
+
+    assert browser.scroll_calls == 1
+    assert details.budget_exhausted is True
+
+
+def test_phone_timeline_clips_long_delay_to_local_budget() -> None:
+    now = [0.0]
+    sleeps: list[float] = []
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        ["<main></main>", "<main></main>"],
+        [100, 200],
+    )
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    details = ProfileEnricher(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        content_ready_func=lambda browser, timeout, route: True,
+        sleep_func=sleep,
+        jitter_func=lambda start, end: 0,
+        monotonic_func=lambda: now[0],
+    ).enrich(
+        browser,
+        record(),
+        (ProfileField.PHONE,),
+        phone_post_steps=10,
+        phone_post_duration_seconds=1,
+        phone_post_delay_seconds=1800,
+    )
+
+    assert sleeps == [1.0]
+    assert now[0] == 1.0
+    assert details.budget_exhausted is True
+
+
+def test_phone_timeline_long_delay_is_interrupted_by_cancellation() -> None:
+    sleeps: list[float] = []
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        ["<main></main>", "<main></main>"],
+        [100, 200],
+    )
+
+    class CancelDuringWait:
+        cancelled = False
+
+        def is_cancel_requested(self):
+            return self.cancelled
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            return None
+
+    control = CancelDuringWait()
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        control.cancelled = True
+
+    with pytest.raises(CrawlCancelled):
+        ProfileEnricher(
+            BrowserSettings(),
+            control=control,
+            authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None,
+            content_ready_func=lambda browser, timeout, route: True,
+            sleep_func=sleep,
+            jitter_func=lambda start, end: 0,
+        ).enrich(
+            browser,
+            record(),
+            (ProfileField.PHONE,),
+            phone_post_steps=10,
+            phone_post_delay_seconds=1800,
+        )
+
+    assert sleeps == [1.0]
+
+
+def test_phone_timeline_long_delay_is_interrupted_by_global_deadline() -> None:
+    sleeps: list[float] = []
+    browser = ScrollingBrowser(
+        "<main><h1>Synthetic User</h1></main>",
+        ["<main></main>", "<main></main>"],
+        [100, 200],
+    )
+
+    class DeadlineDuringWait:
+        expired = False
+
+        def is_cancel_requested(self):
+            if self.expired:
+                raise JobBudgetReached()
+            return False
+
+        def emit(self, event_type, *, counters=None, safe_message=""):
+            return None
+
+        def check_account_safety(self, browser):
+            return None
+
+    control = DeadlineDuringWait()
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        control.expired = True
+
+    with pytest.raises(JobBudgetReached):
+        ProfileEnricher(
+            BrowserSettings(),
+            control=control,
+            authenticated_func=lambda browser: True,
+            ready_func=lambda browser, timeout: None,
+            content_ready_func=lambda browser, timeout, route: True,
+            sleep_func=sleep,
+            jitter_func=lambda start, end: 0,
+        ).enrich(
+            browser,
+            record(),
+            (ProfileField.PHONE,),
+            phone_post_steps=10,
+            phone_post_delay_seconds=1800,
+        )
+
+    assert sleeps == [1.0]
 
 
 def test_phone_timeline_cancellation_after_first_progress_has_no_second_scroll() -> None:

@@ -19,7 +19,9 @@ from fb_crawl.api.dependencies import (
 from fb_crawl.api.routes.health import ReadinessCheck, create_health_router
 from fb_crawl.api.routes.account import create_account_router
 from fb_crawl.api.routes.jobs import create_jobs_router
+from fb_crawl.api.routes.users import UserNotFound, create_users_router
 from fb_crawl.core.exceptions import FbCrawlError, ValidationError
+from fb_crawl.api.safe_logging import log_unexpected_api_error
 from fb_crawl.core.jobs import IdempotencyConflict, JobConflict, JobNotFound
 
 
@@ -51,6 +53,7 @@ def create_app(
     app.include_router(create_health_router(readiness))
     app.include_router(create_jobs_router(job_service, job_repository, auth))
     app.include_router(create_account_router(job_service, auth))
+    app.include_router(create_users_router(user_repository, auth))
     _install_api_authentication(app, auth)
 
     if settings.docs_enabled:
@@ -139,7 +142,7 @@ def _install_exception_handlers(app: FastAPI) -> None:
         _request: Request,
         error: FbCrawlError,
     ) -> JSONResponse:
-        if isinstance(error, JobNotFound):
+        if isinstance(error, (JobNotFound, UserNotFound)):
             status_code = 404
         elif isinstance(error, (IdempotencyConflict, JobConflict)):
             status_code = 409
@@ -157,7 +160,7 @@ def _install_exception_handlers(app: FastAPI) -> None:
         _request: Request,
         _error: Exception,
     ) -> JSONResponse:
-        logger.exception("Unhandled API error.")
+        log_unexpected_api_error(logger)
         return JSONResponse(
             status_code=500,
             content={

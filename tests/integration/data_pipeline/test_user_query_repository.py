@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import os
+from urllib.parse import unquote, urlparse
 
 import psycopg
 import pytest
@@ -16,13 +18,45 @@ from fb_data_pipeline.repositories.users import (
 )
 
 
-TEST_DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@127.0.0.1:5432/fb_pipeline_test"
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
+
+
+def _safe_test_database_name(value: str) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError:
+        return None
+    database_name = unquote(parsed.path.removeprefix("/"))
+    if (
+        parsed.scheme not in {"postgres", "postgresql"}
+        or not hostname
+        or parsed.query
+        or parsed.fragment
+        or not database_name.endswith("_test")
+        or "/" in database_name
+        or "\\" in database_name
+    ):
+        return None
+    return database_name
+
+
+TEST_DATABASE_NAME = _safe_test_database_name(TEST_DATABASE_URL)
+
+pytestmark = pytest.mark.skipif(
+    TEST_DATABASE_NAME is None,
+    reason="TEST_DATABASE_URL must target a PostgreSQL database ending in _test",
+)
 
 
 def _assert_dedicated_test_database() -> None:
-    assert TEST_DATABASE_URL.endswith("/fb_pipeline_test")
+    assert TEST_DATABASE_NAME is not None
     with psycopg.connect(TEST_DATABASE_URL) as connection:
-        assert connection.info.dbname == "fb_pipeline_test"
+        assert connection.info.dbname == TEST_DATABASE_NAME
+        assert connection.info.dbname.endswith("_test")
 
 
 @pytest.fixture(autouse=True)

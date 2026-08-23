@@ -292,6 +292,37 @@ def test_nonretryable_target_is_not_repeated() -> None:
     assert outcome.retry.pending == 0
 
 
+def test_budget_exhaustion_keeps_checkpoint_target_retryable_and_incomplete(
+    tmp_path: Path,
+) -> None:
+    """Break caught: a bounded partial target is saved as completed and skipped."""
+    checkpoint = tmp_path / "budget.json"
+    target = "https://www.facebook.com/groups/100"
+    partial = ScrapeResult(
+        records=(record("100", target),),
+        issues=(
+            ScrapeIssue(
+                "authenticated_budget_exhausted",
+                "Authenticated crawl budget was exhausted.",
+                target,
+                ScrapeMode.AUTHENTICATED,
+                "members",
+                True,
+            ),
+        ),
+        stats=ScrapeStats(1, 1, 1, 1),
+    )
+    service = OutcomeService({target: [partial, partial]})
+
+    first = CheckpointingService(service).run(request(checkpoint, target), object())
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    second = CheckpointingService(service).run(request(checkpoint, target), object())
+
+    assert first.records and second.records
+    assert payload["completed_targets"] == []
+    assert service.calls == [target, target]
+
+
 def test_rate_limit_issue_is_counted_across_attempts() -> None:
     target = "https://www.facebook.com/groups/100"
     service = OutcomeService(

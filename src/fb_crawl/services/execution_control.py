@@ -146,6 +146,70 @@ def guard_execution(control: ExecutionControl, browser: object) -> None:
         raise AccountSafetyStop(signal)
 
 
+def cooperative_wait(
+    seconds: float,
+    *,
+    control: ExecutionControl = NOOP_EXECUTION_CONTROL,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+    deadline_monotonic: float | None = None,
+    sleep_slice_seconds: float = 1.0,
+) -> bool:
+    """Wait cooperatively, returning false when a local deadline clips the wait.
+
+    Worker controls are checked at most one second apart. The no-op CLI path
+    retains a single injected sleeper call while still respecting a local
+    crawl deadline.
+    """
+    numeric_values = (seconds, sleep_slice_seconds)
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        for value in numeric_values
+    ):
+        raise ValueError("Cooperative wait durations must be finite numbers.")
+    if seconds < 0 or sleep_slice_seconds <= 0 or sleep_slice_seconds > 1:
+        raise ValueError("Cooperative wait durations are outside safe bounds.")
+    if deadline_monotonic is not None and (
+        isinstance(deadline_monotonic, bool)
+        or not isinstance(deadline_monotonic, (int, float))
+        or not math.isfinite(deadline_monotonic)
+    ):
+        raise ValueError("Cooperative wait deadline must be finite.")
+    if not callable(sleep) or not callable(monotonic):
+        raise TypeError("Cooperative wait requires callable time functions.")
+
+    guard_cancellation(control)
+    if seconds == 0:
+        return True
+
+    requested = float(seconds)
+    remaining = requested
+    clipped = False
+    if deadline_monotonic is not None:
+        local_remaining = float(deadline_monotonic) - float(monotonic())
+        if local_remaining <= 0:
+            return False
+        if local_remaining < remaining:
+            remaining = local_remaining
+            clipped = True
+
+    if control is NOOP_EXECUTION_CONTROL or isinstance(control, NoOpExecutionControl):
+        sleep(remaining)
+        return not clipped
+
+    while remaining > 0:
+        guard_cancellation(control)
+        duration = min(float(sleep_slice_seconds), remaining)
+        sleep(duration)
+        remaining -= duration
+        guard_cancellation(control)
+        if deadline_monotonic is not None and monotonic() >= deadline_monotonic:
+            return False
+    return not clipped
+
+
 class SafeNavigationPacer:
     """Deterministically enforce a shared minimum interval between navigations."""
 

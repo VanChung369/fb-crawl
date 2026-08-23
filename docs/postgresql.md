@@ -1,8 +1,9 @@
 # PostgreSQL source of truth
 
 PostgreSQL 17 is the durable source of truth for normalized Facebook
-identities, phone evidence, and FBNumber attempt history. CSV and JSON exports
-remain compatibility artifacts and are not authoritative.
+identities, phone evidence, FBNumber attempt history, authenticated jobs,
+targets, progress events, and default-account safety state. CSV and JSON
+exports remain compatibility artifacts and are not authoritative.
 
 The implementation uses regular PostgreSQL and `psycopg`. It does not require
 Supabase services, SDKs, authentication, or APIs.
@@ -78,6 +79,21 @@ FROM facebook_user_phone_slots;
 Provider failure does not discard the Facebook user or crawler evidence. The
 failed attempt is stored so the durable retry worker can process it later.
 
+Migration `003_job_orchestration` adds `crawl_jobs`, `crawl_targets`,
+`crawl_job_events`, and `crawler_account_state`, including the single
+`default` account row. Apply it before starting either API or worker:
+
+```powershell
+$env:DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@localhost:5432/fb_pipeline"
+fb-crawl pipeline migrate
+```
+
+API-created jobs write each completed target through FBNumber and then into
+the PostgreSQL user/evidence tables before the next target starts. They create
+no intermediate CSV/JSON artifact and never delete cache, session, checkpoint,
+or existing output files. See [job-api.md](job-api.md) for process startup,
+queue inspection, account safety, and recovery commands.
+
 ## Retry durable FBNumber failures
 
 Inspect eligible work without calling the provider or writing enrichment data:
@@ -148,11 +164,12 @@ dedicated database and run:
 ```powershell
 docker compose exec postgres createdb -U fb_pipeline fb_pipeline_test
 $env:TEST_DATABASE_URL = "postgresql://fb_pipeline:fb_pipeline_dev@localhost:5432/fb_pipeline_test"
-python -m pytest tests/integration/data_pipeline/test_postgres_repository.py -q
+python -m pytest -q
 ```
 
 If the test database already exists, skip the `createdb` command. Without
-`TEST_DATABASE_URL`, the live PostgreSQL module skips safely.
+`TEST_DATABASE_URL`, PostgreSQL integration modules skip with an explicit
+reason. Never point `TEST_DATABASE_URL` at the normal `fb_pipeline` database.
 
 ## Production guidance
 

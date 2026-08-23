@@ -296,6 +296,27 @@ def test_result_and_ingestion_outcomes_control_target_status(records, issues, re
     assert finished[2]["status"] is expected
 
 
+def test_budget_exhaustion_is_partial_even_when_no_record_was_discovered() -> None:
+    """Break caught: an exhausted target is reported failed/unretryable instead of partial."""
+    job = _job()
+    target = _target(job, 0, checkpoint_path="checkpoint.json")
+    repository = Repository(ClaimedJob(job, (target,)))
+    issue = ScrapeIssue(
+        "authenticated_budget_exhausted",
+        "Authenticated crawl budget was exhausted.",
+        target.target_url,
+        ScrapeMode.AUTHENTICATED,
+        "members",
+        True,
+    )
+    session = Session([_result(records=0, issues=(issue,))], _report(persisted=0))
+
+    CrawlWorker(repository, _runtime(session, []), worker_id="worker").run_once()
+
+    finished = next(event for event in repository.events if event[0] == "finish_target")
+    assert finished[2]["status"] is TargetStatus.PARTIAL
+
+
 @pytest.mark.parametrize(
     ("failure", "target_status", "job_status", "code"),
     [
@@ -386,6 +407,166 @@ def test_control_cancellation_before_runtime_prevents_browser_construction() -> 
 
     assert CrawlWorker(repository, lambda *_: pytest.fail("runtime opened"), worker_id="worker").run_once() is True
     assert not [event for event in repository.events if event[0] == "start"]
+
+
+def test_control_persists_live_progress_against_the_active_target() -> None:
+    """Break caught: collector progress is a target-less event until after ingestion."""
+    job = _job()
+    target = _target(job, 0, checkpoint_path="checkpoint.json")
+    repository = Repository(ClaimedJob(job, (target,)))
+    control = JobExecutionControl(
+        repository,
+        job,
+        type("Heartbeat", (), {"lost": False})(),
+        deadline_monotonic=9999,
+        monotonic=lambda: 0,
+    )
+
+    control.set_active_target(target.id)
+    control.emit("target_progress", counters={"steps_completed": 3})
+    control.emit("provider_progress", counters={"users_persisted": 2})
+
+    assert repository.events == [
+        ("progress", target.id, {"steps_completed": 3}),
+        ("event", "provider_progress", {"target_id": target.id, "counters": {"users_persisted": 2}}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("cancel_during_write", "expected"),
+    [(True, CrawlCancelled), (False, LeaseLost)],
+)
+def test_live_progress_reclassifies_cancel_and_ownership_races(
+    cancel_during_write: bool,
+    expected: type[BaseException],
+) -> None:
+    """Break caught: a rejected live counter write hides cancellation or lease loss."""
+    job = _job()
+    target = _target(job, 0, checkpoint_path="checkpoint.json")
+
+    class RejectingRepository(Repository):
+        def update_target_progress(self, *args, **kwargs):
+            if cancel_during_write:
+                assert self.current_job is not None
+                self.current_job = replace(
+                    self.current_job,
+                    status=JobStatus.CANCELLING,
+                    cancel_requested_at=NOW,
+                )
+            return False
+
+    repository = RejectingRepository(ClaimedJob(job, (target,)))
+    control = JobExecutionControl(
+        repository,
+        job,
+        type("Heartbeat", (), {"lost": False})(),
+        deadline_monotonic=9999,
+        monotonic=lambda: 0,
+    )
+    control.set_active_target(target.id)
+
+    with pytest.raises(expected):
+        control.emit("target_progress", counters={"steps_completed": 1})
+
+
+def test_collector_progress_is_durable_before_provider_ingestion() -> None:
+    """Break caught: target counters remain zero while provider work is running."""
+    job = _job()
+    target = _target(job, 0, checkpoint_path="checkpoint.json")
+    repository = Repository(ClaimedJob(job, (target,)))
+
+    class ProgressSession(Session):
+        control: JobExecutionControl
+
+        def run(self, request):
+            self.control.emit("target_progress", counters={"steps_completed": 2})
+            return super().run(request)
+
+        def ingest(self, result):
+            assert ("progress", target.id, {"steps_completed": 2}) in repository.events
+            return super().ingest(result)
+
+    session = ProgressSession([_result()], _report())
+
+    @contextmanager
+    def runtime(control, pacer):
+        session.control = control
+        yield session
+
+    CrawlWorker(repository, runtime, worker_id="worker").run_once()
+
+    live_index = repository.events.index(
+        ("progress", target.id, {"steps_completed": 2})
+    )
+    final_index = next(
+        index
+        for index, event in enumerate(repository.events)
+        if event[0] == "progress" and event[2].get("items_discovered") == 1
+    )
+    assert live_index < final_index
+
+
+def test_final_progress_does_not_replace_live_steps_with_user_count() -> None:
+    """A high-yield page may discover many users while consuming one scroll step."""
+    job = _job()
+    target = _target(job, 0, checkpoint_path="checkpoint.json")
+    repository = Repository(ClaimedJob(job, (target,)))
+    many_users = _result(records=200)
+    many_users = replace(
+        many_users,
+        stats=replace(many_users.stats, succeeded=200),
+    )
+
+    class OneStepSession(Session):
+        control: JobExecutionControl
+
+        def run(self, request):
+            self.control.emit(
+                "target_progress",
+                counters={"steps_completed": 1},
+            )
+            return super().run(request)
+
+    session = OneStepSession([many_users], _report(persisted=200))
+
+    @contextmanager
+    def runtime(control, pacer):
+        session.control = control
+        yield session
+
+    CrawlWorker(repository, runtime, worker_id="worker").run_once()
+
+    progress = [event[2] for event in repository.events if event[0] == "progress"]
+    assert progress[0] == {"steps_completed": 1}
+    assert progress[1] == {
+        "items_discovered": 200,
+        "users_persisted": 200,
+        "provider_retries_required": 0,
+    }
+
+
+def test_worker_emits_browser_and_provider_lifecycle_at_truthful_boundaries() -> None:
+    """Break caught: API event consumers cannot distinguish runtime/provider phases."""
+    job = _job()
+    target = _target(job, 0, checkpoint_path="checkpoint.json")
+    repository = Repository(ClaimedJob(job, (target,)))
+    session = Session([_result()], _report())
+
+    CrawlWorker(repository, _runtime(session, []), worker_id="worker").run_once()
+
+    events = [event for event in repository.events if event[0] == "event"]
+    assert events[0] == ("event", "browser_started", {})
+    assert events[1] == (
+        "event",
+        "provider_progress",
+        {
+            "target_id": target.id,
+            "counters": {
+                "users_persisted": 1,
+                "provider_retries_required": 0,
+            },
+        },
+    )
 
 
 def test_policy_rejects_relaxing_safety_bounds() -> None:

@@ -7,7 +7,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
-from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
+from fb_crawl.adapters.browser.crawl_budget import CrawlBudget, CrawlCollection
 from fb_crawl.adapters.browser.driver import wait_for_document_ready
 from fb_crawl.adapters.browser.session import is_authenticated
 from fb_crawl.config import BrowserSettings
@@ -16,7 +16,7 @@ from fb_crawl.core.exceptions import (
     RateLimitError,
     SessionError,
 )
-from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, cooperative_wait, guard_cancellation, guard_execution
 
 
 REACTIONS_XPATH = (
@@ -94,8 +94,13 @@ class ReactionsCollector:
         steps: int | None,
         delay_seconds: float,
         max_duration_seconds: float | None = None,
-    ) -> tuple[str, int]:
+    ) -> CrawlCollection:
         try:
+            budget = CrawlBudget(
+                steps=steps,
+                max_duration_seconds=max_duration_seconds,
+                monotonic_func=self._monotonic,
+            )
             guard_cancellation(self._control)
             self._navigation_pacer.wait()
             browser.get(url)
@@ -120,27 +125,34 @@ class ReactionsCollector:
 
             attempts = 0
             previous: int | None = None
-            budget = CrawlBudget(
-                steps=steps,
-                max_duration_seconds=max_duration_seconds,
-                monotonic_func=self._monotonic,
-            )
+            natural_complete = False
+            wait_exhausted = False
 
             while budget.allows(attempts):
                 guard_execution(self._control, browser)
                 height = browser.execute_script(REACTIONS_SCROLL_SCRIPT)
 
                 if height is None:
+                    natural_complete = True
                     break
 
                 attempts += 1
                 self._control.emit("target_progress", counters={"steps_completed": attempts})
 
                 if delay_seconds:
-                    self._sleep(delay_seconds)
+                    if not cooperative_wait(
+                        delay_seconds,
+                        control=self._control,
+                        sleep=self._sleep,
+                        monotonic=self._monotonic,
+                        deadline_monotonic=budget.deadline_monotonic,
+                    ):
+                        wait_exhausted = True
+                        break
 
                 current = int(height)
                 if previous is not None and current <= previous:
+                    natural_complete = True
                     break
                 previous = current
 
@@ -152,7 +164,14 @@ class ReactionsCollector:
                     "Visible reactions list could not be opened.", target=url
                 )
 
-            return str(html), attempts
+            return CrawlCollection(
+                str(html),
+                attempts,
+                budget_exhausted=(
+                    wait_exhausted
+                    or (not natural_complete and budget.exhausted(attempts))
+                ),
+            )
 
         except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
             raise

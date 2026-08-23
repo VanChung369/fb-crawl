@@ -36,14 +36,20 @@ SCHEMAS_PATH = ROOT / "src" / "fb_crawl" / "api" / "schemas.py"
 JOBS_ROUTE_PATH = ROOT / "src" / "fb_crawl" / "api" / "routes" / "jobs.py"
 
 try:
+    import fastapi
+    import pydantic
+except ModuleNotFoundError as error:
+    if error.name not in {"fastapi", "pydantic"}:
+        raise
+    FASTAPI_AVAILABLE = False
+else:
+    FASTAPI_AVAILABLE = True
+
+if FASTAPI_AVAILABLE:
     from fastapi.testclient import TestClient
 
     from fb_crawl.api.app import create_app
     from fb_crawl.api.config import ApiSettings
-
-    FASTAPI_AVAILABLE = True
-except ModuleNotFoundError:
-    FASTAPI_AVAILABLE = False
 
 
 def _headers(*, idempotency_key: str | None = None) -> dict[str, str]:
@@ -117,6 +123,7 @@ class FakeJobRepository:
         self.jobs = {job.id: job for job in jobs}
         self.targets: dict[UUID, tuple[CrawlTarget, ...]] = {}
         self.events: dict[UUID, tuple[CrawlEvent, ...]] = {}
+        self.event_list_calls: list[tuple[UUID, int, int]] = []
 
     def get_job(self, job_id: UUID) -> CrawlJob | None:
         return self.jobs.get(job_id)
@@ -136,6 +143,7 @@ class FakeJobRepository:
     def list_events(
         self, job_id: UUID, *, after_id: int, limit: int,
     ) -> Page[CrawlEvent]:
+        self.event_list_calls.append((job_id, after_id, limit))
         values = tuple(event for event in self.events.get(job_id, ()) if event.id > after_id)
         return Page(values[:limit], str(values[limit - 1].id) if len(values) > limit else None)
 
@@ -236,6 +244,7 @@ def test_schema_source_declares_closed_create_and_response_models() -> None:
 
     assert {
         "JobCreateRequest",
+        "EventCountersResponse",
         "JobResponse",
         "JobTargetResponse",
         "JobEventResponse",
@@ -244,6 +253,19 @@ def test_schema_source_declares_closed_create_and_response_models() -> None:
         "JobEventPageResponse",
     } <= classes.keys()
     assert 'ConfigDict(extra="forbid")' in source
+    assert "max_length=2048" in source
+    for counter_name in (
+        "requested_targets",
+        "completed_targets",
+        "failed_targets",
+        "discovered_users",
+        "persisted_users",
+        "provider_retries_required",
+        "steps_completed",
+        "items_discovered",
+        "users_persisted",
+    ):
+        assert counter_name in source
     assert "checkpoint_path" not in source
     assert "worker_id" not in source
     assert "lease_expires_at" not in source
@@ -271,6 +293,8 @@ def test_job_route_source_uses_typed_commands_and_whitelisted_serializers() -> N
     )
     assert "response_model=" in source
     assert "Depends(auth)" in source
+    assert "le=9223372036854775807" in source
+    assert "response_model_exclude_none" not in source
     assert "__dict__" not in source
     assert "asdict(" not in source
 
@@ -308,6 +332,7 @@ def test_create_requires_auth_and_idempotency_and_returns_accepted_job() -> None
         _body(action="inspect"),
         _body(action="batch"),
         _body(targets=[]),
+        _body(targets=[""]),
         _body(targets=["https://www.facebook.com/groups/123"] * 101),
         _body(output="private.csv"),
         _body(session_path="runtime/session.json"),
@@ -339,6 +364,26 @@ def test_create_rejects_public_unknown_credential_and_unsafe_input(body: dict[st
     assert response.status_code == 400
     assert "private" not in response.text
     assert "secret-proxy" not in response.text
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
+def test_oversized_target_is_rejected_before_job_service_call() -> None:
+    """Break caught: an enormous target reaches canonicalization or persistence."""
+
+    repository = FakeJobRepository()
+    service = FakeJobService(repository)
+    client, _, _ = _client(repository, service)
+    oversized = "https://www.facebook.com/" + "x" * 1_000_000
+
+    response = client.post(
+        "/api/v1/jobs",
+        headers=_headers(idempotency_key=IDEMPOTENCY_KEY),
+        json=_body(targets=[oversized]),
+    )
+
+    assert response.status_code == 400
+    assert service.created_by_key == {}
+    assert oversized not in response.text
 
 
 @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
@@ -433,8 +478,28 @@ def test_list_detail_target_and_event_responses_expose_only_stable_fields() -> N
     repository.targets[job.id] = (_target(job.id),)
     now = datetime(2026, 8, 22, 12, tzinfo=UTC)
     repository.events[job.id] = (
-        CrawlEvent(124, job.id, "target_progress", "info", now, safe_message="Safe progress."),
-        CrawlEvent(125, job.id, "target_completed", "info", now),
+        CrawlEvent(
+            124,
+            job.id,
+            "target_progress",
+            "info",
+            now,
+            safe_message="Safe progress.",
+            counters={
+                "requested_targets": 1,
+                "completed_targets": 1,
+                "failed_targets": 0,
+                "discovered_users": 4,
+                "persisted_users": 3,
+                "provider_retries_required": 1,
+                "steps_completed": 2,
+                "items_discovered": 4,
+                "users_persisted": 3,
+                "unknown_legacy_counter": 999,
+                "credential_secret": 123,
+            },
+        ),
+        CrawlEvent(125, job.id, "job_completed", "info", now),
     )
     client, _, _ = _client(repository)
     headers = _headers()
@@ -451,6 +516,36 @@ def test_list_detail_target_and_event_responses_expose_only_stable_fields() -> N
     assert jobs.json()["next_cursor"] == "opaque-next"
     assert targets.json()["next_cursor"] == "target-next"
     assert [event["id"] for event in events.json()["items"]] == [124, 125]
+    assert events.json()["next_cursor"] is None
+    assert events.json()["items"][1]["target_id"] is None
+    assert events.json()["items"][0]["counters"] == {
+        "requested_targets": 1,
+        "completed_targets": 1,
+        "failed_targets": 0,
+        "discovered_users": 4,
+        "persisted_users": 3,
+        "provider_retries_required": 1,
+        "steps_completed": 2,
+        "items_discovered": 4,
+        "users_persisted": 3,
+    }
+    assert set(events.json()["items"][1]["counters"]) == {
+        "requested_targets",
+        "completed_targets",
+        "failed_targets",
+        "discovered_users",
+        "persisted_users",
+        "provider_retries_required",
+        "steps_completed",
+        "items_discovered",
+        "users_persisted",
+    }
+    assert all(
+        value is None
+        for value in events.json()["items"][1]["counters"].values()
+    )
+    assert "unknown_legacy_counter" not in events.text
+    assert "credential_secret" not in events.text
     combined = " ".join((jobs.text, detail.text, targets.text, events.text))
     for secret in (
         "checkpoint_path",
@@ -477,6 +572,7 @@ def test_list_detail_target_and_event_responses_expose_only_stable_fields() -> N
         "/api/v1/jobs/not-a-uuid",
         f"/api/v1/jobs/{uuid4()}/targets?limit=101",
         f"/api/v1/jobs/{uuid4()}/events?after_id=-1",
+        f"/api/v1/jobs/{uuid4()}/events?after_id=9223372036854775808",
         f"/api/v1/jobs/{uuid4()}/events?limit=101",
     ],
 )
@@ -488,6 +584,23 @@ def test_job_read_routes_reject_invalid_limits_cursors_and_ids(path: str) -> Non
     response = client.get(path, headers=_headers())
 
     assert response.status_code in {400, 404}
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
+def test_event_cursor_above_postgres_bigint_is_rejected_before_repository_call() -> None:
+    """Break caught: an out-of-range after_id reaches a PostgreSQL BIGINT parameter."""
+
+    job = _job()
+    repository = FakeJobRepository((job,))
+    client, _, _ = _client(repository)
+
+    response = client.get(
+        f"/api/v1/jobs/{job.id}/events?after_id=9223372036854775808",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 400
+    assert repository.event_list_calls == []
 
 
 @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")

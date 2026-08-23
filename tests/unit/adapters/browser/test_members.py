@@ -119,6 +119,54 @@ def test_members_collector_never_exceeds_steps() -> None:
     assert browser.scrolls == 3
 
 
+def test_members_collector_reports_step_budget_exhaustion() -> None:
+    """Break caught: reaching the configured step bound looks fully complete."""
+    browser = FakeBrowser([100, 200])
+    outcome = MembersCollector(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        sleep_func=lambda seconds: None,
+        jitter_func=lambda low, high: 0.0,
+    ).collect(
+        browser,
+        "https://www.facebook.com/groups/1/members",
+        steps=1,
+        delay_seconds=0,
+    )
+
+    assert outcome.budget_exhausted is True
+    assert tuple(outcome) == ("<html>members</html>", 1)
+
+
+def test_members_long_delay_is_clipped_to_local_time_budget() -> None:
+    """Break caught: a 1800-second delay overruns a one-second collector budget."""
+    now = [0.0]
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    outcome = MembersCollector(
+        BrowserSettings(),
+        authenticated_func=lambda browser: True,
+        ready_func=lambda browser, timeout: None,
+        sleep_func=sleep,
+        jitter_func=lambda low, high: 0.0,
+        monotonic_func=lambda: now[0],
+    ).collect(
+        FakeBrowser([100, 200]),
+        "https://www.facebook.com/groups/1/members",
+        steps=20,
+        delay_seconds=1800,
+        max_duration_seconds=1,
+    )
+
+    assert outcome.budget_exhausted is True
+    assert sleeps == [1.0]
+
+
 def test_members_collector_without_limits_stops_at_exhaustion_signal() -> None:
     browser = FakeBrowser([100, 200, 200])
     collector = MembersCollector(

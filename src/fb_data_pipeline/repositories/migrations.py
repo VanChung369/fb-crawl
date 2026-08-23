@@ -3,7 +3,7 @@ from __future__ import annotations
 import psycopg
 
 from fb_data_pipeline.migrations import Migration, load_migrations
-from fb_data_pipeline.repositories.errors import MigrationChecksumError
+from fb_data_pipeline.repositories.errors import DatabaseError, MigrationChecksumError
 
 
 class MigrationRunner:
@@ -19,6 +19,30 @@ class MigrationRunner:
         self.migrations = (
             load_migrations() if migrations is None else migrations
         )
+
+    def is_applied(self, version: str) -> bool:
+        """Read one migration marker without mutating the database schema."""
+        try:
+            with self.connect_factory(self.database_url) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM schema_migrations
+                            WHERE version = %s
+                        )
+                        """,
+                        (version,),
+                    )
+                    row = cursor.fetchone()
+        except DatabaseError:
+            raise
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database readiness check failed.") from error
+        if row is None:
+            raise DatabaseError("Database readiness check failed.")
+        return bool(row[0])
 
     def apply(self) -> tuple[str, ...]:
         applied: list[str] = []

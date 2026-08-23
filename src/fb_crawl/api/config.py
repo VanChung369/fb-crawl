@@ -58,7 +58,7 @@ def load_api_settings(env: Mapping[str, str]) -> ApiSettings:
 
 
 def _validate_api_key(value: object) -> None:
-    if not isinstance(value, str) or not value.strip() or len(value) < 32:
+    if not isinstance(value, str) or len(value.strip()) < 32:
         raise ConfigurationError(
             "FB_CRAWL_API_KEY must contain at least 32 nonblank characters."
         )

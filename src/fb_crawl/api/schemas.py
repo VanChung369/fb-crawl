@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -20,6 +20,21 @@ SupportedJobAction: TypeAlias = Literal[
     "reactions",
     "engagement",
 ]
+TargetUrl: TypeAlias = Annotated[str, Field(min_length=1, max_length=2048)]
+
+EVENT_COUNTER_NAMES = frozenset(
+    {
+        "requested_targets",
+        "completed_targets",
+        "failed_targets",
+        "discovered_users",
+        "persisted_users",
+        "provider_retries_required",
+        "steps_completed",
+        "items_discovered",
+        "users_persisted",
+    }
+)
 
 
 class JobCreateRequest(BaseModel):
@@ -27,7 +42,7 @@ class JobCreateRequest(BaseModel):
 
     mode: Literal["authenticated"]
     action: SupportedJobAction
-    targets: list[str] = Field(min_length=1, max_length=100)
+    targets: list[TargetUrl] = Field(min_length=1, max_length=100)
     options: dict[str, JsonValue] = Field(default_factory=dict)
 
 
@@ -97,6 +112,20 @@ class JobTargetResponse(BaseModel):
     error_message: str
 
 
+class EventCountersResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requested_targets: int | None = Field(default=None, ge=0)
+    completed_targets: int | None = Field(default=None, ge=0)
+    failed_targets: int | None = Field(default=None, ge=0)
+    discovered_users: int | None = Field(default=None, ge=0)
+    persisted_users: int | None = Field(default=None, ge=0)
+    provider_retries_required: int | None = Field(default=None, ge=0)
+    steps_completed: int | None = Field(default=None, ge=0)
+    items_discovered: int | None = Field(default=None, ge=0)
+    users_persisted: int | None = Field(default=None, ge=0)
+
+
 class JobEventResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -107,7 +136,7 @@ class JobEventResponse(BaseModel):
     created_at: datetime
     target_id: UUID | None
     safe_message: str
-    counters: dict[str, int]
+    counters: EventCountersResponse
 
 
 class JobPageResponse(BaseModel):
@@ -158,6 +187,74 @@ class AccountResponse(BaseModel):
     acknowledged_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    id: int = Field(gt=0)
+    facebook_uid: str | None
+    username: str | None
+    name: str | None
+    profile_url: str | None
+    phone_1: str | None
+    phone_2: str | None
+    address: str | None
+    birth_date: str | None
+    gender: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PhoneEvidenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    id: int = Field(gt=0)
+    normalized_phone: str
+    display_phone: str
+    origin: Literal["fbnumber", "fb_crawl"]
+    source: str
+    source_url: str
+    provider: str
+    confidence: str
+    first_captured_at: datetime
+    last_captured_at: datetime
+    evidence_count: int = Field(gt=0)
+    created_at: datetime
+    updated_at: datetime
+
+
+class EnrichmentAttemptResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    id: int = Field(gt=0)
+    provider: str
+    status: Literal["found", "not_found", "rate_limited", "failed"]
+    checked_at: datetime
+    error_code: str | None
+    values_found: int = Field(ge=0)
+    created_at: datetime
+
+
+class UserPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[UserResponse]
+    next_cursor: str | None
+
+
+class PhoneEvidencePageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[PhoneEvidenceResponse]
+    next_cursor: str | None
+
+
+class EnrichmentAttemptPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[EnrichmentAttemptResponse]
+    next_cursor: str | None
 
 
 class ApiErrorResponse(BaseModel):

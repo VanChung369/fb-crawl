@@ -228,6 +228,7 @@ class ProfileDetails:
     field_status: tuple[tuple[str, str], ...] = ()
     field_sources: tuple[tuple[str, str], ...] = ()
     canonical_profile_url: str | None = None
+    budget_exhausted: bool = False
 
 
 @dataclass(frozen=True, slots=True)

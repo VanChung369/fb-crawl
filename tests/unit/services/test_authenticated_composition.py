@@ -146,6 +146,8 @@ def test_component_builder_wires_one_control_and_pacer_everywhere() -> None:
     assert authenticated._control is control
     assert authenticated._session._control is control
     assert authenticated._session._navigation_pacer is pacer
+    assert authenticated._session._store._control is control
+    assert authenticated._session._store._navigation_pacer is pacer
     assert authenticated._members._control is control
     assert authenticated._members._navigation_pacer is pacer
     assert authenticated._comments._control is control

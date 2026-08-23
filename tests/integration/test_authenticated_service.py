@@ -20,6 +20,7 @@ from fb_crawl.services.authenticated import (
     AuthenticatedService,
 )
 from fb_crawl.services.execution_control import CrawlCancelled
+from fb_crawl.adapters.browser.crawl_budget import CrawlCollection
 
 
 class Session:
@@ -145,6 +146,28 @@ def test_members_service_normalizes_targets_and_counts_users() -> None:
 
     assert session.ensure_calls == 1
     assert members.calls == [target]
+
+
+def test_collection_budget_exhaustion_becomes_a_stable_retryable_partial_issue() -> None:
+    """Break caught: collector budget exhaustion disappears before checkpointing."""
+    target = "https://www.facebook.com/groups/1/members"
+
+    class ExhaustedCollector(Collector):
+        def collect(self, *args, **kwargs):
+            html, attempts = super().collect(*args, **kwargs)
+            return CrawlCollection(html, attempts, budget_exhausted=True)
+
+    result = AuthenticatedService(
+        Session(),
+        ExhaustedCollector({target: "100:Member"}),
+        Collector({}),
+        Parser(),
+    ).run(request(AuthenticatedAction.MEMBERS, target), object())
+
+    assert [record.user_id for record in result.records] == ["100"]
+    assert [(issue.code, issue.retryable) for issue in result.issues] == [
+        ("authenticated_budget_exhausted", True)
+    ]
 
 
 def test_explicit_invalid_target_fails_before_session() -> None:
@@ -593,6 +616,50 @@ def test_relationship_depth_respects_global_max_users() -> None:
 
     assert len(result.records) == 2
     assert [item.depth for item in result.records] == [1, 1]
+    assert [item.code for item in result.issues] == [
+        "authenticated_budget_exhausted"
+    ]
+    assert result.issues[0].retryable is True
+
+
+def test_relationship_exact_max_users_is_complete_when_queue_is_exhausted() -> None:
+    seed = "https://www.facebook.com/root.user/followers"
+
+    class FinalPageParser:
+        def parse(self, html, *, source, source_url):
+            return tuple(
+                UserRecord(
+                    user_id=handle,
+                    username=handle,
+                    name=None,
+                    profile_url=f"https://www.facebook.com/{handle}",
+                    source=source,
+                    source_url=source_url,
+                )
+                for handle in ("friend.one", "friend.two")
+            )
+
+    service = AuthenticatedService(
+        Session(),
+        Collector({}),
+        Collector({}),
+        Parser(),
+        relationships=Collector({seed: "ignored"}),
+        relationship_parser=FinalPageParser(),
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.FOLLOWERS,
+            "https://www.facebook.com/root.user",
+            depth=3,
+            max_nodes=2,
+        ),
+        object(),
+    )
+
+    assert len(result.records) == 2
+    assert result.issues == ()
 
 
 def test_enrichment_runs_once_after_global_dedup_and_merges_details() -> None:
@@ -696,6 +763,40 @@ def test_service_forwards_phone_post_budget_only_when_enabled() -> None:
             "phone_post_delay_seconds": 0,
         }
     ]
+
+
+def test_phone_post_exhaustion_becomes_retryable_authenticated_budget_issue() -> None:
+    target = "https://www.facebook.com/groups/1/members"
+    profiles = BudgetProfileEnricher(
+        {"100": ProfileDetails(budget_exhausted=True)}
+    )
+    service = AuthenticatedService(
+        Session(),
+        Collector({target: "100:Synthetic User"}),
+        Collector({}),
+        Parser(),
+        profiles,
+    )
+
+    result = service.run(
+        request(
+            AuthenticatedAction.MEMBERS,
+            target,
+            enrich_profiles=True,
+            phone_post_steps=1,
+            profile_delay_seconds=0,
+        ),
+        object(),
+    )
+
+    issue = next(
+        item
+        for item in result.issues
+        if item.code == "authenticated_budget_exhausted"
+    )
+    assert issue.target == target
+    assert issue.action == "profile_enrichment"
+    assert issue.retryable is True
 
 
 def test_enrichment_limit_delay_and_empty_success_are_bounded() -> None:

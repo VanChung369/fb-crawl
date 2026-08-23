@@ -7,7 +7,14 @@ import os
 
 from pathlib import Path
 from fb_crawl.core.exceptions import SessionError
-from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
+from fb_crawl.services.execution_control import (
+    ExecutionControl,
+    NavigationPacer,
+    NOOP_EXECUTION_CONTROL,
+    NOOP_NAVIGATION_PACER,
+    guard_cancellation,
+    guard_execution,
+)
 
 from collections.abc import Mapping
 from urllib.parse import urlparse
@@ -132,23 +139,29 @@ class SessionStore:
         if not cookies:
             return False
 
+        guard_cancellation(self._control)
+        self._navigation_pacer.wait()
+
         try:
-            guard_cancellation(self._control)
-            self._navigation_pacer.wait()
             browser.get(FACEBOOK_HOME)
 
             for cookie in cookies:
                 browser.add_cookie(cookie)
+        except Exception:
+            return False
 
-            guard_execution(self._control, browser)
-            guard_cancellation(self._control)
-            self._navigation_pacer.wait()
+        guard_cancellation(self._control)
+        self._navigation_pacer.wait()
+
+        try:
             browser.refresh()
-            guard_execution(self._control, browser)
-            return is_authenticated(browser)
+        except Exception:
+            return False
 
-        except (CrawlCancelled, JobBudgetReached, AccountSafetyStop):
-            raise
+        guard_execution(self._control, browser)
+
+        try:
+            return is_authenticated(browser)
         except Exception:
             # Session restoration failed, so we treat the session as invalid. The browser may have
             # regarded as invalid session.

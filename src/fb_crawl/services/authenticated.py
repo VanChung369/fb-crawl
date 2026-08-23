@@ -48,7 +48,10 @@ from fb_crawl.core.urls import (
     normalize_reactions_url,
     profile_identity_url,
 )
-from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NOOP_EXECUTION_CONTROL, guard_cancellation, guard_execution
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NOOP_EXECUTION_CONTROL, cooperative_wait, guard_cancellation, guard_execution
+
+
+AUTHENTICATED_BUDGET_EXHAUSTED = "authenticated_budget_exhausted"
 
 
 class SessionPort(Protocol):
@@ -122,6 +125,22 @@ PreparedTarget = tuple[
     AuthenticatedAction,
     str,
 ]
+
+
+def _collection_payload(value: object) -> tuple[str, int, bool]:
+    html, attempts = value  # type: ignore[misc]
+    return str(html), int(attempts), bool(getattr(value, "budget_exhausted", False))
+
+
+def _budget_exhausted_issue(target: str, action: str) -> ScrapeIssue:
+    return ScrapeIssue(
+        code=AUTHENTICATED_BUDGET_EXHAUSTED,
+        message="Authenticated crawl budget was exhausted.",
+        target=target,
+        mode=ScrapeMode.AUTHENTICATED,
+        action=action,
+        retryable=True,
+    )
 
 
 def _safe_target(value: str) -> str:
@@ -513,6 +532,7 @@ class AuthenticatedService:
         message_parser: MessageParserPort | None = None,
         inspector: InspectorPort | None = None,
         sleep_func: Callable[[float], None] = time.sleep,
+        monotonic_func: Callable[[], float] = time.monotonic,
         control: ExecutionControl = NOOP_EXECUTION_CONTROL,
     ) -> None:
         self._session = session
@@ -529,6 +549,7 @@ class AuthenticatedService:
         self._message_parser = message_parser
         self._inspector = inspector
         self._sleep = sleep_func
+        self._monotonic = monotonic_func
         self._control = control
 
     def _resolve_uid_record(
@@ -618,13 +639,14 @@ class AuthenticatedService:
             self._session.assert_authenticated(browser)
 
             try:
-                html, _ = self._relationships.collect(
+                collection = self._relationships.collect(
                     browser,
                     url,
                     steps=request.steps,
                     delay_seconds=request.delay_seconds,
                     max_duration_seconds=request.max_duration_seconds,
                 )
+                html, _, budget_exhausted = _collection_payload(collection)
 
                 try:
                     parsed = self._relationship_parser.parse(
@@ -641,6 +663,9 @@ class AuthenticatedService:
                         "Authenticated user parsing failed.",
                         target=url,
                     ) from error
+
+                if budget_exhausted:
+                    issues.append(_budget_exhausted_issue(url, action.value))
 
             except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                 raise
@@ -703,7 +728,12 @@ class AuthenticatedService:
                         else:
                             uid_resolved += 1
                             if request.profile_delay_seconds:
-                                self._sleep(request.profile_delay_seconds)
+                                cooperative_wait(
+                                    request.profile_delay_seconds,
+                                    control=self._control,
+                                    sleep=self._sleep,
+                                    monotonic=self._monotonic,
+                                )
 
                 existing = records.get(record.user_id)
                 records[record.user_id] = (
@@ -722,6 +752,14 @@ class AuthenticatedService:
 
                 if next_url is not None and next_url not in visited:
                     queue.append((action, next_url, child_depth))
+
+        pending_relationship_work = any(
+            url not in visited and parent_depth < max_depth
+            for _, url, parent_depth in queue
+        )
+        if len(records) >= request.max_nodes and pending_relationship_work:
+            action, target = prepared[0]
+            issues.append(_budget_exhausted_issue(target, action.value))
 
         stats = (
             UidResolutionStats(
@@ -888,13 +926,14 @@ class AuthenticatedService:
                     )
 
                 try:
-                    html, _ = collector.collect(
+                    collection = collector.collect(
                         browser,
                         url,
                         steps=request.steps,
                         delay_seconds=(request.delay_seconds),
                         max_duration_seconds=request.max_duration_seconds,
                     )
+                    html, _, budget_exhausted = _collection_payload(collection)
 
                     try:
                         parsed = parser.parse(
@@ -953,6 +992,14 @@ class AuthenticatedService:
                             if existing is None
                             else _merge_record(existing, record)
                         )
+
+                    if budget_exhausted:
+                        issue_action = (
+                            f"engagement_{collection_action.value}"
+                            if action is AuthenticatedAction.ENGAGEMENT
+                            else action.value
+                        )
+                        issues.append(_budget_exhausted_issue(url, issue_action))
 
                 except (SessionError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                     raise
@@ -1043,7 +1090,12 @@ class AuthenticatedService:
                     and request.profile_delay_seconds
                     and not cached
                 ):
-                    self._sleep(request.profile_delay_seconds)
+                    cooperative_wait(
+                        request.profile_delay_seconds,
+                        control=self._control,
+                        sleep=self._sleep,
+                        monotonic=self._monotonic,
+                    )
 
             records_by_id = resolved_records
             uid_resolution = UidResolutionStats(
@@ -1162,9 +1214,21 @@ class AuthenticatedService:
                     current_city_found += bool(details.current_city)
                     hometown_found += bool(details.hometown)
                     birth_year_found += details.birth_year is not None
+                    if details.budget_exhausted:
+                        issues.append(
+                            _budget_exhausted_issue(
+                                record.source_url or record.profile_url,
+                                "profile_enrichment",
+                            )
+                        )
 
                 if index + 1 < len(selected_ids) and request.profile_delay_seconds:
-                    self._sleep(request.profile_delay_seconds)
+                    cooperative_wait(
+                        request.profile_delay_seconds,
+                        control=self._control,
+                        sleep=self._sleep,
+                        monotonic=self._monotonic,
+                    )
 
             enrichment = EnrichmentStats(
                 selected=len(selected_ids),

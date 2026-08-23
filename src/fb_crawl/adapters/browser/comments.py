@@ -11,7 +11,7 @@ from selenium.webdriver.support.ui import (
     WebDriverWait,
 )
 
-from fb_crawl.adapters.browser.crawl_budget import CrawlBudget
+from fb_crawl.adapters.browser.crawl_budget import CrawlBudget, CrawlCollection
 from fb_crawl.adapters.browser.driver import (
     wait_for_document_ready,
 )
@@ -24,7 +24,7 @@ from fb_crawl.core.exceptions import (
     RateLimitError,
     SessionError,
 )
-from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, cooperative_wait, guard_cancellation, guard_execution
 
 MORE_COMMENTS_TEXTS = (
     "Xem thêm bình luận",
@@ -98,8 +98,13 @@ class CommentsCollector:
         steps: int | None,
         delay_seconds: float,
         max_duration_seconds: float | None = None,
-    ) -> tuple[str, int]:
+    ) -> CrawlCollection:
         try:
+            budget = CrawlBudget(
+                steps=steps,
+                max_duration_seconds=max_duration_seconds,
+                monotonic_func=self._monotonic,
+            )
             guard_cancellation(self._control)
             self._navigation_pacer.wait()
             browser.get(url)
@@ -116,11 +121,8 @@ class CommentsCollector:
                 )
 
             attempts = 0
-            budget = CrawlBudget(
-                steps=steps,
-                max_duration_seconds=max_duration_seconds,
-                monotonic_func=self._monotonic,
-            )
+            natural_complete = False
+            wait_exhausted = False
 
             while budget.allows(attempts):
                 guard_execution(self._control, browser)
@@ -141,21 +143,36 @@ class CommentsCollector:
                     ).until(_first_clickable)
 
                 except TimeoutException:
+                    wait_exhausted = budget.exhausted(attempts)
+                    natural_complete = not wait_exhausted
                     break
 
                 if not candidate:
+                    natural_complete = True
                     break
 
                 guard_execution(self._control, browser)
                 candidate.click()
 
                 if delay_seconds:
-                    self._sleep(delay_seconds)
+                    if not cooperative_wait(
+                        delay_seconds,
+                        control=self._control,
+                        sleep=self._sleep,
+                        monotonic=self._monotonic,
+                        deadline_monotonic=budget.deadline_monotonic,
+                    ):
+                        wait_exhausted = True
+                        break
 
             guard_execution(self._control, browser)
-            return (
+            return CrawlCollection(
                 str(browser.page_source),
                 attempts,
+                budget_exhausted=(
+                    wait_exhausted
+                    or (not natural_complete and budget.exhausted(attempts))
+                ),
             )
 
         except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):

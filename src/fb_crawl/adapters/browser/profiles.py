@@ -34,7 +34,7 @@ from fb_crawl.core.urls import (
     normalize_facebook_url,
     profile_enrichment_urls,
 )
-from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, guard_cancellation, guard_execution
+from fb_crawl.services.execution_control import AccountSafetyStop, CrawlCancelled, JobBudgetReached, ExecutionControl, NavigationPacer, NOOP_EXECUTION_CONTROL, NOOP_NAVIGATION_PACER, cooperative_wait, guard_cancellation, guard_execution
 
 
 def _ordered_union(first: tuple[str, ...], later: tuple[str, ...]) -> tuple[str, ...]:
@@ -233,6 +233,7 @@ class ProfileEnricher:
         critical_parse_failure = False
         unavailable_sections: set[str] = set()
         failed_sections: set[str] = set()
+        phone_post_budget_exhausted = False
 
         requested = tuple(fields) if fields else tuple(ProfileField)
         requested_set = frozenset(requested)
@@ -371,6 +372,7 @@ class ProfileEnricher:
                         ),
                         monotonic_func=self._monotonic,
                     )
+                    timeline_complete = False
 
                     while budget.allows(attempts):
                         guard_execution(self._control, browser)
@@ -387,8 +389,15 @@ class ProfileEnricher:
                             0.0, jitter_limit
                         )
 
-                        if delay:
-                            self._sleep(budget.wait_timeout(delay))
+                        if delay and not cooperative_wait(
+                            delay,
+                            control=self._control,
+                            sleep=self._sleep,
+                            monotonic=self._monotonic,
+                            deadline_monotonic=budget.deadline_monotonic,
+                        ):
+                            phone_post_budget_exhausted = True
+                            break
 
                         if not self._authenticated(browser):
                             raise SessionError(
@@ -411,9 +420,13 @@ class ProfileEnricher:
                         )
 
                         if current_height <= previous_height:
+                            timeline_complete = True
                             break
 
                         previous_height = current_height
+
+                    if not timeline_complete and budget.exhausted(attempts):
+                        phone_post_budget_exhausted = True
 
             except (SessionError, RateLimitError, CrawlCancelled, JobBudgetReached, AccountSafetyStop):
                 raise
@@ -468,6 +481,7 @@ class ProfileEnricher:
                 details,
                 field_status=tuple(statuses),
                 field_sources=tuple(sources),
+                budget_exhausted=phone_post_budget_exhausted,
             )
 
         if parse_failures:
@@ -482,4 +496,7 @@ class ProfileEnricher:
                 target=record.profile_url,
             )
 
-        return details
+        return replace(
+            details,
+            budget_exhausted=phone_post_budget_exhausted,
+        )

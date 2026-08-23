@@ -22,7 +22,7 @@ def test_load_api_settings_uses_only_the_injected_mapping(monkeypatch) -> None:
 def test_api_key_must_be_nonblank_and_at_least_32_characters() -> None:
     """Break caught: a weak or whitespace-only shared secret starts the API."""
 
-    for invalid in ("", " " * 32, "short"):
+    for invalid in ("", " " * 32, "short", "x" * 31 + " " * 100):
         with pytest.raises(ConfigurationError, match="at least 32"):
             load_api_settings({"FB_CRAWL_API_KEY": invalid})
 
