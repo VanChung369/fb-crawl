@@ -12,8 +12,37 @@
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[browser,dev]"
 ```
+
+## Web Dashboard & REST API
+
+Launch the web dashboard and REST API with a single command (supports zero-config development preview or production PostgreSQL connection):
+
+### 1. Quick Launch (Standalone / Development Mode)
+
+```powershell
+python -m fb_crawl api serve --dev --port 8000
+```
+Open your browser at: **`http://localhost:8000/`** (or `http://localhost:8000/docs` for interactive Swagger API documentation).
+
+### 2. Production Mode (PostgreSQL & Background Worker)
+
+```powershell
+# Terminal 1: Start API Server & Web Dashboard
+python -m fb_crawl api serve --host 127.0.0.1 --port 8000
+
+# Terminal 2: Start Background Crawl Worker
+python -m fb_crawl worker run --concurrency 2
+```
+
+### Web Dashboard Features:
+- 📊 **Dashboard Overview**: Realtime analytics with 6 metric cards, recent jobs, and latest discovered leads.
+- ⚡ **Jobs Manager**: Create crawl jobs with full advanced controls (max users, scroll depth, deep profile enrichment, post phone scanning), live event streaming logs, cancel, and retry.
+- 👥 **Leads Explorer**: Search and filter by Name, UID, Phone; inspect phone provenance and confidence evidence; download CSV/JSON exports.
+- 🛡️ **Session Pool Manager**: Automated browser login and cookie extraction via Account/Password/2FA/Proxy, or manual JSON cookie import.
+- 🌐 **Proxy Pool Manager**: Automated proxy rotation, health monitoring (Active/Cooldown/Dead), and bulk proxy imports.
+
 
 ## Public commands
 
