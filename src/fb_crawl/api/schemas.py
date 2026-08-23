@@ -262,3 +262,70 @@ class ApiErrorResponse(BaseModel):
 
     code: str
     message: str
+
+
+class ProxyItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    raw_url: str
+    scheme: str
+    host: str
+    port: int
+    status: str
+    success_count: int
+    failure_count: int
+    is_available: bool
+
+
+class ProxyListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_count: int
+    active_count: int
+    items: list[ProxyItemResponse]
+
+
+class ProxyAddRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proxies: list[str] = Field(min_length=1, max_length=500)
+
+
+class SessionItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    proxy: str | None
+    status: str
+    success_count: int
+    failure_count: int
+    is_available: bool
+
+
+class SessionListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_count: int
+    available_count: int
+    items: list[SessionItemResponse]
+
+
+class SessionImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    cookies: list[dict[str, JsonValue]] = Field(min_length=1)
+    proxy: str | None = None
+
+
+class StatsOverviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_users: int
+    users_with_phone: int
+    total_jobs: int
+    active_proxies: int
+    total_proxies: int
+    available_sessions: int
+    total_sessions: int
+

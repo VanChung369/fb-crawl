@@ -20,9 +20,16 @@ from fb_crawl.api.routes.health import ReadinessCheck, create_health_router
 from fb_crawl.api.routes.account import create_account_router
 from fb_crawl.api.routes.jobs import create_jobs_router
 from fb_crawl.api.routes.users import UserNotFound, create_users_router
+from fb_crawl.api.routes.proxies import create_proxies_router
+from fb_crawl.api.routes.sessions import create_sessions_router
+from fb_crawl.api.routes.stats import create_stats_router
+from fb_crawl.api.routes.export import create_export_router
+from fb_crawl.core.session_pool import SessionPool
+from fb_crawl.core.proxy_pool import ProxyPool
 from fb_crawl.core.exceptions import FbCrawlError, ValidationError
 from fb_crawl.api.safe_logging import log_unexpected_api_error
 from fb_crawl.core.jobs import IdempotencyConflict, JobConflict, JobNotFound
+from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -34,10 +41,18 @@ def create_app(
     job_repository: Any,
     user_repository: Any,
     readiness: ReadinessCheck,
+    *,
+    proxy_pool: ProxyPool | None = None,
+    session_pool: SessionPool | None = None,
+    sessions_dir: Path | None = None,
 ) -> FastAPI:
     """Build an API process from injected services without browser ownership."""
 
     auth = ApiKeyAuth(settings.api_key)
+    resolved_sessions_dir = sessions_dir or Path("runtime/sessions")
+    resolved_proxy_pool = proxy_pool or ProxyPool(file_path=Path("runtime/proxies.txt"))
+    resolved_session_pool = session_pool or SessionPool(sessions_dir=resolved_sessions_dir, proxy_pool=resolved_proxy_pool)
+
     app = FastAPI(
         title="fb-crawl API",
         docs_url=None,
@@ -48,12 +63,18 @@ def create_app(
     app.state.job_repository = job_repository
     app.state.user_repository = user_repository
     app.state.api_key_auth = auth
+    app.state.proxy_pool = resolved_proxy_pool
+    app.state.session_pool = resolved_session_pool
 
     _install_exception_handlers(app)
     app.include_router(create_health_router(readiness))
     app.include_router(create_jobs_router(job_service, job_repository, auth))
     app.include_router(create_account_router(job_service, auth))
     app.include_router(create_users_router(user_repository, auth))
+    app.include_router(create_proxies_router(resolved_proxy_pool, auth))
+    app.include_router(create_sessions_router(resolved_session_pool, resolved_sessions_dir, auth))
+    app.include_router(create_stats_router(job_repository, user_repository, resolved_session_pool, resolved_proxy_pool, auth))
+    app.include_router(create_export_router(user_repository, auth))
     _install_api_authentication(app, auth)
 
     if settings.docs_enabled:
