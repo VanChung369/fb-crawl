@@ -16,6 +16,7 @@ from fb_crawl.cli.data import add_data_parser, execute_data
 from fb_crawl.cli.api import add_api_parser, execute_api
 from fb_crawl.cli.pipeline import add_pipeline_parser, execute_pipeline
 from fb_crawl.cli.worker import add_worker_parser, execute_worker
+from fb_crawl.core.env import load_dotenv
 from fb_crawl.core.exceptions import FbCrawlError
 
 
@@ -45,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(
     argv: Sequence[str] | None = None,
 ) -> int:
+    load_dotenv()
     parser = build_parser()
 
     try:

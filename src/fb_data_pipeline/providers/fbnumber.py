@@ -17,7 +17,23 @@ from fb_data_pipeline.core.models import (
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
 
 
-PHONE_KEYS = frozenset({"phone", "phone_number", "phones", "phone_numbers"})
+PHONE_KEYS = frozenset(
+    {
+        "phone",
+        "phone_number",
+        "phones",
+        "phone_numbers",
+        "number",
+        "number1",
+        "number2",
+        "number3",
+        "mobile",
+        "tel",
+        "telephone",
+        "sdt",
+        "phonenumber",
+    }
+)
 
 
 def _correlation_id(payload: Any, response: httpx.Response) -> str:
@@ -38,19 +54,27 @@ def _phone_candidates(payload: Any) -> tuple[str, ...]:
     def collect(value: Any, *, phone_context: bool = False) -> None:
         if isinstance(value, Mapping):
             for key, child in value.items():
-                collect(child, phone_context=str(key).casefold() in PHONE_KEYS)
+                k = str(key).casefold()
+                is_phone_key = (
+                    k in PHONE_KEYS
+                    or k.startswith("number")
+                    or k.startswith("phone")
+                    or k.startswith("mobile")
+                ) and not k.endswith("provider")
+                collect(child, phone_context=is_phone_key)
             return
         if isinstance(value, list | tuple):
             for child in value:
                 collect(child, phone_context=phone_context)
             return
-        if phone_context and value is not None:
+        if phone_context and value is not None and not isinstance(value, bool):
             candidate = str(value).strip()
             if candidate:
                 found.append(candidate)
 
     collect(payload)
     return tuple(dict.fromkeys(found))
+
 
 
 class FBNumberProvider:

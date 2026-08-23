@@ -286,10 +286,41 @@ def wait_for_profile_content(
 def create_firefox_driver(
     settings: BrowserSettings,
 ):
+    # Try Chrome first on Windows/systems without Firefox
+    try:
+        from selenium.webdriver.chrome.options import Options as ChromeOptions
+        chrome_opts = ChromeOptions()
+        if settings.headless:
+            chrome_opts.add_argument("--headless=new")
+        chrome_opts.add_argument("--window-size=1920,1080")
+        chrome_opts.add_argument("--disable-notifications")
+        chrome_opts.add_argument("--no-sandbox")
+        chrome_opts.add_argument("--disable-gpu")
+        chrome_opts.add_argument("--disable-dev-shm-usage")
+        if settings.proxy:
+            chrome_opts.add_argument(f"--proxy-server={settings.proxy}")
+        return webdriver.Chrome(options=chrome_opts)
+    except Exception:
+        pass
+
+    # Try Firefox
     try:
         return webdriver.Firefox(options=build_firefox_options(settings))
+    except Exception:
+        pass
 
+    # Try Edge
+    try:
+        from selenium.webdriver.edge.options import Options as EdgeOptions
+        edge_opts = EdgeOptions()
+        if settings.headless:
+            edge_opts.add_argument("--headless=new")
+        edge_opts.add_argument("--window-size=1920,1080")
+        edge_opts.add_argument("--disable-notifications")
+        if settings.proxy:
+            edge_opts.add_argument(f"--proxy-server={settings.proxy}")
+        return webdriver.Edge(options=edge_opts)
     except WebDriverException as error:
         raise ConfigurationError(
-            "Could not start Firefox. " "Install Firefox and the browser extra."
+            "Could not start browser (Chrome/Firefox/Edge). Install Chrome or Firefox and the browser extra."
         ) from error

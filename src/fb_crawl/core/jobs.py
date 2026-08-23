@@ -181,6 +181,8 @@ _COMMON_OPTION_NAMES = frozenset(
         "max_duration_seconds",
         "navigation_delay_seconds",
         "max_retries",
+        "call_fbnumber",
+        "enrich_phone",
         "enrich_profiles",
         "profile_fields",
         "profile_limit",
@@ -188,6 +190,7 @@ _COMMON_OPTION_NAMES = frozenset(
         "phone_post_duration_seconds",
     }
 )
+
 
 _RELATIONSHIP_OPTION_NAMES = frozenset({"depth", "max_users"})
 
@@ -233,11 +236,13 @@ class SafeJobOptions:
     max_retries: int = 1
     depth: int = 1
     max_users: int = 1000
+    call_fbnumber: bool = True
     enrich_profiles: bool = False
     profile_fields: tuple[ProfileField, ...] = ()
     profile_limit: int = 20
     phone_post_steps: int = 0
     phone_post_duration_seconds: float | None = None
+
 
     def __post_init__(self) -> None:
         _integer(self.steps, option="steps", minimum=1, maximum=20)
@@ -332,6 +337,7 @@ class SafeJobOptions:
             max_users=_integer(
                 values.get("max_users", 1000), option="max_users", minimum=1, maximum=1000
             ),
+            call_fbnumber=bool(values.get("call_fbnumber", values.get("enrich_phone", True))),
             enrich_profiles=values.get("enrich_profiles", False),
             profile_fields=fields,
             profile_limit=_integer(
@@ -357,6 +363,7 @@ class SafeJobOptions:
 
     def to_canonical_dict(self) -> dict[str, object]:
         return {
+            "call_fbnumber": self.call_fbnumber,
             "depth": self.depth,
             "enrich_profiles": self.enrich_profiles,
             "max_duration_seconds": float(self.max_duration_seconds),
@@ -369,7 +376,7 @@ class SafeJobOptions:
                 else float(self.phone_post_duration_seconds)
             ),
             "phone_post_steps": self.phone_post_steps,
-            "profile_fields": [field.value for field in self.profile_fields],
+            "profile_fields": [field.value if hasattr(field, "value") else str(field) for field in self.profile_fields],
             "profile_limit": self.profile_limit,
             "steps": self.steps,
         }

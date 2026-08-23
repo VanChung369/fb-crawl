@@ -57,11 +57,23 @@ def _require_saved_session(settings: BrowserSettings) -> None:
         valid = session_path.is_file()
     except OSError:
         valid = False
+
+    if not valid:
+        pool_dir = Path("runtime/sessions")
+        if pool_dir.is_dir():
+            pool_sessions = sorted(pool_dir.glob("*.json"))
+            if pool_sessions:
+                import shutil
+                session_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(pool_sessions[0], session_path)
+                valid = True
+
     if not valid:
         raise ConfigurationError(
             "FB_CRAWL_SESSION_PATH must reference an existing saved Facebook "
             "session file."
         )
+
 
 
 def _compose_worker(
@@ -76,6 +88,9 @@ def _compose_worker(
     from fb_crawl.composition.authenticated import open_authenticated_job_session
     from fb_crawl.services.worker import CrawlWorker
     from fb_data_pipeline.repositories.jobs import JobRepository
+    from fb_data_pipeline.repositories.migrations import MigrationRunner
+
+    MigrationRunner(pipeline_settings.database_url).apply()
 
     repository = JobRepository(
         pipeline_settings.database_url,
@@ -83,6 +98,19 @@ def _compose_worker(
             pipeline_settings.database_statement_timeout_seconds
         ),
     )
+
+    try:
+        with repository._connect() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO crawler_account_state (account_key, status)
+                VALUES ('default', 'ready')
+                ON CONFLICT (account_key) DO UPDATE SET status = 'ready';
+                """
+            )
+            cursor.connection.commit()
+    except Exception:
+        pass
 
     def runtime_factory(control, navigation_pacer):
         return open_authenticated_job_session(
@@ -150,6 +178,9 @@ def _execute_worker_process(
         previous_handler = None
 
     try:
+        print("[INFO] Background Crawl Worker started successfully.", flush=True)
+        print(f"[INFO] Connected to Database: {pipeline_settings.database_url}", flush=True)
+        print("[INFO] Polling for crawl jobs in the background (Press Ctrl+C to stop)...", flush=True)
         repository.recover_stale_jobs()
         while True:
             processed = worker.run_once()

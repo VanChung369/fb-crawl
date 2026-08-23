@@ -24,6 +24,7 @@ from fb_crawl.api.routes.proxies import create_proxies_router
 from fb_crawl.api.routes.sessions import create_sessions_router
 from fb_crawl.api.routes.stats import create_stats_router
 from fb_crawl.api.routes.export import create_export_router
+from fb_crawl.api.routes.settings import create_settings_router
 from fb_crawl.core.session_pool import SessionPool
 from fb_crawl.core.proxy_pool import ProxyPool
 from fb_crawl.core.exceptions import FbCrawlError, ValidationError
@@ -75,6 +76,8 @@ def create_app(
     app.include_router(create_sessions_router(resolved_session_pool, resolved_sessions_dir, auth))
     app.include_router(create_stats_router(job_repository, user_repository, resolved_session_pool, resolved_proxy_pool, auth))
     app.include_router(create_export_router(user_repository, auth))
+    app.include_router(create_settings_router(auth=auth))
+
     _install_api_authentication(app, auth)
 
     if settings.docs_enabled:

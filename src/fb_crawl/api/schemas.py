@@ -37,13 +37,37 @@ EVENT_COUNTER_NAMES = frozenset(
 )
 
 
+ACTION_ALIASES = {
+    "group_members": "members",
+    "post_comments": "comments",
+    "post_reactions": "reactions",
+    "profile_about": "profile",
+    "relationships_friends": "friends",
+    "relationships_followers": "followers",
+}
+
+
 class JobCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["authenticated"]
+    mode: Literal["authenticated"] = "authenticated"
     action: SupportedJobAction
     targets: list[TargetUrl] = Field(min_length=1, max_length=100)
     options: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_request(cls, data: object) -> object:
+        if isinstance(data, dict):
+            payload = dict(data)
+            if "mode" not in payload:
+                payload["mode"] = "authenticated"
+            raw_action = payload.get("action")
+            if isinstance(raw_action, str) and raw_action in ACTION_ALIASES:
+                payload["action"] = ACTION_ALIASES[raw_action]
+            return payload
+        return data
+
 
 
 class JobOptionsResponse(BaseModel):
@@ -55,11 +79,13 @@ class JobOptionsResponse(BaseModel):
     max_retries: int
     depth: int
     max_users: int
+    call_fbnumber: bool = True
     enrich_profiles: bool
     profile_fields: list[str]
     profile_limit: int
     phone_post_steps: int
     phone_post_duration_seconds: float | None
+
 
 
 class JobResponse(BaseModel):
@@ -313,9 +339,10 @@ class SessionListResponse(BaseModel):
 class SessionImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1, max_length=128)
-    cookies: list[dict[str, JsonValue]] = Field(min_length=1)
+    name: str | None = None
+    cookies: list[dict[str, JsonValue]] | str
     proxy: str | None = None
+
 
 
 class SessionExtractRequest(BaseModel):

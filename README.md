@@ -33,7 +33,7 @@ Open your browser at: **`http://localhost:8000/`** (or `http://localhost:8000/do
 python -m fb_crawl api serve --host 127.0.0.1 --port 8000
 
 # Terminal 2: Start Background Crawl Worker
-python -m fb_crawl worker run --concurrency 2
+python -m fb_crawl worker run
 ```
 
 ### Web Dashboard Features:

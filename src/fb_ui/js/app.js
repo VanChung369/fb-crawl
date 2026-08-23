@@ -129,6 +129,23 @@ class DashboardApp {
     if (this.formExtractSession) this.formExtractSession.addEventListener('submit', (e) => this.handleExtractSession(e));
     if (this.formAddProxies) this.formAddProxies.addEventListener('submit', (e) => this.handleAddProxies(e));
 
+    // FBNumber Settings Form & Token Test
+    const formSettings = document.getElementById('form-update-settings');
+    if (formSettings) formSettings.addEventListener('submit', (e) => this.handleSaveFBNumberSettings(e));
+
+    const btnToggleToken = document.getElementById('btn-toggle-token-visibility');
+    if (btnToggleToken) {
+      btnToggleToken.addEventListener('click', () => {
+        const input = document.getElementById('cfg-fbnumber-token');
+        if (input) {
+          input.type = input.type === 'password' ? 'text' : 'password';
+        }
+      });
+    }
+
+    const btnTestToken = document.getElementById('btn-test-fbnumber-token');
+    if (btnTestToken) btnTestToken.addEventListener('click', () => this.handleTestFBNumberToken());
+
     // Toggle sub-options for Profile Enrichment
     const enrichCheckbox = document.getElementById('job-opt-enrich-profiles');
     const subOptionsEnrich = document.getElementById('sub-options-enrich');
@@ -176,7 +193,8 @@ class DashboardApp {
       jobs: 'Quản Lý & Giám Sát Tiến Trình Crawl',
       leads: 'Khám Phá Khách Hàng & Số Điện Thoại',
       sessions: 'Quản Lý Quần Thể Nick Facebook',
-      proxies: 'Quản Lý Quần Thể Proxy'
+      proxies: 'Quản Lý Quần Thể Proxy',
+      settings: 'Cấu Hình API Tra Cứu Số Điện Thoại (FBNumber)'
     };
     if (this.viewHeaderTitle) {
       this.viewHeaderTitle.textContent = titles[viewName] || 'Dashboard';
@@ -241,6 +259,7 @@ class DashboardApp {
     else if (this.currentView === 'leads') this.loadLeadsData();
     else if (this.currentView === 'sessions') this.loadSessionsData();
     else if (this.currentView === 'proxies') this.loadProxiesData();
+    else if (this.currentView === 'settings') this.loadSettingsData();
   }
 
   // ==========================================
@@ -356,14 +375,20 @@ class DashboardApp {
 
     const checkedFields = Array.from(document.querySelectorAll('input[name="profile_fields"]:checked')).map(cb => cb.value);
 
+    const callFbnumber = document.getElementById('job-opt-call-fbnumber') ? !!document.getElementById('job-opt-call-fbnumber').checked : true;
+
     const options = {
-      max_users: Math.min(Math.max(maxUsers, 1), 1000),
       steps: Math.min(Math.max(steps, 1), 20),
       max_duration_seconds: Math.min(Math.max(maxDuration, 1), 1800),
       navigation_delay_seconds: Math.min(Math.max(navDelay, 8), 1800),
-      depth: depth,
+      call_fbnumber: callFbnumber,
       enrich_profiles: enrichProfiles
     };
+
+    if (action.includes('friends') || action.includes('followers') || action.includes('relationships')) {
+      options.depth = depth;
+      options.max_users = Math.min(Math.max(maxUsers, 1), 1000);
+    }
 
     if (enrichProfiles) {
       options.profile_limit = Math.min(Math.max(profileLimit, 1), 50);
@@ -378,6 +403,7 @@ class DashboardApp {
 
     const idempotencyKey = 'job_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const body = {
+      mode: 'authenticated',
       action: action,
       targets: targets,
       options: options
@@ -563,33 +589,50 @@ class DashboardApp {
 
   async handleImportSession(e) {
     e.preventDefault();
-    const name = document.getElementById('session-name').value.trim();
+    const name = document.getElementById('session-name').value.trim() || null;
     const proxy = document.getElementById('session-proxy').value.trim() || null;
-    const rawCookies = document.getElementById('session-cookies').value.trim();
+    const rawInput = document.getElementById('session-cookies').value.trim();
 
-    let cookiesJson;
-    try {
-      cookiesJson = JSON.parse(rawCookies);
-      if (!Array.isArray(cookiesJson)) throw new Error('Cookies JSON phải là một mảng []');
-    } catch (err) {
-      alert('Định dạng JSON Cookie không hợp lệ: ' + err.message);
+    if (!rawInput) {
+      alert('Vui lòng nhập Cookie hoặc dòng thông tin nick!');
       return;
     }
 
-    const res = await this.fetchApi('/api/v1/sessions', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: name,
-        cookies: cookiesJson,
-        proxy: proxy
-      })
-    });
+    // Support single JSON array or multi-line lines
+    let itemsToProcess = [rawInput];
+    if (!rawInput.startsWith('[')) {
+      itemsToProcess = rawInput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    }
 
-    if (res) {
+    let successCount = 0;
+    for (const item of itemsToProcess) {
+      let payloadCookies = item;
+      try {
+        if (item.startsWith('[') && item.endsWith(']')) {
+          payloadCookies = JSON.parse(item);
+        }
+      } catch (err) {
+        payloadCookies = item;
+      }
+
+      const res = await this.fetchApi('/api/v1/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: itemsToProcess.length === 1 ? name : null,
+          cookies: payloadCookies,
+          proxy: proxy
+        })
+      });
+      if (res && res.name) successCount++;
+    }
+
+    if (successCount > 0) {
       this.closeModal(this.modalImportSession);
       this.formImportSession.reset();
-      this.showToast(`Đã nạp thành công Session ${res.name}!`);
+      this.showToast(`Đã nạp thành công ${successCount} Session vào Pool!`);
       this.loadSessionsData();
+    } else {
+      alert('Không thể nạp Session. Vui lòng kiểm tra lại định dạng dữ liệu!');
     }
   }
 
@@ -701,6 +744,112 @@ class DashboardApp {
     if (s === 'cancelled') return `<span class="pill warning">Đã hủy</span>`;
     if (s === 'cooldown') return `<span class="pill warning">Cooldown</span>`;
     return `<span class="pill info">${status}</span>`;
+  }
+
+  // ==========================================
+  // VIEW 6: SETTINGS (FBNUMBER API)
+  // ==========================================
+  async loadSettingsData() {
+    const data = await this.fetchApi('/api/v1/settings/fbnumber');
+    if (!data) return;
+
+    const urlInput = document.getElementById('cfg-fbnumber-url');
+    const tokenInput = document.getElementById('cfg-fbnumber-token');
+    const timeoutInput = document.getElementById('cfg-fbnumber-timeout');
+    const retriesInput = document.getElementById('cfg-fbnumber-retries');
+    const countryInput = document.getElementById('cfg-country-code');
+
+    if (urlInput) urlInput.value = data.api_url || '';
+    if (tokenInput) tokenInput.value = data.api_token || '';
+    if (timeoutInput) timeoutInput.value = data.timeout_seconds || 15;
+    if (retriesInput) retriesInput.value = data.max_retries || 2;
+    if (countryInput) countryInput.value = data.default_country_code || '84';
+  }
+
+  async handleSaveFBNumberSettings(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-save-settings');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang lưu...';
+    }
+
+    const payload = {
+      api_url: document.getElementById('cfg-fbnumber-url').value.trim(),
+      api_token: document.getElementById('cfg-fbnumber-token').value.trim(),
+      timeout_seconds: parseFloat(document.getElementById('cfg-fbnumber-timeout').value) || 15.0,
+      max_retries: parseInt(document.getElementById('cfg-fbnumber-retries').value, 10) || 2,
+      default_country_code: document.getElementById('cfg-country-code').value.trim() || '84'
+    };
+
+    const res = await this.fetchApi('/api/v1/settings/fbnumber', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '💾 Lưu Cấu Hình Vào Hệ Thống (.env)';
+    }
+
+    if (res) {
+      this.showToast('Đã lưu cấu hình FBNumber vào .env thành công!');
+    } else {
+      alert('Không thể lưu cấu hình. Vui lòng kiểm tra lại!');
+    }
+  }
+
+  async handleTestFBNumberToken() {
+    const btn = document.getElementById('btn-test-fbnumber-token');
+    const resultBox = document.getElementById('test-token-result');
+    const statusText = document.getElementById('test-token-status');
+    const latencyText = document.getElementById('test-token-latency');
+    const rawBox = document.getElementById('test-token-raw');
+
+    const url = document.getElementById('cfg-fbnumber-url').value.trim();
+    const token = document.getElementById('cfg-fbnumber-token').value.trim();
+    const testUid = document.getElementById('cfg-test-uid').value.trim() || '4';
+
+    if (!token) {
+      alert('Vui lòng nhập Token trước khi kiểm tra!');
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang kiểm tra API...';
+    }
+
+    const res = await this.fetchApi('/api/v1/settings/fbnumber/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        api_url: url,
+        api_token: token,
+        test_uid: testUid
+      })
+    });
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔍 Gửi Yêu Cầu Test Token Ngay';
+    }
+
+    if (resultBox && res) {
+      resultBox.style.display = 'block';
+      if (res.success) {
+        resultBox.style.background = 'rgba(16, 185, 129, 0.15)';
+        resultBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        statusText.style.color = 'var(--accent-success)';
+        statusText.innerHTML = `✅ ${res.message}`;
+      } else {
+        resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        statusText.style.color = 'var(--accent-danger)';
+        statusText.innerHTML = `❌ ${res.message}`;
+      }
+      latencyText.textContent = `⏱️ Độ trễ phản hồi: ${res.latency_ms} ms (HTTP ${res.status_code})`;
+      rawBox.textContent = res.raw_response || '(Không có dữ liệu phản hồi)';
+    }
   }
 
   openModal(modal) {

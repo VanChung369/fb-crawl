@@ -52,6 +52,12 @@
             <span>Quản lý Proxy</span>
           </a>
         </li>
+        <li class="nav-item" data-view="settings">
+          <a href="#settings" id="nav-settings">
+            <span class="nav-icon">🔑</span>
+            <span>Cấu hình API SĐT</span>
+          </a>
+        </li>
       </ul>
 
       <div class="sidebar-footer">
@@ -399,6 +405,87 @@
           </div>
         </div>
       </section>
+
+      <!-- VIEW 6: SETTINGS (FBNumber API & Pipeline) -->
+      <section class="content-body view-section" id="view-settings">
+        <div class="section-header">
+          <div>
+            <h3>Cấu hình API Tra cứu Số điện thoại (FBNumber API)</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Thiết lập Endpoint, API Token và các tham số làm giàu dữ liệu SĐT tự động</p>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px;">
+          <!-- Left: Settings Form -->
+          <div class="panel">
+            <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding: 16px 20px;">
+              <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary);">🔑 Thông Tin Cấu Hình FBNumber API</h4>
+            </div>
+            <form id="form-update-settings" style="padding: 20px;">
+              <div class="form-group">
+                <label for="cfg-fbnumber-url">FB_NUMBER_API_URL (Endpoint Tra Cứu)</label>
+                <input type="text" id="cfg-fbnumber-url" class="form-control" placeholder="https://api.fbnumber.com/v1/phone/search" required>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-fbnumber-token">FB_NUMBER_API_TOKEN (Mã Token Xác Thực JWT)</label>
+                <div style="position: relative;">
+                  <input type="password" id="cfg-fbnumber-token" class="form-control" placeholder="Bearer Token..." style="padding-right: 40px; font-family: monospace;" required>
+                  <button type="button" id="btn-toggle-token-visibility" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem;">👁️</button>
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                  <label for="cfg-fbnumber-timeout">Timeout (Giây)</label>
+                  <input type="number" id="cfg-fbnumber-timeout" class="form-control" value="15" min="1" max="120" required>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-fbnumber-retries">Số lần thử lại (Retries)</label>
+                  <input type="number" id="cfg-fbnumber-retries" class="form-control" value="2" min="0" max="10" required>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="cfg-country-code">Mã Quốc Gia Mặc Định (PIPELINE_DEFAULT_COUNTRY_CODE)</label>
+                <input type="text" id="cfg-country-code" class="form-control" value="84" placeholder="84" required>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Chuẩn hóa đầu số viễn thông (+84 / 09x, 08x, 07x, 03x, 05x)</div>
+              </div>
+
+              <div style="margin-top: 20px;">
+                <button type="submit" class="btn btn-primary" id="btn-save-settings" style="width: 100%;">💾 Lưu Cấu Hình Vào Hệ Thống (.env)</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Right: Test API Tool & Live Status -->
+          <div class="panel">
+            <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding: 16px 20px;">
+              <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary);">⚡ Kiểm Tra Kết Nối API Token Trực Tiếp</h4>
+            </div>
+            <div style="padding: 20px;">
+              <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+                Nhập 1 Facebook UID bất kỳ để gửi yêu cầu kiểm tra xem Token có hợp lệ, còn hạn và máy chủ phản hồi bao nhiêu mili-giây (ms).
+              </p>
+
+              <div class="form-group">
+                <label for="cfg-test-uid">Facebook UID Thử Nghiệm</label>
+                <input type="text" id="cfg-test-uid" class="form-control" value="4" placeholder="vd: 4 (Mark Zuckerberg)">
+              </div>
+
+              <button type="button" class="btn btn-secondary" id="btn-test-fbnumber-token" style="width: 100%; margin-bottom: 16px;">
+                🔍 Gửi Yêu Cầu Test Token Ngay
+              </button>
+
+              <div id="test-token-result" style="display: none; padding: 14px; border-radius: 8px; font-size: 0.85rem;">
+                <div id="test-token-status" style="font-weight: 600; margin-bottom: 6px;"></div>
+                <div id="test-token-latency" style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 6px;"></div>
+                <pre id="test-token-raw" style="background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 0.75rem; overflow-x: auto; max-height: 140px; white-space: pre-wrap; margin: 0;"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -417,17 +504,32 @@
         <div class="form-group">
           <label for="job-action">Loại Tác Vụ Thu Thập (Action)</label>
           <select id="job-action" class="form-control" required>
-            <option value="group_members">👥 Thành viên Nhóm Facebook (Group Members)</option>
-            <option value="post_comments">💬 Bình luận Bài viết / Reels (Post Comments)</option>
-            <option value="post_reactions">👍 Cảm xúc Bài viết (Post Reactions)</option>
-            <option value="profile_about">👤 Thông tin Hồ sơ Cá nhân (Profile Bio/About)</option>
-            <option value="relationships_friends">🤝 Bạn bè & Người theo dõi (Friends/Followers)</option>
+            <option value="members">👥 Thành viên Nhóm Facebook (Group Members)</option>
+            <option value="comments">💬 Bình luận Bài viết / Reels (Post Comments)</option>
+            <option value="reactions">👍 Cảm xúc Bài viết (Post Reactions)</option>
+            <option value="profile">👤 Thông tin Hồ sơ Cá nhân (Profile Bio/About)</option>
+            <option value="friends">🤝 Bạn bè & Người theo dõi (Friends/Followers)</option>
           </select>
         </div>
 
         <div class="form-group">
           <label for="job-targets">Danh sách URL Mục tiêu (Mỗi dòng 1 liên kết Facebook)</label>
           <textarea id="job-targets" class="form-control" rows="3" placeholder="https://www.facebook.com/groups/example&#10;https://www.facebook.com/groups/another_group" required></textarea>
+        </div>
+
+        <!-- Tùy chọn Tra Cứu Số Điện Thoại (FBNumber API) -->
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); padding: 14px 16px; margin: 16px 0; border-radius: 8px;">
+          <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin: 0;">
+            <div>
+              <div style="font-weight: 600; color: var(--accent-success); font-size: 0.92rem;">
+                📞 Tự Động Tra Cứu Số Điện Thoại (FBNumber API)
+              </div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+                Tự động gửi UID qua API FBNumber để lấy SĐT Viettel / Vina / Mobi và lưu vào Database
+              </div>
+            </div>
+            <input type="checkbox" id="job-opt-call-fbnumber" checked style="width: 20px; height: 20px; accent-color: var(--accent-success); cursor: pointer;">
+          </label>
         </div>
 
         <!-- 2. Giới hạn & An toàn chống ban -->
@@ -658,31 +760,37 @@
 
   <!-- MODAL: IMPORT SESSION -->
   <div class="modal-backdrop" id="modal-import-session">
-    <div class="modal" style="max-width: 550px;">
+    <div class="modal" style="max-width: 580px;">
       <div class="modal-header">
-        <h3>🛡️ Import Cookie / Session Mới</h3>
+        <h3>🛡️ Import Cookie / Định Dạng Nick Facebook</h3>
         <button class="modal-close" data-close>&times;</button>
       </div>
       <form id="form-import-session">
         <div class="form-group">
-          <label for="session-name">Tên Định Danh Tài Khoản</label>
-          <input type="text" id="session-name" class="form-control" placeholder="vd: acc_clone_01" required>
+          <label for="session-cookies">Nội dung Cookie hoặc Dòng Nick Facebook</label>
+          <textarea id="session-cookies" class="form-control" rows="5" placeholder="Hỗ trợ 3 định dạng:&#10;1. Dạng Pipe: UID|Pass|2FA|Cookie|Token|Email...&#10;2. Dạng Cookie String: c_user=...;xs=...;datr=...;fr=...&#10;3. Dạng JSON mảng: [{&quot;name&quot;: &quot;cookie_name&quot;, &quot;value&quot;: &quot;dummy_cookie_value&quot;}, ...]" required></textarea>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+            Hỗ trợ dán nhiều dòng để nạp hàng loạt nhiều nick cùng lúc!
+          </div>
         </div>
-        <div class="form-group">
-          <label for="session-proxy">Proxy Gán Cố Định (Tùy chọn)</label>
-          <input type="text" id="session-proxy" class="form-control" placeholder="http://127.0.0.1:8080">
-        </div>
-        <div class="form-group">
-          <label for="session-cookies">Nội dung JSON Cookie</label>
-          <textarea id="session-cookies" class="form-control" rows="5" placeholder='[{"name": "cookie_name", "value": "dummy_cookie_value"}, ...]' required></textarea>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label for="session-name">Tên Định Danh (Tùy chọn)</label>
+            <input type="text" id="session-name" class="form-control" placeholder="Tự động lấy theo fb_UID">
+          </div>
+          <div class="form-group">
+            <label for="session-proxy">Proxy Gán Cố Định (Tùy chọn)</label>
+            <input type="text" id="session-proxy" class="form-control" placeholder="http://127.0.0.1:8080">
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" data-close>Hủy</button>
-          <button type="submit" class="btn btn-primary">Lưu Session</button>
+          <button type="submit" class="btn btn-primary">Lưu Session Vào Pool</button>
         </div>
       </form>
     </div>
   </div>
+
 
   <!-- MODAL: ADD PROXIES -->
   <div class="modal-backdrop" id="modal-add-proxies">
