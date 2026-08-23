@@ -54,6 +54,9 @@ class DashboardApp {
     this.modalImportSession = document.getElementById('modal-import-session');
     this.modalExtractSession = document.getElementById('modal-extract-session');
     this.modalAddProxies = document.getElementById('modal-add-proxies');
+    this.modalEditUser = document.getElementById('modal-edit-user');
+    this.modalEditSession = document.getElementById('modal-edit-session');
+    this.modalEditProxy = document.getElementById('modal-edit-proxy');
 
     // Forms
     this.formCreateJob = document.getElementById('form-create-job');
@@ -61,6 +64,9 @@ class DashboardApp {
     this.formImportSession = document.getElementById('form-import-session');
     this.formExtractSession = document.getElementById('form-extract-session');
     this.formAddProxies = document.getElementById('form-add-proxies');
+    this.formEditUser = document.getElementById('form-edit-user');
+    this.formEditSession = document.getElementById('form-edit-session');
+    this.formEditProxy = document.getElementById('form-edit-proxy');
 
     // Settings Input
     this.inputApiKey = document.getElementById('input-api-key');
@@ -166,6 +172,9 @@ class DashboardApp {
     if (this.formImportSession) this.formImportSession.addEventListener('submit', (e) => this.handleImportSession(e));
     if (this.formExtractSession) this.formExtractSession.addEventListener('submit', (e) => this.handleExtractSession(e));
     if (this.formAddProxies) this.formAddProxies.addEventListener('submit', (e) => this.handleAddProxies(e));
+    if (this.formEditUser) this.formEditUser.addEventListener('submit', (e) => this.handleEditUserSubmit(e));
+    if (this.formEditSession) this.formEditSession.addEventListener('submit', (e) => this.handleEditSessionSubmit(e));
+    if (this.formEditProxy) this.formEditProxy.addEventListener('submit', (e) => this.handleEditProxySubmit(e));
 
     // Pagination Listeners: Jobs
     const jobsLimit = document.getElementById('jobs-page-limit');
@@ -527,7 +536,7 @@ class DashboardApp {
             </td>
             <td>${u.phone_1 ? `<span class="pill success">📞 ${u.phone_1}</span>` : `<span class="pill info">Chưa có SĐT</span>`}</td>
             <td>${u.address || 'N/A'}</td>
-            <td>${u.profile_url ? `<a href="${u.profile_url}" target="_blank" class="btn btn-secondary btn-sm">Xem FB ↗</a>` : ''}</td>
+            <td>${u.profile_url ? `<a href="${u.profile_url}" target="_blank" class="btn btn-secondary btn-sm">Xem FB</a>` : ''}</td>
           </tr>
         `).join('');
       }
@@ -571,8 +580,9 @@ class DashboardApp {
           <td>
             <div style="display:flex; gap:6px;">
               <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewJobDetails('${job.id}')">Chi tiết</button>
-              ${isRunning ? `<button class="btn btn-danger btn-sm" onclick="window.dashboardApp.cancelJob('${job.id}')">Hủy</button>` : ''}
+              ${isRunning ? `<button class="btn btn-warning btn-sm" onclick="window.dashboardApp.cancelJob('${job.id}')">Hủy</button>` : ''}
               ${isFailed ? `<button class="btn btn-primary btn-sm" onclick="window.dashboardApp.retryJob('${job.id}')">Thử lại</button>` : ''}
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteJob('${job.id}')">Xóa</button>
             </div>
           </td>
         </tr>
@@ -750,6 +760,15 @@ class DashboardApp {
     }
   }
 
+  async deleteJob(jobId) {
+    if (!confirm(`Bạn có chắc chắn muốn XÓA Job ${jobId.substring(0, 8)}...? (Dữ liệu khách hàng đã cào vẫn được giữ nguyên)`)) return;
+    const res = await this.fetchApi(`/api/v1/jobs/${jobId}`, { method: 'DELETE' });
+    if (res) {
+      this.showToast('Đã xóa Crawl Job thành công!');
+      this.loadJobsData();
+    }
+  }
+
   // ==========================================
   // VIEW 3: LEADS & USERS EXPLORER
   // ==========================================
@@ -788,7 +807,11 @@ class DashboardApp {
           <td>${u.gender || '<span style="color:var(--text-muted);">-</span>'}</td>
           <td>${new Date(u.created_at).toLocaleDateString('vi-VN')}</td>
           <td>
-            <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewPhoneEvidence(${u.id})">🔍 Bằng chứng</button>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewPhoneEvidence(${u.id})">Bằng chứng</button>
+              <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.openEditUserModal(${u.id})">Sửa</button>
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteUser(${u.id})">Xóa</button>
+            </div>
           </td>
         </tr>
       `;
@@ -857,6 +880,73 @@ class DashboardApp {
     }
   }
 
+  async openEditUserModal(userId) {
+    if (!userId) return;
+    const user = await this.fetchApi(`/api/v1/users/${userId}`);
+    if (!user) {
+      this.showToast('Không tìm thấy thông tin khách hàng!');
+      return;
+    }
+
+    const idInput = document.getElementById('edit-user-id');
+    const nameInput = document.getElementById('edit-user-name');
+    const usernameInput = document.getElementById('edit-user-username');
+    const phone1Input = document.getElementById('edit-user-phone1');
+    const phone2Input = document.getElementById('edit-user-phone2');
+    const addressInput = document.getElementById('edit-user-address');
+    const genderSelect = document.getElementById('edit-user-gender');
+    const birthdateInput = document.getElementById('edit-user-birthdate');
+    const titleEl = document.getElementById('modal-edit-user-title');
+
+    if (titleEl) titleEl.textContent = `Sửa Khách Hàng #${user.id} (${user.name || user.facebook_uid || 'Ẩn danh'})`;
+    if (idInput) idInput.value = user.id;
+    if (nameInput) nameInput.value = user.name || '';
+    if (usernameInput) usernameInput.value = user.username || '';
+    if (phone1Input) phone1Input.value = user.phone_1 || '';
+    if (phone2Input) phone2Input.value = user.phone_2 || '';
+    if (addressInput) addressInput.value = user.address || '';
+    if (genderSelect) genderSelect.value = user.gender || '';
+    if (birthdateInput) birthdateInput.value = user.birth_date || '';
+
+    this.openModal(this.modalEditUser);
+  }
+
+  async handleEditUserSubmit(e) {
+    e.preventDefault();
+    const id = document.getElementById('edit-user-id')?.value;
+    if (!id) return;
+
+    const payload = {
+      name: document.getElementById('edit-user-name')?.value.trim() || null,
+      username: document.getElementById('edit-user-username')?.value.trim() || null,
+      phone_1: document.getElementById('edit-user-phone1')?.value.trim() || null,
+      phone_2: document.getElementById('edit-user-phone2')?.value.trim() || null,
+      address: document.getElementById('edit-user-address')?.value.trim() || null,
+      gender: document.getElementById('edit-user-gender')?.value || null,
+      birth_date: document.getElementById('edit-user-birthdate')?.value.trim() || null,
+    };
+
+    const res = await this.fetchApi(`/api/v1/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+
+    if (res) {
+      this.closeModal(this.modalEditUser);
+      this.showToast(`Đã cập nhật thông tin khách hàng #${id} thành công!`);
+      this.loadLeadsData();
+    }
+  }
+
+  async deleteUser(userId) {
+    if (!confirm(`Bạn có chắc chắn muốn XÓA vĩnh viễn khách hàng #${userId} và dữ liệu liên quan?`)) return;
+    const res = await this.fetchApi(`/api/v1/users/${userId}`, { method: 'DELETE' });
+    if (res) {
+      this.showToast(`Đã xóa khách hàng #${userId} thành công!`);
+      this.loadLeadsData();
+    }
+  }
+
   exportLeads(format) {
     const url = `${this.baseUrl}/api/v1/export/users?format=${format}&limit=100`;
     window.open(url, '_blank');
@@ -901,13 +991,74 @@ class DashboardApp {
           <td><span style="color:var(--accent-danger); font-weight:600;">${s.failure_count || 0}</span></td>
           <td>${s.is_available ? '✅ Sẵn sàng' : '⏳ Tạm khóa/Nghỉ'}</td>
           <td>
-            <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.launchSessionBrowser('${s.name}')" title="Mở trình duyệt đăng nhập sẵn nick này">
-              🚀 Vào FB Ngay
-            </button>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.launchSessionBrowser('${s.name}')" title="Mở trình duyệt đăng nhập sẵn nick này">
+                Vào FB
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.openEditSessionModal('${s.name}')">
+                Sửa
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteSession('${s.name}')">
+                Xóa
+              </button>
+            </div>
           </td>
         </tr>
       `;
     }).join('');
+  }
+
+  openEditSessionModal(sessionName) {
+    const session = this.sessionsPagination.allItems.find(s => s.name === sessionName);
+    if (!session) {
+      this.showToast('Không tìm thấy thông tin session!');
+      return;
+    }
+
+    const nameInput = document.getElementById('edit-session-name');
+    const displayInput = document.getElementById('edit-session-display-name');
+    const proxyInput = document.getElementById('edit-session-proxy');
+    const statusSelect = document.getElementById('edit-session-status');
+    const titleEl = document.getElementById('modal-edit-session-title');
+
+    if (titleEl) titleEl.textContent = `Chỉnh Sửa Nick: ${session.name}`;
+    if (nameInput) nameInput.value = session.name;
+    if (displayInput) displayInput.value = session.name;
+    if (proxyInput) proxyInput.value = session.proxy || '';
+    if (statusSelect) statusSelect.value = session.status || 'healthy';
+
+    this.openModal(this.modalEditSession);
+  }
+
+  async handleEditSessionSubmit(e) {
+    e.preventDefault();
+    const sessionName = document.getElementById('edit-session-name')?.value;
+    if (!sessionName) return;
+
+    const proxy = document.getElementById('edit-session-proxy')?.value.trim() || null;
+    const status = document.getElementById('edit-session-status')?.value || null;
+
+    const res = await this.fetchApi(`/api/v1/sessions/${encodeURIComponent(sessionName)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ proxy, status }),
+    });
+
+    if (res) {
+      this.closeModal(this.modalEditSession);
+      this.showToast(`Đã cập nhật cấu hình nick ${sessionName} thành công!`);
+      this.loadSessionsData();
+    }
+  }
+
+  async deleteSession(sessionName) {
+    if (!confirm(`Bạn có chắc chắn muốn XÓA nick '${sessionName}' khỏi Pool và xóa file Cookie?`)) return;
+    const res = await this.fetchApi(`/api/v1/sessions/${encodeURIComponent(sessionName)}`, {
+      method: 'DELETE',
+    });
+    if (res) {
+      this.showToast(`Đã xóa nick '${sessionName}' thành công!`);
+      this.loadSessionsData();
+    }
   }
 
   async launchSessionBrowser(sessionName) {
@@ -1069,9 +1220,71 @@ class DashboardApp {
           <td><span style="color:var(--accent-success); font-weight:600;">${p.success_count || 0}</span></td>
           <td><span style="color:var(--accent-danger); font-weight:600;">${p.failure_count || 0}</span></td>
           <td>${p.is_available ? '✅ Hoạt động' : '❌ Ngắt/Cooldown'}</td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.openEditProxyModal('${encodeURIComponent(p.raw_url)}')">
+                Sửa
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteProxy('${encodeURIComponent(p.raw_url)}')">
+                Xóa
+              </button>
+            </div>
+          </td>
         </tr>
       `;
     }).join('');
+  }
+
+  openEditProxyModal(encodedUrl) {
+    const rawUrl = decodeURIComponent(encodedUrl);
+    const proxy = this.proxiesPagination.allItems.find(p => p.raw_url === rawUrl);
+    if (!proxy) {
+      this.showToast('Không tìm thấy thông tin proxy!');
+      return;
+    }
+
+    const rawInput = document.getElementById('edit-proxy-raw');
+    const urlInput = document.getElementById('edit-proxy-url');
+    const statusSelect = document.getElementById('edit-proxy-status');
+
+    if (rawInput) rawInput.value = proxy.raw_url;
+    if (urlInput) urlInput.value = proxy.raw_url;
+    if (statusSelect) statusSelect.value = proxy.status || 'active';
+
+    this.openModal(this.modalEditProxy);
+  }
+
+  async handleEditProxySubmit(e) {
+    e.preventDefault();
+    const rawUrl = document.getElementById('edit-proxy-raw')?.value;
+    if (!rawUrl) return;
+
+    const newUrl = document.getElementById('edit-proxy-url')?.value.trim() || null;
+    const status = document.getElementById('edit-proxy-status')?.value || null;
+
+    const res = await this.fetchApi('/api/v1/proxies', {
+      method: 'PATCH',
+      body: JSON.stringify({ raw_url: rawUrl, new_url: newUrl, status: status }),
+    });
+
+    if (res) {
+      this.closeModal(this.modalEditProxy);
+      this.showToast('Đã cập nhật cấu hình proxy thành công!');
+      this.loadProxiesData();
+    }
+  }
+
+  async deleteProxy(encodedUrl) {
+    const rawUrl = decodeURIComponent(encodedUrl);
+    if (!confirm(`Bạn có chắc chắn muốn XÓA proxy '${rawUrl}' khỏi ProxyPool?`)) return;
+    const res = await this.fetchApi('/api/v1/proxies', {
+      method: 'DELETE',
+      body: JSON.stringify({ raw_url: rawUrl }),
+    });
+    if (res) {
+      this.showToast('Đã xóa proxy khỏi Pool thành công!');
+      this.loadProxiesData();
+    }
   }
 
   updateProxiesPaginationUI(totalCount, currentPage, totalPages) {

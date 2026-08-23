@@ -124,3 +124,29 @@ class SessionPool:
                 s.status = status
                 s.failure_count += 1
                 break
+
+    def remove_session(self, name_or_path: str | Path) -> bool:
+        target_name = Path(name_or_path).name
+        initial_len = len(self._sessions)
+        self._sessions = [s for s in self._sessions if s.path.name != target_name]
+        return len(self._sessions) < initial_len
+
+    def update_session(
+        self,
+        name_or_path: str | Path,
+        *,
+        proxy: str | None = None,
+        status: SessionStatus | str | None = None,
+    ) -> ManagedSession | None:
+        target_name = Path(name_or_path).name
+        for s in self._sessions:
+            if s.path.name == target_name:
+                if proxy is not None:
+                    s.proxy = proxy if proxy.strip() else None
+                if status is not None:
+                    try:
+                        s.status = SessionStatus(status)
+                    except ValueError:
+                        pass
+                return s
+        return None

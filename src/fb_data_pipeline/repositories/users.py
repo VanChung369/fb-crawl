@@ -316,6 +316,92 @@ class UserQueryRepository:
         )
         return Page(items, next_cursor)
 
+    def delete_user(self, user_id: int) -> bool:
+        user_id = self._user_id(user_id)
+        with self._connect() as cursor:
+            cursor.execute("DELETE FROM facebook_users WHERE id = %s", (user_id,))
+            return bool(cursor.rowcount and cursor.rowcount > 0)
+
+    def update_user(
+        self,
+        user_id: int,
+        *,
+        name: str | None = None,
+        username: str | None = None,
+        address: str | None = None,
+        gender: str | None = None,
+        birth_date: str | None = None,
+        phone_1: str | None = None,
+        phone_2: str | None = None,
+    ) -> UserSummary | None:
+        user_id = self._user_id(user_id)
+        with self._connect() as cursor:
+            # Update facebook_users display_name / username
+            updates = []
+            params = []
+            if name is not None:
+                updates.append("display_name = %s")
+                params.append(name.strip())
+            if username is not None:
+                updates.append("facebook_username = %s")
+                params.append(username.strip())
+            if updates:
+                updates.append("updated_at = now()")
+                params.append(user_id)
+                cursor.execute(
+                    f"UPDATE facebook_users SET {', '.join(updates)} WHERE id = %s",
+                    tuple(params),
+                )
+
+            # Update facebook_user_profiles
+            if address is not None or gender is not None or birth_date is not None:
+                cursor.execute(
+                    """
+                    INSERT INTO facebook_user_profiles (facebook_user_id, address, gender, birth_date, updated_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (facebook_user_id) DO UPDATE SET
+                        address = COALESCE(EXCLUDED.address, facebook_user_profiles.address),
+                        gender = COALESCE(EXCLUDED.gender, facebook_user_profiles.gender),
+                        birth_date = COALESCE(EXCLUDED.birth_date, facebook_user_profiles.birth_date),
+                        updated_at = now()
+                    """,
+                    (user_id, address, gender, birth_date),
+                )
+
+            # Update phone evidence if phone_1 or phone_2 is provided
+            for phone_val, origin in [(phone_1, "fbnumber"), (phone_2, "fb_crawl")]:
+                if phone_val is not None and phone_val.strip():
+                    norm = phone_val.strip()
+                    # Ensure phone number exists in phone_numbers table
+                    cursor.execute(
+                        """
+                        INSERT INTO phone_numbers (normalized_phone, display_phone)
+                        VALUES (%s, %s)
+                        ON CONFLICT (normalized_phone) DO NOTHING
+                        RETURNING id
+                        """,
+                        (norm, norm),
+                    )
+                    row = cursor.fetchone()
+                    if row is None:
+                        cursor.execute("SELECT id FROM phone_numbers WHERE normalized_phone = %s", (norm,))
+                        row = cursor.fetchone()
+                    if row:
+                        phone_id = row[0]
+                        cursor.execute(
+                            """
+                            INSERT INTO user_phone_evidence (
+                                facebook_user_id, phone_number_id, origin, source, source_url, provider, confidence,
+                                first_captured_at, last_captured_at, evidence_count
+                            ) VALUES (%s, %s, %s, 'manual_edit', '', 'manual', 'manual_edit', now(), now(), 1)
+                            ON CONFLICT (facebook_user_id, phone_number_id, origin, source, source_url, provider)
+                            DO UPDATE SET last_captured_at = now(), updated_at = now()
+                            """,
+                            (user_id, phone_id, origin),
+                        )
+
+        return self.get_user(user_id)
+
     @staticmethod
     def _user_id(value: object) -> int:
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:

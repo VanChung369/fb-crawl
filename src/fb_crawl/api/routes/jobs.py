@@ -99,6 +99,16 @@ def create_jobs_router(
     def get_job(job_id: UUID) -> JobResponse:
         return _job_response(_require_job(job_repository, job_id))
 
+    @router.delete(
+        "/{job_id}",
+        status_code=status.HTTP_200_OK,
+        responses=ERROR_RESPONSES,
+    )
+    def delete_job(job_id: UUID) -> dict[str, Any]:
+        _require_job(job_repository, job_id)
+        job_repository.delete_job(job_id)
+        return {"status": "success", "message": f"Job {job_id} đã được xóa thành công."}
+
     @router.get(
         "/{job_id}/targets",
         response_model=JobTargetPageResponse,

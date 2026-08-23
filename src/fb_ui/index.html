@@ -447,11 +447,12 @@
                   <th>Thành Công</th>
                   <th>Lỗi Kết Nối</th>
                   <th>Khả Dụng</th>
+                  <th>Thao Tác</th>
                 </tr>
               </thead>
               <tbody id="table-all-proxies-body">
                 <tr>
-                  <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                  <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 24px;">
                     Đang nạp danh sách Proxy...
                   </td>
                 </tr>
@@ -914,6 +915,126 @@
       <div class="modal-actions">
         <button class="btn btn-primary" id="btn-save-settings">Lưu Cấu Hình</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT USER -->
+  <div class="modal-backdrop" id="modal-edit-user">
+    <div class="modal" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3 id="modal-edit-user-title">Chỉnh Sửa Thông Tin Khách Hàng</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <form id="form-edit-user">
+        <input type="hidden" id="edit-user-id">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label for="edit-user-name">Họ và Tên</label>
+            <input type="text" id="edit-user-name" class="form-control" placeholder="Nguyễn Văn A">
+          </div>
+          <div class="form-group">
+            <label for="edit-user-username">Username / Nickname</label>
+            <input type="text" id="edit-user-username" class="form-control" placeholder="nguyenvana">
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label for="edit-user-phone1">Số Điện Thoại 1 (FBNumber / Chính)</label>
+            <input type="text" id="edit-user-phone1" class="form-control" placeholder="0912345678">
+          </div>
+          <div class="form-group">
+            <label for="edit-user-phone2">Số Điện Thoại 2 (Crawl / Phụ)</label>
+            <input type="text" id="edit-user-phone2" class="form-control" placeholder="0987654321">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="edit-user-address">Địa Chỉ / Nơi Ở</label>
+          <input type="text" id="edit-user-address" class="form-control" placeholder="Hà Nội, Việt Nam">
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label for="edit-user-gender">Giới Tính</label>
+            <select id="edit-user-gender" class="form-control">
+              <option value="">-- Chưa rõ --</option>
+              <option value="male">Nam (Male)</option>
+              <option value="female">Nữ (Female)</option>
+              <option value="other">Khác</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit-user-birthdate">Ngày Sinh</label>
+            <input type="text" id="edit-user-birthdate" class="form-control" placeholder="DD/MM/YYYY">
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" data-close>Hủy</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-edit-user">Lưu Thay Đổi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT SESSION -->
+  <div class="modal-backdrop" id="modal-edit-session">
+    <div class="modal" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 id="modal-edit-session-title">Chỉnh Sửa Cấu Hình Nick</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <form id="form-edit-session">
+        <input type="hidden" id="edit-session-name">
+        <div class="form-group">
+          <label>Tên File Session</label>
+          <input type="text" id="edit-session-display-name" class="form-control" disabled style="opacity: 0.7;">
+        </div>
+        <div class="form-group">
+          <label for="edit-session-proxy">Proxy Gán Riêng Cho Nick (Tùy chọn)</label>
+          <input type="text" id="edit-session-proxy" class="form-control" placeholder="http://127.0.0.1:8080">
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Để trống nếu muốn dùng Proxy động từ Pool.</div>
+        </div>
+        <div class="form-group">
+          <label for="edit-session-status">Trạng Thái Nick</label>
+          <select id="edit-session-status" class="form-control">
+            <option value="healthy">Khỏe (Healthy)</option>
+            <option value="cooldown">Nghỉ ngơi (Cooldown)</option>
+            <option value="expired">Hết hạn / Lỗi Cookie (Expired)</option>
+            <option value="checkpoint">Bị Checkpoint (Checkpoint)</option>
+          </select>
+        </div>
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" data-close>Hủy</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-edit-session">Cập Nhật Nick</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT PROXY -->
+  <div class="modal-backdrop" id="modal-edit-proxy">
+    <div class="modal" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3>Chỉnh Sửa Proxy</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <form id="form-edit-proxy">
+        <input type="hidden" id="edit-proxy-raw">
+        <div class="form-group">
+          <label for="edit-proxy-url">Địa Chỉ URL Proxy Mới</label>
+          <input type="text" id="edit-proxy-url" class="form-control" placeholder="http://user:pass@ip:port" required>
+        </div>
+        <div class="form-group">
+          <label for="edit-proxy-status">Trạng Thái Proxy</label>
+          <select id="edit-proxy-status" class="form-control">
+            <option value="active">Hoạt Động (Active)</option>
+            <option value="cooldown">Nghỉ Tạm Thời (Cooldown)</option>
+            <option value="dead">Chết / Không Kết Nối (Dead)</option>
+          </select>
+        </div>
+        <div class="modal-actions" style="margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" data-close>Hủy</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-edit-proxy">Cập Nhật Proxy</button>
+        </div>
+      </form>
     </div>
   </div>
 

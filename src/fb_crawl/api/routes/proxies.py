@@ -8,8 +8,10 @@ from fb_crawl.api.dependencies import ApiKeyAuth
 from fb_crawl.api.schemas import (
     ApiErrorResponse,
     ProxyAddRequest,
+    ProxyDeleteRequest,
     ProxyItemResponse,
     ProxyListResponse,
+    ProxyUpdateRequest,
 )
 from fb_crawl.core.proxy_pool import ProxyPool
 
@@ -52,5 +54,30 @@ def create_proxies_router(proxy_pool: ProxyPool, auth: ApiKeyAuth) -> APIRouter:
         for item in request.proxies:
             proxy_pool.add_proxy(item)
         return list_proxies()
+
+    @router.patch("", response_model=ProxyItemResponse, responses=ERROR_RESPONSES)
+    def update_proxy(request: ProxyUpdateRequest) -> ProxyItemResponse:
+        from fastapi import HTTPException
+        entry = proxy_pool.update_proxy(request.raw_url, new_url=request.new_url, status=request.status)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Không tìm thấy proxy tương ứng.")
+        return ProxyItemResponse(
+            raw_url=entry.raw_url,
+            scheme=entry.scheme,
+            host=entry.host,
+            port=entry.port,
+            status=entry.status.value,
+            success_count=entry.success_count,
+            failure_count=entry.failure_count,
+            is_available=entry.is_available,
+        )
+
+    @router.delete("", responses=ERROR_RESPONSES)
+    def delete_proxy(request: ProxyDeleteRequest):
+        from fastapi import HTTPException
+        removed = proxy_pool.remove_proxy(request.raw_url)
+        if not removed:
+            raise HTTPException(status_code=404, detail="Không tìm thấy proxy để xóa.")
+        return {"status": "success", "message": "Proxy đã được xóa khỏi Pool thành công."}
 
     return router

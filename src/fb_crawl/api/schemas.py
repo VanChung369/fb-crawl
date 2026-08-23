@@ -368,3 +368,36 @@ class StatsOverviewResponse(BaseModel):
     available_sessions: int
     total_sessions: int
 
+
+class UserUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    username: str | None = None
+    phone_1: str | None = None
+    phone_2: str | None = None
+    address: str | None = None
+    gender: str | None = None
+    birth_date: str | None = None
+
+
+class SessionUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proxy: str | None = None
+    status: str | None = None
+
+
+class ProxyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    raw_url: str
+    new_url: str | None = None
+    status: str | None = None
+
+
+class ProxyDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    raw_url: str
+

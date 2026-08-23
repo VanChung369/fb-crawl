@@ -13,6 +13,7 @@ from fb_crawl.api.schemas import (
     SessionImportRequest,
     SessionItemResponse,
     SessionListResponse,
+    SessionUpdateRequest,
 )
 from fb_crawl.core.session_pool import SessionPool
 
@@ -139,6 +140,35 @@ def create_sessions_router(session_pool: SessionPool, sessions_dir: Path, auth: 
         thread.start()
 
         return {"status": "success", "message": f"Đang khởi động trình duyệt cho nick {clean_name}..."}
+
+    @router.patch("/{session_name}", response_model=SessionItemResponse, responses=ERROR_RESPONSES)
+    def update_session(session_name: str, request: SessionUpdateRequest) -> SessionItemResponse:
+        from fastapi import HTTPException
+        clean_name = session_name if session_name.endswith(".json") else f"{session_name}.json"
+        managed = session_pool.update_session(clean_name, proxy=request.proxy, status=request.status)
+        if not managed:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy session '{clean_name}'.")
+        return SessionItemResponse(
+            name=managed.path.name,
+            proxy=managed.proxy,
+            status=managed.status.value,
+            success_count=managed.success_count,
+            failure_count=managed.failure_count,
+            is_available=managed.is_available,
+        )
+
+    @router.delete("/{session_name}", responses=ERROR_RESPONSES)
+    def delete_session(session_name: str):
+        from fastapi import HTTPException
+        clean_name = session_name if session_name.endswith(".json") else f"{session_name}.json"
+        session_file = sessions_dir / clean_name
+        if session_file.is_file():
+            try:
+                session_file.unlink()
+            except OSError as err:
+                raise HTTPException(status_code=500, detail=f"Lỗi khi xóa file session: {err}")
+        session_pool.remove_session(clean_name)
+        return {"status": "success", "message": f"Session '{clean_name}' đã được xóa thành công."}
 
     return router
 

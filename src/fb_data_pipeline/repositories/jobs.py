@@ -235,6 +235,14 @@ class JobRepository:
             row = cursor.fetchone()
         return None if row is None else self._job_from_row(row)
 
+    def delete_job(self, job_id: UUID) -> bool:
+        with self._connect() as cursor:
+            cursor.execute(
+                "DELETE FROM crawl_jobs WHERE id = %s",
+                (job_id,),
+            )
+            return bool(cursor.rowcount and cursor.rowcount > 0)
+
     def list_jobs(self, *, limit: int = 50, cursor: str | None = None) -> Page[CrawlJob]:
         limit = self._bounded_limit(limit)
         cursor_values = self._decode_uuid_cursor(cursor, name="job") if cursor else None

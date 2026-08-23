@@ -203,3 +203,37 @@ class ProxyPool:
                     entry.status = ProxyStatus.COOLDOWN
                     entry.cooldown_until = time.monotonic() + cooldown
                 break
+
+    def remove_proxy(self, raw_url: str) -> bool:
+        initial_len = len(self._entries)
+        self._entries = [
+            p for p in self._entries
+            if p.raw_url != raw_url and p.formatted_url != raw_url
+        ]
+        return len(self._entries) < initial_len
+
+    def update_proxy(
+        self,
+        raw_url: str,
+        *,
+        new_url: str | None = None,
+        status: ProxyStatus | str | None = None,
+    ) -> ProxyEntry | None:
+        for entry in self._entries:
+            if entry.raw_url == raw_url or entry.formatted_url == raw_url:
+                if new_url and new_url.strip():
+                    new_entry = parse_proxy_line(new_url.strip())
+                    if new_entry:
+                        entry.raw_url = new_entry.raw_url
+                        entry.scheme = new_entry.scheme
+                        entry.host = new_entry.host
+                        entry.port = new_entry.port
+                        entry.username = new_entry.username
+                        entry.password = new_entry.password
+                if status is not None:
+                    try:
+                        entry.status = ProxyStatus(status)
+                    except ValueError:
+                        pass
+                return entry
+        return None

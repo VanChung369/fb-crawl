@@ -174,6 +174,7 @@ def create_users_router(
         PhoneEvidenceResponse,
         UserPageResponse,
         UserResponse,
+        UserUpdateRequest,
     )
 
     error_responses = {
@@ -281,5 +282,40 @@ def create_users_router(
         return UserResponse(
             **user_response_values(require_user(user_repository, user_id))
         )
+
+    @router.patch(
+        "/{user_id}",
+        response_model=UserResponse,
+        responses=error_responses,
+    )
+    def update_user(
+        user_id: Annotated[int, Path(gt=0, le=9223372036854775807)],
+        request: "UserUpdateRequest",
+    ) -> UserResponse:
+        require_user(user_repository, user_id)
+        updated = user_repository.update_user(
+            user_id,
+            name=request.name,
+            username=request.username,
+            phone_1=request.phone_1,
+            phone_2=request.phone_2,
+            address=request.address,
+            gender=request.gender,
+            birth_date=request.birth_date,
+        )
+        if updated is None:
+            raise UserNotFound("Không thể cập nhật thông tin khách hàng.")
+        return UserResponse(**user_response_values(updated))
+
+    @router.delete(
+        "/{user_id}",
+        responses=error_responses,
+    )
+    def delete_user(
+        user_id: Annotated[int, Path(gt=0, le=9223372036854775807)],
+    ) -> dict[str, object]:
+        require_user(user_repository, user_id)
+        user_repository.delete_user(user_id)
+        return {"status": "success", "message": f"Khách hàng #{user_id} đã được xóa thành công."}
 
     return router
