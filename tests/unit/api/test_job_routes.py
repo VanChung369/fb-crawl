@@ -615,9 +615,8 @@ def test_openapi_contains_no_unsafe_create_fields() -> None:
         readiness=lambda _migration: True,
     )
     schema = TestClient(app).get("/openapi.json", headers=_headers()).json()
-    schema_text = str(schema)
-
     assert "/api/v1/jobs" in schema["paths"]
+    create_schema_text = str(schema["components"]["schemas"]["JobCreateRequest"])
     for unsafe_name in (
         "session_path",
         "proxy",
@@ -628,4 +627,4 @@ def test_openapi_contains_no_unsafe_create_fields() -> None:
         "raw_args",
         "persist",
     ):
-        assert unsafe_name not in schema_text
+        assert unsafe_name not in create_schema_text

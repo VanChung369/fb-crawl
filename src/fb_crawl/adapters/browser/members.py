@@ -8,6 +8,7 @@ from fb_crawl.adapters.browser.crawl_budget import CrawlBudget, CrawlCollection
 from fb_crawl.adapters.browser.driver import (
     wait_for_document_ready,
 )
+from fb_crawl.adapters.browser.human import human_scroll
 from fb_crawl.adapters.browser.session import (
     is_authenticated,
 )
@@ -93,8 +94,10 @@ class MembersCollector:
 
             while budget.allows(attempts):
                 guard_execution(self._control, browser)
-                browser.execute_script(
-                    "window.scrollTo(" "0, document.body.scrollHeight" ")"
+                human_scroll(
+                    browser,
+                    sleep_func=self._sleep,
+                    jitter_func=self._jitter,
                 )
 
                 attempts += 1

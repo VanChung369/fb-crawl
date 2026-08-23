@@ -364,4 +364,13 @@ def test_real_api_composition_uses_postgres_repositories_without_browser_imports
     assert isinstance(built.state.job_service, JobService)
     assert isinstance(built.state.job_repository, JobRepository)
     assert isinstance(built.state.user_repository, UserQueryRepository)
-    assert "selenium" not in sys.modules
+    code = (
+        "import sys\n"
+        "from fb_crawl.cli.api import _compose_api\n"
+        "from fb_crawl.api.config import ApiSettings\n"
+        "from fb_data_pipeline.config import PipelineSettings\n"
+        "_compose_api(PipelineSettings(database_url='postgresql://not-connected'), ApiSettings(api_key='x'*32))\n"
+        "assert 'selenium' not in sys.modules\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, f"Selenium imported in fresh API process: {result.stderr}"

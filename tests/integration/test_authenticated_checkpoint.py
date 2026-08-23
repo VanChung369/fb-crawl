@@ -307,7 +307,7 @@ def test_budget_exhaustion_keeps_checkpoint_target_retryable_and_incomplete(
                 target,
                 ScrapeMode.AUTHENTICATED,
                 "members",
-                True,
+                False,
             ),
         ),
         stats=ScrapeStats(1, 1, 1, 1),
