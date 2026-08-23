@@ -9,7 +9,7 @@ from typing import Any
 
 from fb_crawl.adapters.browser.driver import create_browser
 from fb_crawl.adapters.browser.session import SessionStore, is_authenticated
-from fb_crawl.core.config import BrowserSettings
+from fb_crawl.config import BrowserSettings
 from fb_crawl.core.exceptions import SessionError
 
 
