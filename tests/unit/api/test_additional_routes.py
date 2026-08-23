@@ -120,5 +120,15 @@ def test_export_users_csv_and_json(tmp_path: Path) -> None:
     json_res = client.get("/api/v1/export/users?format=json", headers=HEADERS)
     assert json_res.status_code == 200
     assert "application/json" in json_res.headers["content-type"]
-    assert len(json_res.json()) == 1
-    assert json_res.json()[0]["username"] == "user1"
+    assert len(json_json := json_res.json()) == 1
+    assert json_json[0]["username"] == "user1"
+
+
+def test_dashboard_static_page_served(tmp_path: Path) -> None:
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    res = client.get("/dashboard")
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+    assert "fb-crawl" in res.text

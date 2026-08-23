@@ -89,6 +89,20 @@ def create_app(
             allow_headers=["X-API-Key", "Idempotency-Key", "Content-Type"],
         )
 
+    ui_dir = Path(__file__).parents[2] / "fb_ui"
+    if not ui_dir.is_dir():
+        ui_dir = Path(__file__).parent / "static"
+
+    if ui_dir.is_dir():
+        from fastapi.staticfiles import StaticFiles
+        from fastapi.responses import FileResponse
+        app.mount("/static", StaticFiles(directory=str(ui_dir)), name="static")
+
+        @app.get("/", include_in_schema=False)
+        @app.get("/dashboard", include_in_schema=False)
+        def serve_dashboard():
+            return FileResponse(str(ui_dir / "index.html"))
+
     return app
 
 

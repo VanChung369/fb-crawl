@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>fb-crawl | Pro Dashboard & Automation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <h1>fb-crawl</h1>
+          <span>Pro Automation</span>
+        </div>
+      </div>
+
+      <ul class="nav-menu">
+        <li class="nav-item active" data-view="dashboard">
+          <a href="#dashboard" id="nav-dashboard">
+            <span class="nav-icon">📊</span>
+            <span>Tổng quan</span>
+          </a>
+        </li>
+        <li class="nav-item" data-view="jobs">
+          <a href="#jobs" id="nav-jobs">
+            <span class="nav-icon">⚙️</span>
+            <span>Tiến trình Crawl</span>
+          </a>
+        </li>
+        <li class="nav-item" data-view="leads">
+          <a href="#leads" id="nav-leads">
+            <span class="nav-icon">👥</span>
+            <span>Khách hàng & SĐT</span>
+          </a>
+        </li>
+        <li class="nav-item" data-view="sessions">
+          <a href="#sessions" id="nav-sessions">
+            <span class="nav-icon">🛡️</span>
+            <span>Quản lý Nick (Sessions)</span>
+          </a>
+        </li>
+        <li class="nav-item" data-view="proxies">
+          <a href="#proxies" id="nav-proxies">
+            <span class="nav-icon">🌐</span>
+            <span>Quản lý Proxy</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="sidebar-footer">
+        <div>Phiên bản: <strong>v0.1.0-pro</strong></div>
+        <div style="font-size: 0.72rem; color: var(--accent-secondary); margin-top: 4px;">Anti-Ban & Multi-Rotate</div>
+      </div>
+    </aside>
+
+    <!-- Main Content Wrapper -->
+    <main class="main-wrapper">
+      <!-- Top Header -->
+      <header class="top-header">
+        <div class="header-title">
+          <h2 id="view-header-title">Bảng Điều Khiển Tổng Quan</h2>
+        </div>
+
+        <div class="header-actions">
+          <div class="status-badge">
+            <span class="status-indicator" id="status-indicator"></span>
+            <span id="status-text">Đang kết nối...</span>
+          </div>
+
+          <button class="btn btn-secondary btn-sm" id="btn-refresh" title="Làm mới dữ liệu">
+            🔄 Làm mới
+          </button>
+
+          <button class="btn btn-secondary btn-sm" id="btn-settings">
+            🔑 Cấu hình API Key
+          </button>
+        </div>
+      </header>
+
+      <!-- VIEW 1: DASHBOARD OVERVIEW -->
+      <section class="content-body view-section active" id="view-dashboard">
+        <!-- Metric Cards -->
+        <div class="metrics-grid">
+          <div class="metric-card highlight-indigo">
+            <div class="metric-top">
+              <span class="metric-label">Tổng Khách hàng (Leads)</span>
+              <div class="metric-icon-wrap">👥</div>
+            </div>
+            <div class="metric-value" id="metric-total-users">0</div>
+            <div class="metric-subtext">Hồ sơ đã lưu trong cơ sở dữ liệu</div>
+          </div>
+
+          <div class="metric-card highlight-emerald">
+            <div class="metric-top">
+              <span class="metric-label">Khách hàng có SĐT</span>
+              <div class="metric-icon-wrap">📞</div>
+            </div>
+            <div class="metric-value" id="metric-users-phone">0</div>
+            <div class="metric-subtext">Đã bóc tách & tìm thấy số điện thoại</div>
+          </div>
+
+          <div class="metric-card highlight-cyan">
+            <div class="metric-top">
+              <span class="metric-label">Tỉ lệ có Số điện thoại</span>
+              <div class="metric-icon-wrap">🎯</div>
+            </div>
+            <div class="metric-value" id="metric-phone-rate">0%</div>
+            <div class="metric-subtext">Tỉ lệ tìm thấy SĐT thực tế</div>
+          </div>
+
+          <div class="metric-card highlight-amber">
+            <div class="metric-top">
+              <span class="metric-label">Tổng Jobs thực hiện</span>
+              <div class="metric-icon-wrap">⚡</div>
+            </div>
+            <div class="metric-value" id="metric-total-jobs">0</div>
+            <div class="metric-subtext">Tiến trình đã được phân phối</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-top">
+              <span class="metric-label">Nick Facebook khả dụng</span>
+              <div class="metric-icon-wrap">🛡️</div>
+            </div>
+            <div class="metric-value" id="metric-active-sessions">0/0</div>
+            <div class="metric-subtext">SessionPool xoay vòng chống ban</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-top">
+              <span class="metric-label">Proxy khả dụng</span>
+              <div class="metric-icon-wrap">🌐</div>
+            </div>
+            <div class="metric-value" id="metric-active-proxies">0/0</div>
+            <div class="metric-subtext">ProxyPool HTTP / SOCKS5</div>
+          </div>
+        </div>
+
+        <!-- Dashboard Two-Columns Split -->
+        <div class="dashboard-columns">
+          <!-- Recent Jobs Panel -->
+          <div class="panel">
+            <div class="panel-header">
+              <h3 class="panel-title">⚡ Tiến trình Crawl gần đây</h3>
+              <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.switchView('jobs'); window.dashboardApp.openModal(document.getElementById('modal-create-job'));">
+                + Tạo Job Mới
+              </button>
+            </div>
+            <div class="table-container">
+              <table class="custom-table">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Hành động</th>
+                    <th>Trạng thái</th>
+                    <th>Tiến độ</th>
+                    <th>Thời gian</th>
+                  </tr>
+                </thead>
+                <tbody id="table-recent-jobs-body">
+                  <tr>
+                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                      Đang nạp dữ liệu...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Recent Leads Panel -->
+          <div class="panel">
+            <div class="panel-header">
+              <h3 class="panel-title">👥 Khách hàng mới thu thập</h3>
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.switchView('leads');">
+                Xem Tất Cả ↗
+              </button>
+            </div>
+            <div class="table-container">
+              <table class="custom-table">
+                <thead>
+                  <tr>
+                    <th>Khách hàng</th>
+                    <th>Số điện thoại</th>
+                    <th>Địa chỉ</th>
+                    <th>Liên kết</th>
+                  </tr>
+                </thead>
+                <tbody id="table-recent-leads-body">
+                  <tr>
+                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                      Đang nạp dữ liệu...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: JOBS MANAGER -->
+      <section class="content-body view-section" id="view-jobs">
+        <div class="section-header">
+          <div>
+            <h3>Quản lý & Giám sát Tiến trình Crawl</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Tạo mới, theo dõi tiến độ thời gian thực và quản lý các tác vụ quét</p>
+          </div>
+          <button class="btn btn-primary" id="btn-open-create-job">
+            ⚡ + Tạo Job Mới
+          </button>
+        </div>
+
+        <div class="panel">
+          <div class="table-container">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>Mã Job ID</th>
+                  <th>Loại Tác Vụ</th>
+                  <th>Trạng Thái</th>
+                  <th>Tiến Độ Targets</th>
+                  <th>Leads Tìm Thấy</th>
+                  <th>Leads Đã Lưu</th>
+                  <th>Bắt Đầu / Tạo</th>
+                  <th>Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody id="table-all-jobs-body">
+                <tr>
+                  <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    Đang nạp danh sách Jobs...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 3: LEADS & USERS EXPLORER -->
+      <section class="content-body view-section" id="view-leads">
+        <div class="section-header">
+          <div>
+            <h3>Dữ liệu Khách hàng & Số điện thoại (Leads Explorer)</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Tra cứu, lọc danh sách khách hàng và xuất file CSV / JSON</p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary" id="btn-export-csv">
+              📥 Xuất File CSV
+            </button>
+            <button class="btn btn-secondary" id="btn-export-json">
+              📥 Xuất File JSON
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="panel" style="margin-bottom: 20px; padding: 18px 24px;">
+          <form id="form-filter-leads" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) 120px; gap: 14px; align-items: flex-end;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="filter-q">Tìm kiếm từ khóa</label>
+              <input type="text" id="filter-q" class="form-control" placeholder="Tên, địa chỉ...">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="filter-uid">Facebook UID</label>
+              <input type="text" id="filter-uid" class="form-control" placeholder="1000...">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="filter-phone">Số điện thoại</label>
+              <input type="text" id="filter-phone" class="form-control" placeholder="09...">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="filter-has-phone">Bộ lọc SĐT</label>
+              <select id="filter-has-phone" class="form-control">
+                <option value="">Tất cả</option>
+                <option value="true">Chỉ có SĐT</option>
+                <option value="false">Chưa có SĐT</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary" style="height: 42px;">
+              🔍 Lọc
+            </button>
+          </form>
+        </div>
+
+        <!-- Leads Table Panel -->
+        <div class="panel">
+          <div class="table-container">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>Khách Hàng (Tên & UID)</th>
+                  <th>Username</th>
+                  <th>Số Điện Thoại 1</th>
+                  <th>Số Điện Thoại 2</th>
+                  <th>Địa Chỉ</th>
+                  <th>Giới Tính</th>
+                  <th>Ngày Quét</th>
+                  <th>Bằng Chứng SĐT</th>
+                </tr>
+              </thead>
+              <tbody id="table-all-leads-body">
+                <tr>
+                  <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    Đang nạp danh sách khách hàng...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 4: SESSIONS MANAGER -->
+      <section class="content-body view-section" id="view-sessions">
+        <div class="section-header">
+          <div>
+            <h3>Quản lý Quần thể Nick Facebook (Session Pool)</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Quản lý vòng đời tài khoản Facebook, chống checkpoint và xoay vòng tự động</p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" id="btn-open-extract-session">
+              🔑 + Tự Động Lấy Session (User / Pass)
+            </button>
+            <button class="btn btn-secondary" id="btn-open-import-session">
+              🛡️ + Import Cookie JSON
+            </button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="table-container">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>Tên Session (File)</th>
+                  <th>Proxy Gán Cố Định</th>
+                  <th>Trạng Thái Nick</th>
+                  <th>Thành Công</th>
+                  <th>Thất Bại</th>
+                  <th>Khả Dụng</th>
+                </tr>
+              </thead>
+              <tbody id="table-all-sessions-body">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    Đang nạp danh sách Session...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 5: PROXIES MANAGER -->
+      <section class="content-body view-section" id="view-proxies">
+        <div class="section-header">
+          <div>
+            <h3>Quản lý Quần thể Proxy (Proxy Pool)</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Xoay vòng địa chỉ IP HTTP / SOCKS5, tự động cách ly proxy lỗi kết nối</p>
+          </div>
+          <button class="btn btn-primary" id="btn-open-add-proxies">
+            🌐 + Thêm Danh Sách Proxy
+          </button>
+        </div>
+
+        <div class="panel">
+          <div class="table-container">
+            <table class="custom-table">
+              <thead>
+                <tr>
+                  <th>Định Dạng URL Raw</th>
+                  <th>Giao Thức</th>
+                  <th>Host IP</th>
+                  <th>Cổng Port</th>
+                  <th>Trạng Thái</th>
+                  <th>Thành Công</th>
+                  <th>Lỗi Kết Nối</th>
+                  <th>Khả Dụng</th>
+                </tr>
+              </thead>
+              <tbody id="table-all-proxies-body">
+                <tr>
+                  <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 24px;">
+                    Đang nạp danh sách Proxy...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- MODAL: CREATE JOB WITH ADVANCED CONFIG OPTIONS -->
+  <div class="modal-backdrop" id="modal-create-job">
+    <div class="modal" style="max-width: 720px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3>⚡ Tạo Crawl Job Mới (Đầy Đủ Cấu Hình Nâng Cao)</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <form id="form-create-job">
+        <!-- 1. Cấu hình cơ bản -->
+        <div style="font-weight: 600; color: var(--accent-secondary); margin-bottom: 10px; font-size: 0.9rem;">
+          📌 1. Thông Tin Mục Tiêu & Tác Vụ
+        </div>
+        <div class="form-group">
+          <label for="job-action">Loại Tác Vụ Thu Thập (Action)</label>
+          <select id="job-action" class="form-control" required>
+            <option value="group_members">👥 Thành viên Nhóm Facebook (Group Members)</option>
+            <option value="post_comments">💬 Bình luận Bài viết / Reels (Post Comments)</option>
+            <option value="post_reactions">👍 Cảm xúc Bài viết (Post Reactions)</option>
+            <option value="profile_about">👤 Thông tin Hồ sơ Cá nhân (Profile Bio/About)</option>
+            <option value="relationships_friends">🤝 Bạn bè & Người theo dõi (Friends/Followers)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="job-targets">Danh sách URL Mục tiêu (Mỗi dòng 1 liên kết Facebook)</label>
+          <textarea id="job-targets" class="form-control" rows="3" placeholder="https://www.facebook.com/groups/example&#10;https://www.facebook.com/groups/another_group" required></textarea>
+        </div>
+
+        <!-- 2. Giới hạn & An toàn chống ban -->
+        <div style="font-weight: 600; color: var(--accent-secondary); margin: 16px 0 10px 0; font-size: 0.9rem;">
+          🛡️ 2. Giới Hạn Quét & An Toàn Chống Ban (Anti-Ban Safety)
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label for="job-opt-max-users">Số User tối đa (max_users)</label>
+            <input type="number" id="job-opt-max-users" class="form-control" value="1000" min="1" max="1000">
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 1000 users (Tối đa 1 chu kỳ)</div>
+          </div>
+          <div class="form-group">
+            <label for="job-opt-steps">Số bước cuộn trang (steps)</label>
+            <input type="number" id="job-opt-steps" class="form-control" value="20" min="1" max="20">
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 20 bước (Cuộn tối đa)</div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label for="job-opt-duration">Thời lượng tối đa (giây)</label>
+            <input type="number" id="job-opt-duration" class="form-control" value="1800" min="1" max="1800">
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 1800s (30 phút)</div>
+          </div>
+          <div class="form-group">
+            <label for="job-opt-delay">Độ trễ giãn cách (giây)</label>
+            <input type="number" id="job-opt-delay" class="form-control" value="8" min="8" max="1800">
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Tránh checkpoint (>= 8s)</div>
+          </div>
+          <div class="form-group">
+            <label for="job-opt-depth">Độ sâu quét (depth)</label>
+            <select id="job-opt-depth" class="form-control">
+              <option value="1">Cấp 1 (Chỉ trang này)</option>
+              <option value="2">Cấp 2 (Đệ quy liên kết)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 3. Đào sâu Profile & Quét bài viết -->
+        <div style="font-weight: 600; color: var(--accent-secondary); margin: 18px 0 10px 0; font-size: 0.9rem;">
+          🔍 3. Tùy Chọn Đào Sâu Vào Từng Trang Cá Nhân (Profile Enrichment)
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: flex; align-items: flex-start; gap: 12px; background: rgba(59, 130, 246, 0.08); padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(59, 130, 246, 0.25); cursor: pointer;">
+            <input type="checkbox" id="job-opt-enrich-profiles" style="width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent-primary); cursor: pointer;">
+            <div>
+              <div style="font-weight: 600; color: var(--text-primary); font-size: 0.92rem;">
+                👤 Tự động vào từng trang cá nhân để bóc tách thông tin chi tiết
+              </div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 3px; line-height: 1.4;">
+                Tích chọn để bot tự động ghé thăm tường cá nhân của từng thành viên tìm được nhằm bóc tách Bio, Nơi làm việc, Học vấn, Nơi ở, SĐT và bài viết.
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <div id="sub-options-enrich" style="display: none; background: var(--bg-glass-input); padding: 14px; border-radius: 10px; border: 1px solid var(--border-glass); margin-bottom: 14px;">
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="job-opt-profile-limit">Giới hạn số Profile cá nhân cần đào sâu</label>
+            <input type="number" id="job-opt-profile-limit" class="form-control" value="20" min="1" max="50">
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Khống chế số profile vào xem để tối ưu tốc độ và an toàn (1 - 50)</div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label>Các trường thông tin cần bóc tách từ Profile:</label>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 0.82rem; margin-top: 4px;">
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="phone" checked> 📞 SĐT
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="bio" checked> 📝 Tiểu sử
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="work" checked> 💼 Công việc
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="education" checked> 🎓 Học vấn
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="location" checked> 📍 Nơi ở
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="gender" checked> ⚧ Giới tính
+              </label>
+              <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" name="profile_fields" value="birth_date"> 🎂 Ngày sinh
+              </label>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="job-opt-post-steps">Số bước quét bài viết tường (steps)</label>
+              <input type="number" id="job-opt-post-steps" class="form-control" value="0" min="0" max="20">
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Quét bài viết trên tường tìm SĐT (0: tắt)</div>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="job-opt-post-duration">Thời gian quét bài viết (giây)</label>
+              <input type="number" id="job-opt-post-duration" class="form-control" value="30" min="1" max="300">
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Tối đa 300s</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 24px;">
+          <button type="button" class="btn btn-secondary" data-close>Hủy</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-create-job">
+            🚀 Khởi Chạy Crawl Job Ngay
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: JOB DETAILS & EVENTS -->
+  <div class="modal-backdrop" id="modal-job-details">
+    <div class="modal" style="max-width: 750px;">
+      <div class="modal-header">
+        <h3 id="modal-job-title">Chi Tiết Tiến Trình Job</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <div style="margin-bottom: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+        <div class="metric-card" style="padding: 12px;">
+          <div class="metric-label" style="font-size: 0.75rem;">Trạng Thái</div>
+          <div id="job-detail-status" style="font-weight: 700;">-</div>
+        </div>
+        <div class="metric-card" style="padding: 12px;">
+          <div class="metric-label" style="font-size: 0.75rem;">Targets</div>
+          <div id="job-detail-targets" style="font-weight: 700;">-</div>
+        </div>
+        <div class="metric-card" style="padding: 12px;">
+          <div class="metric-label" style="font-size: 0.75rem;">Tìm Thấy</div>
+          <div id="job-detail-discovered" style="font-weight: 700;">-</div>
+        </div>
+        <div class="metric-card" style="padding: 12px;">
+          <div class="metric-label" style="font-size: 0.75rem;">Đã Lưu DB</div>
+          <div id="job-detail-persisted" style="font-weight: 700;">-</div>
+        </div>
+      </div>
+
+      <div class="panel" style="background: var(--bg-glass-input); padding: 14px; max-height: 260px; overflow-y: auto;">
+        <h4 style="font-size: 0.85rem; margin-bottom: 8px; color: var(--accent-secondary);">📜 Dòng Sự Kiện Thời Gian Thực (Events Log)</h4>
+        <div id="job-detail-events" style="font-family: monospace; font-size: 0.8rem; line-height: 1.6; color: var(--text-secondary);">
+          Đang tải events...
+        </div>
+      </div>
+
+      <div class="modal-actions" id="job-detail-actions">
+        <button type="button" class="btn btn-secondary" data-close>Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PHONE EVIDENCE -->
+  <div class="modal-backdrop" id="modal-phone-evidence">
+    <div class="modal" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 id="modal-evidence-title">Lịch Sử & Bằng Chứng Số Điện Thoại</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <div class="table-container" style="max-height: 350px; overflow-y: auto;">
+        <table class="custom-table">
+          <thead>
+            <tr>
+              <th>Số Điện Thoại</th>
+              <th>Nguồn Gốc (Origin)</th>
+              <th>Độ Tin Cậy</th>
+              <th>Provider</th>
+              <th>Bắt Gặp Lần Đầu</th>
+            </tr>
+          </thead>
+          <tbody id="table-evidence-body">
+            <tr>
+              <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                Đang tải bằng chứng...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: AUTO EXTRACT SESSION VIA CREDENTIALS -->
+  <div class="modal-backdrop" id="modal-extract-session">
+    <div class="modal" style="max-width: 550px;">
+      <div class="modal-header">
+        <h3>🔑 Tự Động Lấy Session Bằng Tài Khoản Facebook</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <form id="form-extract-session">
+        <div class="form-group">
+          <label for="extract-name">Tên Định Danh Nick (File)</label>
+          <input type="text" id="extract-name" class="form-control" placeholder="vd: nick_chinh_01" required>
+        </div>
+        <div class="form-group">
+          <label for="extract-email">Email / Số Điện Thoại / UID Facebook</label>
+          <input type="text" id="extract-email" class="form-control" placeholder="vd: your_email@gmail.com hoặc 1000..." required>
+        </div>
+        <div class="form-group">
+          <label for="extract-password">Mật Khẩu Facebook</label>
+          <input type="password" id="extract-password" class="form-control" placeholder="Nhập mật khẩu tài khoản..." required>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div class="form-group">
+            <label for="extract-2fa">Mã 2FA / OTP (Nếu có)</label>
+            <input type="text" id="extract-2fa" class="form-control" placeholder="6 chữ số 2FA...">
+          </div>
+          <div class="form-group">
+            <label for="extract-proxy">Proxy Đăng Nhập (Tùy chọn)</label>
+            <input type="text" id="extract-proxy" class="form-control" placeholder="http://ip:port">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" data-close>Hủy</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-extract-session">
+            🚀 Bắt Đầu Đăng Nhập & Lấy Cookie
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: IMPORT SESSION -->
+  <div class="modal-backdrop" id="modal-import-session">
+    <div class="modal" style="max-width: 550px;">
+      <div class="modal-header">
+        <h3>🛡️ Import Cookie / Session Mới</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <form id="form-import-session">
+        <div class="form-group">
+          <label for="session-name">Tên Định Danh Tài Khoản</label>
+          <input type="text" id="session-name" class="form-control" placeholder="vd: acc_clone_01" required>
+        </div>
+        <div class="form-group">
+          <label for="session-proxy">Proxy Gán Cố Định (Tùy chọn)</label>
+          <input type="text" id="session-proxy" class="form-control" placeholder="http://127.0.0.1:8080">
+        </div>
+        <div class="form-group">
+          <label for="session-cookies">Nội dung JSON Cookie</label>
+          <textarea id="session-cookies" class="form-control" rows="5" placeholder='[{"name": "c_user", "value": "1000123..."}, ...]' required></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" data-close>Hủy</button>
+          <button type="submit" class="btn btn-primary">Lưu Session</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD PROXIES -->
+  <div class="modal-backdrop" id="modal-add-proxies">
+    <div class="modal" style="max-width: 550px;">
+      <div class="modal-header">
+        <h3>🌐 Nạp Thêm Danh Sách Proxy</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <form id="form-add-proxies">
+        <div class="form-group">
+          <label for="proxies-list">Danh Sách Proxy (Mỗi dòng 1 Proxy)</label>
+          <textarea id="proxies-list" class="form-control" rows="6" placeholder="http://192.168.1.1:8080&#10;socks5://user:pass@10.0.0.1:1080&#10;172.16.0.1:3128:admin:secret" required></textarea>
+          <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 6px;">
+            Hỗ trợ tự động chuẩn hóa URL <code>http://</code>, <code>socks5://</code>, <code>ip:port</code> và <code>ip:port:user:pass</code>.
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" data-close>Hủy</button>
+          <button type="submit" class="btn btn-primary">Nạp Vào Proxy Pool</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SETTINGS -->
+  <div class="modal-backdrop" id="modal-settings">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Cấu hình Kết nối API</h3>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+      <div class="form-group">
+        <label for="input-api-key">X-API-Key (Khóa bảo mật REST API)</label>
+        <input type="password" id="input-api-key" class="form-control" placeholder="Nhập API key của bạn...">
+        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 6px;">
+          Khóa này dùng để xác thực khi Dashboard gọi các endpoint <code>/api/v1/*</code>.
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btn-save-settings">Lưu Cấu Hình</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

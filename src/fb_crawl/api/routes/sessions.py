@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, status
 from fb_crawl.api.dependencies import ApiKeyAuth
 from fb_crawl.api.schemas import (
     ApiErrorResponse,
+    SessionExtractRequest,
     SessionImportRequest,
     SessionItemResponse,
     SessionListResponse,
@@ -64,4 +65,32 @@ def create_sessions_router(session_pool: SessionPool, sessions_dir: Path, auth: 
             is_available=managed.is_available,
         )
 
+    @router.post("/extract", status_code=status.HTTP_201_CREATED, response_model=SessionItemResponse, responses=ERROR_RESPONSES)
+    def extract_session(request: SessionExtractRequest) -> SessionItemResponse:
+        from fb_crawl.adapters.browser.session_extractor import extract_session_from_credentials
+
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        filename = request.name if request.name.endswith(".json") else f"{request.name}.json"
+        session_file = sessions_dir / filename
+
+        extract_session_from_credentials(
+            email=request.email,
+            password=request.password,
+            two_factor_code=request.two_factor_code,
+            proxy=request.proxy,
+            output_path=session_file,
+            headless=request.headless,
+        )
+
+        managed = session_pool.add_session(session_file, proxy=request.proxy)
+        return SessionItemResponse(
+            name=managed.path.name,
+            proxy=managed.proxy,
+            status=managed.status.value,
+            success_count=managed.success_count,
+            failure_count=managed.failure_count,
+            is_available=managed.is_available,
+        )
+
     return router
+

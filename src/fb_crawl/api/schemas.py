@@ -318,6 +318,18 @@ class SessionImportRequest(BaseModel):
     proxy: str | None = None
 
 
+class SessionExtractRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    email: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=1, max_length=256)
+    two_factor_code: str | None = None
+    proxy: str | None = None
+    headless: bool = True
+
+
+
 class StatsOverviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

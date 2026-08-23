@@ -43,6 +43,7 @@ def add_api_parser(
     )
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=_port, default=8000)
+    serve.add_argument("--dev", action="store_true", help="Run in standalone dev/mock mode without requiring PostgreSQL")
     return parser
 
 
@@ -55,6 +56,30 @@ def _raise_optional_dependency(error: ModuleNotFoundError) -> NoReturn:
     if error.name not in API_EXTRA_ROOTS:
         raise error
     raise ConfigurationError(API_EXTRA_MESSAGE) from error
+
+
+def _compose_dev_api():
+    """Build a standalone dev API application with mock repositories."""
+    from unittest.mock import MagicMock
+    from fb_crawl.api.app import create_app
+    from fb_crawl.core.jobs import Page
+
+    user_repo = MagicMock()
+    user_repo.list_users.return_value = Page(items=[], next_cursor=None)
+    job_repo = MagicMock()
+    job_repo.list_jobs.return_value = Page(items=[], next_cursor=None)
+
+    dev_settings = ApiSettings(
+        api_key=os.environ.get("API_KEY", "dev-api-key-1234567890123456789012"),
+        docs_enabled=True,
+    )
+    return create_app(
+        dev_settings,
+        job_service=MagicMock(),
+        job_repository=job_repo,
+        user_repository=user_repo,
+        readiness=lambda m: True,
+    )
 
 
 def _compose_api(
@@ -92,16 +117,19 @@ def execute_api(args: argparse.Namespace) -> int:
         raise ValueError(f"Unsupported API command: {args.api_command}")
 
     try:
-        pipeline_settings = load_pipeline_settings()
-        _require_database(pipeline_settings)
-        api_settings = load_api_settings(os.environ)
-        try:
-            application = _compose_api(pipeline_settings, api_settings)
-        except ModuleNotFoundError as error:
-            _raise_optional_dependency(error)
+        if getattr(args, "dev", False):
+            print(f"[INFO] Running in DEV / MOCK mode at http://{args.host}:{args.port}")
+            print(f"[INFO] Default API Key: {os.environ.get('API_KEY', 'dev-api-key-1234567890123456789012')}")
+            application = _compose_dev_api()
+        else:
+            pipeline_settings = load_pipeline_settings()
+            _require_database(pipeline_settings)
+            api_settings = load_api_settings(os.environ)
+            try:
+                application = _compose_api(pipeline_settings, api_settings)
+            except ModuleNotFoundError as error:
+                _raise_optional_dependency(error)
 
-        # The optional server dependency is deliberately last: configuration
-        # and the already-built application are both ready before it is loaded.
         try:
             import uvicorn
         except ModuleNotFoundError as error:
