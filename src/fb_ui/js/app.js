@@ -995,6 +995,9 @@ class DashboardApp {
               <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.launchSessionBrowser('${s.name}')" title="Mở trình duyệt đăng nhập sẵn nick này">
                 Vào FB
               </button>
+              <button class="btn btn-info btn-sm" onclick="window.dashboardApp.checkSessionLive('${s.name}')" title="Kiểm tra Cookie còn Live không">
+                Kiểm tra
+              </button>
               <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.openEditSessionModal('${s.name}')">
                 Sửa
               </button>
@@ -1006,6 +1009,38 @@ class DashboardApp {
         </tr>
       `;
     }).join('');
+  }
+
+  async checkSessionLive(sessionName) {
+    this.showToast(`Đang kiểm tra trạng thái nick ${sessionName}...`);
+    try {
+      const res = await this.fetchApi(`/api/v1/sessions/${encodeURIComponent(sessionName)}/check`, {
+        method: 'POST'
+      });
+      if (res && res.is_live) {
+        this.showToast(`Nick ${sessionName} còn Live (Hoạt động tốt)!`);
+      } else {
+        this.showToast(`Nick ${sessionName}: ${res?.message || 'Không thể xác thực'}`);
+      }
+      this.loadSessionsData();
+    } catch (err) {
+      alert(`Lỗi kiểm tra nick ${sessionName}: ` + err.message);
+    }
+  }
+
+  async checkAllSessions() {
+    this.showToast('Đang kiểm tra toàn bộ nick trong Session Pool...');
+    try {
+      const res = await this.fetchApi('/api/v1/sessions/check-all', {
+        method: 'POST'
+      });
+      if (res) {
+        this.showToast(`Đã kiểm tra xong ${res.total_checked} nick!`);
+        this.loadSessionsData();
+      }
+    } catch (err) {
+      alert('Lỗi kiểm tra danh sách nick: ' + err.message);
+    }
   }
 
   openEditSessionModal(sessionName) {

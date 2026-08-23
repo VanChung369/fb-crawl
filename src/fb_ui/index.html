@@ -370,11 +370,14 @@
             <p style="color: var(--text-muted); font-size: 0.85rem;">Quản lý vòng đời tài khoản Facebook, chống checkpoint và xoay vòng tự động</p>
           </div>
           <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary" id="btn-check-all-sessions" onclick="window.dashboardApp.checkAllSessions()">
+              Kiểm tra tất cả nick
+            </button>
             <button class="btn btn-primary" id="btn-open-extract-session">
-              🔑 + Tự Động Lấy Session (User / Pass)
+              + Tự Động Lấy Session
             </button>
             <button class="btn btn-secondary" id="btn-open-import-session">
-              🛡️ + Import Cookie JSON
+              + Import Cookie JSON
             </button>
           </div>
         </div>

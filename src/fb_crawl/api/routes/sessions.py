@@ -170,5 +170,82 @@ def create_sessions_router(session_pool: SessionPool, sessions_dir: Path, auth: 
         session_pool.remove_session(clean_name)
         return {"status": "success", "message": f"Session '{clean_name}' đã được xóa thành công."}
 
+    @router.post("/{session_name}/check", responses=ERROR_RESPONSES)
+    def check_session_live(session_name: str):
+        from fastapi import HTTPException
+        from fb_crawl.adapters.browser.account_safety import SafetyCode, classify_account_safety
+        from fb_crawl.adapters.browser.driver import create_firefox_driver
+        from fb_crawl.adapters.browser.session import SessionStore, is_authenticated
+        from fb_crawl.config import load_browser_settings
+        from fb_crawl.core.session_pool import SessionStatus
+
+        clean_name = session_name if session_name.endswith(".json") else f"{session_name}.json"
+        session_file = sessions_dir / clean_name
+        if not session_file.is_file():
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy file session '{clean_name}'.")
+
+        # Find managed session for proxy if any
+        managed = next((s for s in session_pool._sessions if s.path.name == clean_name), None)
+        proxy = managed.proxy if managed else None
+
+        settings = load_browser_settings()
+        object.__setattr__(settings, "headless", True)
+        if proxy:
+            object.__setattr__(settings, "proxy_url", proxy)
+
+        driver = None
+        new_status = SessionStatus.EXPIRED
+        msg = "Cookie đã hết hạn hoặc phiên đăng nhập không còn hiệu lực."
+        try:
+            driver = create_firefox_driver(settings)
+            store = SessionStore(session_file)
+            is_auth = store.restore(driver)
+            signal = classify_account_safety(driver)
+
+            if is_auth and signal is None:
+                new_status = SessionStatus.HEALTHY
+                msg = "Nick đang hoạt động bình thường (Live)."
+            elif signal is not None and signal.code in (
+                SafetyCode.CHECKPOINT,
+                SafetyCode.TWO_FACTOR,
+                SafetyCode.CAPTCHA,
+                SafetyCode.ACCOUNT_RESTRICTED,
+                SafetyCode.ACCOUNT_RECOVERY,
+                SafetyCode.UNUSUAL_ACTIVITY,
+            ):
+                new_status = SessionStatus.CHECKPOINT
+                msg = f"Nick bị Checkpoint / Khóa bảo vệ: {signal.safe_message}"
+            else:
+                new_status = SessionStatus.EXPIRED
+                msg = "Cookie đã hết hạn hoặc phiên đăng nhập không còn hiệu lực."
+        except Exception as err:
+            new_status = SessionStatus.EXPIRED
+            msg = f"Lỗi kiểm tra session: {err}"
+        finally:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+        # Update status in pool
+        if managed:
+            managed.status = new_status
+
+        return {
+            "name": clean_name,
+            "status": new_status.value,
+            "is_live": new_status == SessionStatus.HEALTHY,
+            "message": msg,
+        }
+
+    @router.post("/check-all", responses=ERROR_RESPONSES)
+    def check_all_sessions():
+        results = []
+        for s in list(session_pool._sessions):
+            res = check_session_live(s.path.name)
+            results.append(res)
+        return {"total_checked": len(results), "results": results}
+
     return router
 
