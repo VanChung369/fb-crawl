@@ -279,8 +279,11 @@ def create_sessions_router(
             }:
                 new_status = SessionStatus.COOLDOWN
                 message = signal.safe_message
-        except Exception:
+        except Exception as error:
+            import traceback
+            traceback.print_exc()
             new_status = SessionStatus.EXPIRED
+            message = f"Check failed: {error}"
         finally:
             if driver is not None:
                 try:
