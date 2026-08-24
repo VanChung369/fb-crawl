@@ -29,6 +29,9 @@ class _CrawlWorker(Protocol):
     def run_once(self) -> bool: ...
 
 
+class _WorkerPolicy(Protocol): ...
+
+
 def add_worker_parser(
     modes: argparse._SubParsersAction,
 ) -> argparse.ArgumentParser:
@@ -87,6 +90,29 @@ def _safe_database_label(database_url: str) -> str:
 
 
 
+def load_worker_policy() -> _WorkerPolicy:
+    from fb_crawl.api.routes.settings import read_env_file_values
+    from fb_crawl.services.worker import WorkerPolicy
+
+    env_file = read_env_file_values()
+    cooldown_str = os.environ.get("CRAWL_WORKER_COOLDOWN_SECONDS") or env_file.get("CRAWL_WORKER_COOLDOWN_SECONDS")
+    delay_str = os.environ.get("CRAWL_WORKER_NAVIGATION_DELAY_SECONDS") or env_file.get("CRAWL_WORKER_NAVIGATION_DELAY_SECONDS")
+    timeout_str = os.environ.get("CRAWL_WORKER_JOB_TIMEOUT_SECONDS") or env_file.get("CRAWL_WORKER_JOB_TIMEOUT_SECONDS")
+    rate_limit_cooldown_str = os.environ.get("CRAWL_WORKER_RATE_LIMIT_COOLDOWN_SECONDS") or env_file.get("CRAWL_WORKER_RATE_LIMIT_COOLDOWN_SECONDS")
+
+    cooldown = int(cooldown_str) if cooldown_str and cooldown_str.isdigit() else 3600
+    delay = max(8, int(delay_str)) if delay_str and delay_str.isdigit() else 8
+    timeout = min(1800, max(1, int(timeout_str))) if timeout_str and timeout_str.isdigit() else 1800
+    rate_limit = int(rate_limit_cooldown_str) if rate_limit_cooldown_str and rate_limit_cooldown_str.isdigit() else 21600
+
+    return WorkerPolicy(
+        normal_cooldown_seconds=max(0, cooldown),
+        navigation_interval_seconds=delay,
+        job_timeout_seconds=timeout,
+        rate_limit_cooldown_seconds=max(0, rate_limit),
+    )
+
+
 def _compose_worker(
     pipeline_settings: PipelineSettings,
     browser_settings: BrowserSettings,
@@ -131,10 +157,12 @@ def _compose_worker(
             navigation_pacer,
         )
 
+    policy = load_worker_policy()
     worker = CrawlWorker(
         repository,
         runtime_factory,
         worker_id=worker_id,
+        policy=policy,
     )
     return repository, worker
 

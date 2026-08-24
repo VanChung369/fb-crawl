@@ -83,7 +83,7 @@ def create_app(
     )
     app.include_router(create_stats_router(job_repository, user_repository, resolved_session_pool, resolved_proxy_pool, auth))
     app.include_router(create_export_router(user_repository, auth))
-    app.include_router(create_settings_router(auth=auth))
+    app.include_router(create_settings_router(job_repository=job_repository, auth=auth))
 
     _install_api_authentication(app, auth)
 

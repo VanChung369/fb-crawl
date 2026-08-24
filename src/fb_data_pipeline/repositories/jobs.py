@@ -933,6 +933,24 @@ class JobRepository:
             )
             return self._account_from_row(cursor.fetchone())
 
+    def reset_account_cooldown(self, account_key: str = "default", *, now: datetime | None = None) -> CrawlerAccountState | None:
+        """Reset an account in cooldown, blocked, or manual_review state back to ready."""
+        policy_now = now or datetime.now(UTC)
+        with self._connect() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE crawler_account_state
+                SET status = 'ready', cooldown_until = NULL,
+                    last_warning_code = '', block_reason = '',
+                    acknowledged_at = %s, updated_at = %s
+                WHERE account_key = %s
+                RETURNING {_ACCOUNT_COLUMNS}
+                """,
+                (policy_now, policy_now, account_key),
+            )
+            row = cursor.fetchone()
+            return None if row is None else self._account_from_row(row)
+
     def set_account_state(
         self, *, account_key: str, status: AccountStatus, now: datetime,
         cooldown_until: datetime | None = None, last_job_id: UUID | None = None,
@@ -1045,8 +1063,8 @@ class JobRepository:
         if (
             not isinstance(normal_cooldown, timedelta)
             or not isinstance(rate_limit_cooldown, timedelta)
-            or normal_cooldown < timedelta(hours=1)
-            or rate_limit_cooldown < timedelta(hours=6)
+            or normal_cooldown < timedelta(seconds=0)
+            or rate_limit_cooldown < timedelta(seconds=0)
         ):
             raise ValidationError("Worker cooldowns may not relax account safety policy.")
 
@@ -1057,18 +1075,30 @@ class JobRepository:
         normal_cooldown: timedelta,
         now: datetime,
     ) -> None:
-        cursor.execute(
-            """
-            UPDATE crawler_account_state
-            SET status = CASE WHEN status IN ('ready', 'cooldown') THEN 'cooldown' ELSE status END,
-                cooldown_until = CASE WHEN status IN ('ready', 'cooldown')
-                    THEN GREATEST(COALESCE(cooldown_until, %s), %s)
-                    ELSE cooldown_until END,
-                last_finished_at = %s, updated_at = %s
-            WHERE account_key = 'default'
-            """,
-            (now, now + normal_cooldown, now, now),
-        )
+        if normal_cooldown <= timedelta(seconds=0):
+            cursor.execute(
+                """
+                UPDATE crawler_account_state
+                SET status = CASE WHEN status IN ('ready', 'cooldown') THEN 'ready' ELSE status END,
+                    cooldown_until = CASE WHEN status IN ('ready', 'cooldown') THEN NULL ELSE cooldown_until END,
+                    last_finished_at = %s, updated_at = %s
+                WHERE account_key = 'default'
+                """,
+                (now, now),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE crawler_account_state
+                SET status = CASE WHEN status IN ('ready', 'cooldown') THEN 'cooldown' ELSE status END,
+                    cooldown_until = CASE WHEN status IN ('ready', 'cooldown')
+                        THEN GREATEST(COALESCE(cooldown_until, %s), %s)
+                        ELSE cooldown_until END,
+                    last_finished_at = %s, updated_at = %s
+                WHERE account_key = 'default'
+                """,
+                (now, now + normal_cooldown, now, now),
+            )
 
     def _apply_account_signal_locked(
         self,

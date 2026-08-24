@@ -1012,6 +1012,76 @@
               </div>
             </div>
           </div>
+
+          <!-- Row 2: Worker & Anti-Ban Cooldown Settings -->
+          <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-top: 20px;">
+            <!-- Left: Worker Policy Form -->
+            <div class="panel">
+              <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding: 16px 20px;">
+                <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary);">🛡️ Cấu Hình Worker & Thời Gian Nghỉ (Anti-Ban Cooldown)</h4>
+              </div>
+              <form id="form-update-worker-settings" style="padding: 20px;">
+                <div class="form-group">
+                  <label for="cfg-worker-cooldown">Thời gian nghỉ giữa các Jobs (CRAWL_WORKER_COOLDOWN_SECONDS)</label>
+                  <input type="number" id="cfg-worker-cooldown" class="form-control" value="3600" min="0" max="86400" required>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+                    Nhập <strong>0</strong> để chạy liên tục không nghỉ giữa các Jobs (Mặc định: 3600s = 1 giờ).
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label for="cfg-worker-nav-delay">Độ trễ cuộn trang (Giây)</label>
+                    <input type="number" id="cfg-worker-nav-delay" class="form-control" value="8" min="8" max="120" required>
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">Tối thiểu 8s</div>
+                  </div>
+                  <div class="form-group">
+                    <label for="cfg-worker-timeout">Timeout tối đa 1 Job (Giây)</label>
+                    <input type="number" id="cfg-worker-timeout" class="form-control" value="1800" min="10" max="1800" required>
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">Tối đa 1800s (30 phút)</div>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-worker-ratelimit-cooldown">Thời gian nghỉ khi bị Facebook chặn tạm thời (Giây)</label>
+                  <input type="number" id="cfg-worker-ratelimit-cooldown" class="form-control" value="21600" min="0" max="604800" required>
+                  <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 21600s = 6 giờ nghỉ dưỡng nick khi gặp Rate Limit.</div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                  <button type="submit" class="btn btn-primary" id="btn-save-worker-settings" style="width: 100%;">
+                    💾 Lưu Cấu Hình Worker (.env)
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Right: Live Account Status & Instant Reset -->
+            <div class="panel">
+              <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding: 16px 20px;">
+                <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary);">⚡ Trạng Thái Tài Khoản & Mở Khóa Cooldown</h4>
+              </div>
+              <div style="padding: 20px;">
+                <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+                  <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px;">Trạng thái tài khoản cào (default account):</div>
+                  <div id="worker-account-status-badge" style="font-size: 1rem; font-weight: 600; margin-bottom: 6px;">
+                    <span class="pill info">Đang kiểm tra...</span>
+                  </div>
+                  <div id="worker-account-cooldown-info" style="font-size: 0.8rem; color: var(--text-muted);">
+                    -
+                  </div>
+                </div>
+
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+                  Nếu bạn muốn cào ngay lập tức mà không phải chờ hết thời gian nghỉ Cooldown, bấm nút bên dưới để giải phóng tài khoản ngay lập tức:
+                </p>
+
+                <button type="button" class="btn btn-primary" id="btn-reset-cooldown" style="width: 100%; height: 44px; font-weight: 600;">
+                  ⚡ Mở Khóa / Bỏ Qua Cooldown Ngay
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
       </main>
     </div>

@@ -302,6 +302,12 @@ class DashboardApp {
     const formSettings = document.getElementById('form-update-settings');
     if (formSettings) formSettings.addEventListener('submit', (e) => this.handleSaveFBNumberSettings(e));
 
+    const formWorkerSettings = document.getElementById('form-update-worker-settings');
+    if (formWorkerSettings) formWorkerSettings.addEventListener('submit', (e) => this.handleSaveWorkerSettings(e));
+
+    const btnResetCooldown = document.getElementById('btn-reset-cooldown');
+    if (btnResetCooldown) btnResetCooldown.addEventListener('click', () => this.handleResetCooldown());
+
     const btnToggleToken = document.getElementById('btn-toggle-token-visibility');
     if (btnToggleToken) {
       btnToggleToken.addEventListener('click', () => {
@@ -1436,27 +1442,125 @@ class DashboardApp {
   }
 
   // ==========================================
-  // VIEW 6: SETTINGS (FBNUMBER API)
+  // VIEW 6: SETTINGS (FBNUMBER API & WORKER COOLDOWN)
   // ==========================================
   async loadSettingsData() {
-    const data = await this.fetchApi('/api/v1/settings/fbnumber');
-    if (!data) return;
+    const [fbData, workerData] = await Promise.all([
+      this.fetchApi('/api/v1/settings/fbnumber'),
+      this.fetchApi('/api/v1/settings/worker')
+    ]);
 
-    const urlInput = document.getElementById('cfg-fbnumber-url');
-    const tokenInput = document.getElementById('cfg-fbnumber-token');
-    const timeoutInput = document.getElementById('cfg-fbnumber-timeout');
-    const retriesInput = document.getElementById('cfg-fbnumber-retries');
-    const countryInput = document.getElementById('cfg-country-code');
+    if (fbData) {
+      const data = fbData;
+      const urlInput = document.getElementById('cfg-fbnumber-url');
+      const tokenInput = document.getElementById('cfg-fbnumber-token');
+      const timeoutInput = document.getElementById('cfg-fbnumber-timeout');
+      const retriesInput = document.getElementById('cfg-fbnumber-retries');
+      const countryInput = document.getElementById('cfg-country-code');
 
-    if (urlInput) urlInput.value = data.api_url || '';
-    if (tokenInput) {
-      tokenInput.value = data.api_token || '';
-      tokenInput.required = false;
-      tokenInput.placeholder = data['api_token_configured'] ? 'Đang dùng token từ .env - để trống vẫn giữ token này' : 'Bearer Token...';
+      if (urlInput) urlInput.value = data.api_url || '';
+      if (tokenInput) {
+        tokenInput.value = data.api_token || '';
+        tokenInput.required = false;
+        tokenInput.placeholder = data['api_token_configured'] ? 'Đang dùng token từ .env - để trống vẫn giữ token này' : 'Bearer Token...';
+      }
+      if (timeoutInput) timeoutInput.value = data.timeout_seconds || 15;
+      if (retriesInput) retriesInput.value = data.max_retries || 2;
+      if (countryInput) countryInput.value = data.default_country_code || '84';
     }
-    if (timeoutInput) timeoutInput.value = data.timeout_seconds || 15;
-    if (retriesInput) retriesInput.value = data.max_retries || 2;
-    if (countryInput) countryInput.value = data.default_country_code || '84';
+
+    if (workerData) {
+      const cooldownInput = document.getElementById('cfg-worker-cooldown');
+      const navDelayInput = document.getElementById('cfg-worker-nav-delay');
+      const timeoutInput = document.getElementById('cfg-worker-timeout');
+      const rateLimitInput = document.getElementById('cfg-worker-ratelimit-cooldown');
+      const badgeEl = document.getElementById('worker-account-status-badge');
+      const infoEl = document.getElementById('worker-account-cooldown-info');
+
+      if (cooldownInput) cooldownInput.value = workerData.cooldown_seconds ?? 3600;
+      if (navDelayInput) navDelayInput.value = workerData.navigation_delay_seconds ?? 8;
+      if (timeoutInput) timeoutInput.value = workerData.job_timeout_seconds ?? 1800;
+      if (rateLimitInput) rateLimitInput.value = workerData.rate_limit_cooldown_seconds ?? 21600;
+
+      if (badgeEl) {
+        const st = workerData.account_status;
+        const pill = st === 'ready'
+          ? '<span class="pill success">✅ Sẵn sàng nhận Job</span>'
+          : st === 'cooldown'
+            ? '<span class="pill warning">⏳ Đang nghỉ dưỡng nick (Cooldown)</span>'
+            : `<span class="pill danger">❌ Trạng thái: ${this.escapeHtml(st)}</span>`;
+        badgeEl.innerHTML = pill;
+      }
+
+      if (infoEl) {
+        if (workerData.account_status === 'cooldown' && workerData.cooldown_until) {
+          infoEl.textContent = `Nghỉ đến: ${new Date(workerData.cooldown_until).toLocaleTimeString('vi-VN')} (${new Date(workerData.cooldown_until).toLocaleDateString('vi-VN')})`;
+        } else if (workerData.account_status === 'ready') {
+          infoEl.textContent = 'Tài khoản ở trạng thái sẵn sàng thực hiện Job tiếp theo ngay khi có trong hàng đợi.';
+        } else {
+          infoEl.textContent = 'Tài khoản cần kiểm tra hoặc đã dừng an toàn.';
+        }
+      }
+    }
+  }
+
+  async handleSaveWorkerSettings(e) {
+    e.preventDefault();
+    const btn = document.getElementById('btn-save-worker-settings');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang lưu...';
+    }
+
+    const payload = {
+      cooldown_seconds: parseInt(document.getElementById('cfg-worker-cooldown').value, 10) || 0,
+      navigation_delay_seconds: parseInt(document.getElementById('cfg-worker-nav-delay').value, 10) || 8,
+      job_timeout_seconds: parseInt(document.getElementById('cfg-worker-timeout').value, 10) || 1800,
+      rate_limit_cooldown_seconds: parseInt(document.getElementById('cfg-worker-ratelimit-cooldown').value, 10) || 21600
+    };
+
+    const res = await this.fetchApi('/api/v1/settings/worker', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '💾 Lưu Cấu Hình Worker (.env)';
+    }
+
+    if (res) {
+      this.showToast('Đã lưu cấu hình Worker Cooldown vào .env thành công!');
+      this.loadSettingsData();
+    } else {
+      alert('Không thể lưu cấu hình Worker. Vui lòng kiểm tra lại!');
+    }
+  }
+
+  async handleResetCooldown() {
+    if (!confirm('Bạn có chắc chắn muốn BỎ QUA thời gian Cooldown và đưa nick về trạng thái SẴN SÀNG ngay lập tức?')) {
+      return;
+    }
+
+    const btn = document.getElementById('btn-reset-cooldown');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang mở khóa...';
+    }
+
+    const res = await this.fetchApi('/api/v1/settings/reset-cooldown', { method: 'POST' });
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Mở Khóa / Bỏ Qua Cooldown Ngay';
+    }
+
+    if (res && res.status === 'success') {
+      this.showToast(res.message || 'Đã mở khóa Cooldown thành công!');
+      this.loadSettingsData();
+    } else {
+      alert('Không thể reset cooldown. Vui lòng kiểm tra API!');
+    }
   }
 
   async handleSaveFBNumberSettings(e) {

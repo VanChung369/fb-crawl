@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -60,6 +61,26 @@ class FBNumberTestResponse(BaseModel):
     latency_ms: float
     message: str
     raw_response: str
+
+
+class WorkerSettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cooldown_seconds: int
+    navigation_delay_seconds: int
+    job_timeout_seconds: int
+    rate_limit_cooldown_seconds: int
+    account_status: str
+    cooldown_until: str | None
+
+
+class WorkerSettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cooldown_seconds: int = Field(default=3600, ge=0, le=86400)
+    navigation_delay_seconds: int = Field(default=8, ge=8, le=120)
+    job_timeout_seconds: int = Field(default=1800, ge=10, le=1800)
+    rate_limit_cooldown_seconds: int = Field(default=21600, ge=0, le=604800)
 
 
 def update_env_file(updates: dict[str, str], env_path: Path | str = ".env") -> None:
@@ -134,7 +155,26 @@ def effective_fbnumber_config() -> dict[str, str]:
     }
 
 
-def create_settings_router(*, auth: ApiKeyAuth) -> APIRouter:
+def effective_worker_config() -> dict[str, int]:
+    env_file = read_env_file_values()
+    cooldown_str = os.environ.get("CRAWL_WORKER_COOLDOWN_SECONDS") or env_file.get("CRAWL_WORKER_COOLDOWN_SECONDS")
+    delay_str = os.environ.get("CRAWL_WORKER_NAVIGATION_DELAY_SECONDS") or env_file.get("CRAWL_WORKER_NAVIGATION_DELAY_SECONDS")
+    timeout_str = os.environ.get("CRAWL_WORKER_JOB_TIMEOUT_SECONDS") or env_file.get("CRAWL_WORKER_JOB_TIMEOUT_SECONDS")
+    rate_limit_cooldown_str = os.environ.get("CRAWL_WORKER_RATE_LIMIT_COOLDOWN_SECONDS") or env_file.get("CRAWL_WORKER_RATE_LIMIT_COOLDOWN_SECONDS")
+
+    return {
+        "cooldown_seconds": max(0, int(cooldown_str)) if cooldown_str and cooldown_str.isdigit() else 3600,
+        "navigation_delay_seconds": max(8, int(delay_str)) if delay_str and delay_str.isdigit() else 8,
+        "job_timeout_seconds": min(1800, max(10, int(timeout_str))) if timeout_str and timeout_str.isdigit() else 1800,
+        "rate_limit_cooldown_seconds": max(0, int(rate_limit_cooldown_str)) if rate_limit_cooldown_str and rate_limit_cooldown_str.isdigit() else 21600,
+    }
+
+
+def create_settings_router(
+    job_repository: object = None,
+    *,
+    auth: ApiKeyAuth,
+) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1/settings",
         tags=["settings"],
@@ -225,6 +265,89 @@ def create_settings_router(*, auth: ApiKeyAuth) -> APIRouter:
                 latency_ms=latency,
                 message="Could not connect to the FBNumber server.",
                 raw_response="",
+            )
+
+    @router.get("/worker", response_model=WorkerSettingsResponse, responses=ERROR_RESPONSES)
+    def get_worker_settings() -> WorkerSettingsResponse:
+        config = effective_worker_config()
+        status_name = "ready"
+        cooldown_until_str = None
+        if job_repository is not None:
+            try:
+                if hasattr(job_repository, "get_account"):
+                    account = job_repository.get_account("default")
+                    if account is not None and hasattr(account, "status"):
+                        st = getattr(account.status, "value", account.status)
+                        if isinstance(st, str):
+                            status_name = st
+                        cd = getattr(account, "cooldown_until", None)
+                        if isinstance(cd, datetime):
+                            cooldown_until_str = cd.isoformat()
+                        elif isinstance(cd, str):
+                            cooldown_until_str = cd
+            except Exception:
+                pass
+        else:
+            try:
+                settings = load_pipeline_settings()
+                from fb_data_pipeline.repositories.jobs import JobRepository
+                repo = JobRepository(settings.database_url)
+                account = repo.get_account("default")
+                if account is not None:
+                    status_name = account.status.value
+                    if account.cooldown_until:
+                        cooldown_until_str = account.cooldown_until.isoformat()
+            except Exception:
+                pass
+
+        return WorkerSettingsResponse(
+            cooldown_seconds=config["cooldown_seconds"],
+            navigation_delay_seconds=config["navigation_delay_seconds"],
+            job_timeout_seconds=config["job_timeout_seconds"],
+            rate_limit_cooldown_seconds=config["rate_limit_cooldown_seconds"],
+            account_status=status_name,
+            cooldown_until=cooldown_until_str,
+        )
+
+    @router.post("/worker", response_model=WorkerSettingsResponse, responses=ERROR_RESPONSES)
+    def update_worker_settings(request: WorkerSettingsUpdateRequest) -> WorkerSettingsResponse:
+        updates = {
+            "CRAWL_WORKER_COOLDOWN_SECONDS": str(request.cooldown_seconds),
+            "CRAWL_WORKER_NAVIGATION_DELAY_SECONDS": str(request.navigation_delay_seconds),
+            "CRAWL_WORKER_JOB_TIMEOUT_SECONDS": str(request.job_timeout_seconds),
+            "CRAWL_WORKER_RATE_LIMIT_COOLDOWN_SECONDS": str(request.rate_limit_cooldown_seconds),
+        }
+        update_env_file(updates)
+        return get_worker_settings()
+
+    @router.post("/reset-cooldown", responses=ERROR_RESPONSES)
+    def reset_cooldown() -> dict[str, str]:
+        if job_repository is not None:
+            try:
+                if hasattr(job_repository, "reset_account_cooldown"):
+                    job_repository.reset_account_cooldown("default")
+                return {
+                    "status": "success",
+                    "message": "Đã reset trạng thái Cooldown thành công. Nick đã sẵn sàng chạy Job tiếp theo.",
+                }
+            except Exception as err:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Không thể reset cooldown: {str(err)}",
+                )
+        try:
+            settings = load_pipeline_settings()
+            from fb_data_pipeline.repositories.jobs import JobRepository
+            repo = JobRepository(settings.database_url)
+            repo.reset_account_cooldown("default")
+            return {
+                "status": "success",
+                "message": "Đã reset trạng thái Cooldown thành công. Nick đã sẵn sàng chạy Job tiếp theo.",
+            }
+        except Exception as err:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Không thể reset cooldown: {str(err)}",
             )
 
     return router

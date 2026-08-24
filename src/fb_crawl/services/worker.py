@@ -62,16 +62,20 @@ class WorkerPolicy:
     rate_limit_cooldown_seconds: int = 21600
 
     def __post_init__(self) -> None:
-        values = (
+        durations = (
             self.lease_seconds,
             self.heartbeat_seconds,
             self.navigation_interval_seconds,
             self.job_timeout_seconds,
+        )
+        cooldowns = (
             self.normal_cooldown_seconds,
             self.rate_limit_cooldown_seconds,
         )
-        if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in values):
+        if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in durations):
             raise ValueError("Worker policy durations must be positive integers.")
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in cooldowns):
+            raise ValueError("Worker policy cooldowns must be non-negative integers.")
         if self.lease_seconds > 60:
             raise ValueError("Worker leases may not exceed sixty seconds.")
         if self.heartbeat_seconds > 10 or self.heartbeat_seconds >= self.lease_seconds:
@@ -80,10 +84,6 @@ class WorkerPolicy:
             raise ValueError("Navigation pacing must be at least eight seconds.")
         if self.job_timeout_seconds > 1800:
             raise ValueError("Worker timeout may not exceed thirty minutes.")
-        if self.normal_cooldown_seconds < 3600:
-            raise ValueError("Normal cooldown must be at least sixty minutes.")
-        if self.rate_limit_cooldown_seconds < 21600:
-            raise ValueError("Rate-limit cooldown must be at least six hours.")
 
 
 class _WaitEvent(Protocol):

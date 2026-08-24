@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import ast
 from unittest.mock import MagicMock
+import pytest
 from fastapi.testclient import TestClient
 
 from fb_crawl.api.app import create_app
@@ -366,3 +367,39 @@ def test_dashboard_static_page_served(tmp_path: Path) -> None:
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
     assert "fb-crawl" in res.text
+
+
+def test_worker_settings_and_reset_cooldown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    get_res = client.get("/api/v1/settings/worker", headers=HEADERS)
+    assert get_res.status_code == 200
+    data = get_res.json()
+    assert "cooldown_seconds" in data
+    assert "navigation_delay_seconds" in data
+    assert "account_status" in data
+
+    post_res = client.post(
+        "/api/v1/settings/worker",
+        headers=HEADERS,
+        json={
+            "cooldown_seconds": 60,
+            "navigation_delay_seconds": 10,
+            "job_timeout_seconds": 1200,
+            "rate_limit_cooldown_seconds": 3600,
+        },
+    )
+    assert post_res.status_code == 200
+    updated = post_res.json()
+    assert updated["cooldown_seconds"] == 60
+    assert updated["navigation_delay_seconds"] == 10
+    assert updated["job_timeout_seconds"] == 1200
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "CRAWL_WORKER_COOLDOWN_SECONDS=60" in env_text
+
+    reset_res = client.post("/api/v1/settings/reset-cooldown", headers=HEADERS)
+    assert reset_res.status_code == 200
+    assert reset_res.json()["status"] == "success"
