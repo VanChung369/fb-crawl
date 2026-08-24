@@ -135,7 +135,7 @@ class DashboardApp {
 
     // Settings
     if (this.btnSettings) this.btnSettings.addEventListener('click', () => this.openModal(this.modalSettings));
-    const btnSaveSettings = document.getElementById('btn-save-settings');
+    const btnSaveSettings = document.getElementById('btn-save-api-key-settings');
     if (btnSaveSettings) btnSaveSettings.addEventListener('click', () => this.saveSettings());
 
     // Refresh
@@ -1565,7 +1565,7 @@ class DashboardApp {
 
   async handleSaveFBNumberSettings(e) {
     e.preventDefault();
-    const btn = document.getElementById('btn-save-settings');
+    const btn = document.getElementById('btn-save-fbnumber-settings');
     if (btn) {
       btn.disabled = true;
       btn.textContent = '⏳ Đang lưu...';

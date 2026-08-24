@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html.parser import HTMLParser
 from pathlib import Path
 import re
 
@@ -8,6 +9,17 @@ ROOT = Path(__file__).parents[3]
 INDEX_PATH = ROOT / "src" / "fb_ui" / "index.html"
 APP_JS_PATH = ROOT / "src" / "fb_ui" / "js" / "app.js"
 CSS_PATH = ROOT / "src" / "fb_ui" / "css" / "styles.css"
+
+
+class IdCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for name, value in attrs:
+            if name == "id" and value:
+                self.ids.append(value)
 
 
 def test_dashboard_login_flow_does_not_collect_facebook_password() -> None:
@@ -118,3 +130,19 @@ def test_dashboard_leads_renders_birth_date_and_facebook_profile_link() -> None:
     assert "u.birth_date" in script
     assert "facebook.com/" in script
     assert 'target="_blank"' in script
+
+
+def test_dashboard_settings_controls_have_distinct_save_button_ids() -> None:
+    """Break caught: duplicate save IDs wire the FBNumber form to API-key settings."""
+
+    html = INDEX_PATH.read_text(encoding="utf-8")
+    parser = IdCollector()
+    parser.feed(html)
+
+    duplicated_ids = {id_value for id_value in parser.ids if parser.ids.count(id_value) > 1}
+
+    assert duplicated_ids == set()
+    assert 'id="btn-save-fbnumber-settings"' in html
+    assert 'document.getElementById(\'btn-save-fbnumber-settings\')' in APP_JS_PATH.read_text(
+        encoding="utf-8"
+    )
