@@ -295,10 +295,11 @@ def create_firefox_driver(
 
 
 def create_browser(settings: BrowserSettings):
+    errors = []
     try:
         return create_firefox_driver(settings)
-    except ConfigurationError as firefox_error:
-        last_error: Exception = firefox_error
+    except Exception as firefox_error:
+        errors.append(f"Firefox: {firefox_error}")
 
     try:
         from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -311,11 +312,12 @@ def create_browser(settings: BrowserSettings):
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-setuid-sandbox")
         if settings.proxy:
             chrome_options.add_argument(f"--proxy-server={settings.proxy}")
         return webdriver.Chrome(options=chrome_options)
-    except WebDriverException as error:
-        last_error = error
+    except Exception as error:
+        errors.append(f"Chrome: {error}")
 
     try:
         from selenium.webdriver.edge.options import Options as EdgeOptions
@@ -325,12 +327,16 @@ def create_browser(settings: BrowserSettings):
             edge_options.add_argument("--headless=new")
         edge_options.add_argument("--window-size=1920,1080")
         edge_options.add_argument("--disable-notifications")
+        edge_options.add_argument("--no-sandbox")
+        edge_options.add_argument("--disable-gpu")
+        edge_options.add_argument("--disable-dev-shm-usage")
         if settings.proxy:
             edge_options.add_argument(f"--proxy-server={settings.proxy}")
         return webdriver.Edge(options=edge_options)
-    except WebDriverException as error:
-        last_error = error
+    except Exception as error:
+        errors.append(f"Edge: {error}")
 
+    error_details = " | ".join(errors)
     raise ConfigurationError(
-        "Could not start a supported browser. Install Firefox, Chrome, or Edge and the browser extra."
-    ) from last_error
+        f"Could not start a supported browser. ({error_details})"
+    )
