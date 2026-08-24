@@ -94,6 +94,9 @@ def _compose_api(
     from fb_data_pipeline.repositories.users import UserQueryRepository
 
     statement_timeout = pipeline_settings.database_statement_timeout_seconds
+    migration_runner = MigrationRunner(pipeline_settings.database_url)
+    migration_runner.apply()
+
     job_repository = JobRepository(
         pipeline_settings.database_url,
         statement_timeout_seconds=statement_timeout,
@@ -102,7 +105,6 @@ def _compose_api(
         pipeline_settings.database_url,
         statement_timeout_seconds=statement_timeout,
     )
-    migration_runner = MigrationRunner(pipeline_settings.database_url)
     return create_app(
         api_settings,
         JobService(job_repository),
