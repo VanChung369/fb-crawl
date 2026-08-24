@@ -12,6 +12,8 @@ from fb_crawl.api.schemas import (
     ApiErrorResponse,
     EVENT_COUNTER_NAMES,
     EventCountersResponse,
+    GroupBatchCreateRequest,
+    GroupBatchCreateResponse,
     JobCreateRequest,
     JobEventPageResponse,
     JobEventResponse,
@@ -89,6 +91,56 @@ def create_jobs_router(
         return JobPageResponse(
             items=[_job_response(job) for job in page.items],
             next_cursor=page.next_cursor,
+        )
+
+    @router.post(
+        "/group-batches",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=GroupBatchCreateResponse,
+        responses=ERROR_RESPONSES,
+    )
+    def create_group_batches(
+        request: GroupBatchCreateRequest,
+        idempotency: Annotated[
+            str,
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=128,
+            ),
+        ],
+    ) -> GroupBatchCreateResponse:
+        action = AuthenticatedAction.MEMBERS
+        options = SafeJobOptions.from_mapping(
+            action,
+            {
+                "max_users": request.batch_size,
+                "max_duration_seconds": request.batch_duration_seconds,
+                "navigation_delay_seconds": request.navigation_delay_seconds,
+                "steps": request.steps,
+                "call_fbnumber": request.call_fbnumber,
+            },
+        )
+        target = canonical_job_target(action, request.group_url)
+        jobs: list[CrawlJob] = []
+        created_count = 0
+        for index in range(1, request.batch_count + 1):
+            command = JobCreateCommand(
+                action=action,
+                targets=(target,),
+                options=options,
+            )
+            job, created = job_service.create(
+                command,
+                idempotency_key=f"{idempotency}:batch:{index}",
+            )
+            if created:
+                created_count += 1
+            jobs.append(job)
+        return GroupBatchCreateResponse(
+            total_requested=request.batch_count,
+            total_created=created_count,
+            items=[_job_response(job) for job in jobs],
         )
 
     @router.get(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit, urlunsplit
+
 from fastapi import APIRouter, Depends, status
 
 from fb_crawl.api.dependencies import ApiKeyAuth
@@ -21,6 +23,25 @@ ERROR_RESPONSES = {
 }
 
 
+def _proxy_display_url(raw_url: str) -> str:
+    parsed = urlsplit(raw_url)
+    if not parsed.hostname or parsed.port is None:
+        return raw_url
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return urlunsplit((parsed.scheme, f"{host}:{parsed.port}", "", "", ""))
+
+
+def _resolve_proxy_key(proxy_pool: ProxyPool, value: str) -> str:
+    for entry in proxy_pool._entries:
+        if entry.raw_url == value or entry.formatted_url == value:
+            return entry.raw_url
+        if _proxy_display_url(entry.raw_url) == value:
+            return entry.raw_url
+    return value
+
+
 def create_proxies_router(proxy_pool: ProxyPool, auth: ApiKeyAuth) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1/proxies",
@@ -32,7 +53,7 @@ def create_proxies_router(proxy_pool: ProxyPool, auth: ApiKeyAuth) -> APIRouter:
     def list_proxies() -> ProxyListResponse:
         items = [
             ProxyItemResponse(
-                raw_url=p.raw_url,
+                display_url=_proxy_display_url(p.raw_url),
                 scheme=p.scheme,
                 host=p.host,
                 port=p.port,
@@ -58,11 +79,12 @@ def create_proxies_router(proxy_pool: ProxyPool, auth: ApiKeyAuth) -> APIRouter:
     @router.patch("", response_model=ProxyItemResponse, responses=ERROR_RESPONSES)
     def update_proxy(request: ProxyUpdateRequest) -> ProxyItemResponse:
         from fastapi import HTTPException
-        entry = proxy_pool.update_proxy(request.raw_url, new_url=request.new_url, status=request.status)
+        proxy_key = _resolve_proxy_key(proxy_pool, request.raw_url)
+        entry = proxy_pool.update_proxy(proxy_key, new_url=request.new_url, status=request.status)
         if not entry:
             raise HTTPException(status_code=404, detail="Không tìm thấy proxy tương ứng.")
         return ProxyItemResponse(
-            raw_url=entry.raw_url,
+            display_url=_proxy_display_url(entry.raw_url),
             scheme=entry.scheme,
             host=entry.host,
             port=entry.port,
@@ -75,7 +97,8 @@ def create_proxies_router(proxy_pool: ProxyPool, auth: ApiKeyAuth) -> APIRouter:
     @router.delete("", responses=ERROR_RESPONSES)
     def delete_proxy(request: ProxyDeleteRequest):
         from fastapi import HTTPException
-        removed = proxy_pool.remove_proxy(request.raw_url)
+        proxy_key = _resolve_proxy_key(proxy_pool, request.raw_url)
+        removed = proxy_pool.remove_proxy(proxy_key)
         if not removed:
             raise HTTPException(status_code=404, detail="Không tìm thấy proxy để xóa.")
         return {"status": "success", "message": "Proxy đã được xóa khỏi Pool thành công."}

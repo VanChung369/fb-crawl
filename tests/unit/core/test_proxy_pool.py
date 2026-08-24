@@ -102,6 +102,8 @@ def test_session_pool_integrates_with_proxy_pool(tmp_path: Path) -> None:
 
     proxy_pool = ProxyPool(["http://10.0.0.1:8080", "http://10.0.0.2:8080"])
     session_pool = SessionPool([s1, s2], proxy_pool=proxy_pool)
+    session_pool.mark_success(s1)
+    session_pool.mark_success(s2)
 
     sess1 = session_pool.next_session()
     sess2 = session_pool.next_session()

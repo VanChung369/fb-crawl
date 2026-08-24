@@ -8,6 +8,9 @@ from pathlib import Path
 
 def load_dotenv(path: Path | str = ".env") -> None:
     """Load key-value pairs from a .env file into os.environ if not already present."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+
     env_path = Path(path)
     if not env_path.is_file():
         return

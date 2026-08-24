@@ -68,7 +68,7 @@ def _build_authenticated_components(
     """Construct browser adapters only when an authenticated runtime is needed."""
     try:
         from fb_crawl.adapters.browser.comments import CommentsCollector
-        from fb_crawl.adapters.browser.driver import create_firefox_driver
+        from fb_crawl.adapters.browser.driver import create_browser
         from fb_crawl.adapters.browser.inspect import BrowserInspector
         from fb_crawl.adapters.browser.login import SessionManager
         from fb_crawl.adapters.browser.members import MembersCollector
@@ -159,7 +159,7 @@ def _build_authenticated_components(
         return CheckpointingService(service)
 
     return AuthenticatedComponents(
-        create_browser=create_firefox_driver,
+        create_browser=create_browser,
         create_service=create_service,
     )
 

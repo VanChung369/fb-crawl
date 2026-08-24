@@ -73,7 +73,14 @@ def create_app(
     app.include_router(create_account_router(job_service, auth))
     app.include_router(create_users_router(user_repository, auth))
     app.include_router(create_proxies_router(resolved_proxy_pool, auth))
-    app.include_router(create_sessions_router(resolved_session_pool, resolved_sessions_dir, auth))
+    app.include_router(
+        create_sessions_router(
+            resolved_session_pool,
+            resolved_sessions_dir,
+            auth,
+            allow_local_browser_login=settings.host in {"127.0.0.1", "localhost", "::1"},
+        )
+    )
     app.include_router(create_stats_router(job_repository, user_repository, resolved_session_pool, resolved_proxy_pool, auth))
     app.include_router(create_export_router(user_repository, auth))
     app.include_router(create_settings_router(auth=auth))

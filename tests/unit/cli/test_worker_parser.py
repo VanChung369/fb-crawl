@@ -7,7 +7,10 @@ import sys
 
 import pytest
 
+from fb_crawl.config import BrowserSettings
+from fb_crawl.core.exceptions import ConfigurationError
 from fb_crawl.cli import app
+from fb_crawl.cli.worker import _require_saved_session
 
 
 def test_worker_run_parser_builds_only_the_run_command() -> None:
@@ -102,3 +105,21 @@ def test_main_dispatches_worker_run(monkeypatch) -> None:
 
     assert app.main(["worker", "run"]) == 17
     assert seen == ["run"]
+
+
+def test_worker_requires_exact_configured_session_without_pool_autocopy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Break caught: the worker silently copies another account's cookies."""
+
+    monkeypatch.chdir(tmp_path)
+    pool_session = tmp_path / "runtime" / "sessions" / "other-account.json"
+    pool_session.parent.mkdir(parents=True)
+    pool_session.write_text("[]", encoding="utf-8")
+    configured = tmp_path / "runtime" / "session.json"
+
+    with pytest.raises(ConfigurationError, match="existing saved Facebook session"):
+        _require_saved_session(BrowserSettings(session_path=configured))
+
+    assert not configured.exists()

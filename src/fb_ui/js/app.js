@@ -342,10 +342,12 @@ class DashboardApp {
     const groupDepth = document.getElementById('group-opt-depth');
     const rowSafetyParams = document.getElementById('row-safety-params');
     const rowUsersSteps = document.getElementById('row-users-steps');
+    const autoBatchOptions = document.getElementById('group-auto-batch-options');
     const enrichCheckbox = document.getElementById('job-opt-enrich-profiles');
     const subOptionsEnrich = document.getElementById('sub-options-enrich');
 
     if (!targets) return;
+    if (autoBatchOptions) autoBatchOptions.style.display = action === 'members' ? 'block' : 'none';
 
     if (action === 'members') {
       targets.placeholder = 'https://www.facebook.com/groups/782850425639223\nhttps://www.facebook.com/groups/example_group/members';
@@ -429,25 +431,28 @@ class DashboardApp {
 
   async fetchApi(endpoint, options = {}) {
     const url = `${this.baseUrl}${endpoint}`;
+    const { throwOnError = false, ...fetchOptions } = options;
     const headers = {
       'Content-Type': 'application/json',
       ...(this.apiKey ? { 'X-API-Key': this.apiKey } : {}),
-      ...(options.headers || {})
+      ...(fetchOptions.headers || {})
     };
 
     try {
-      const response = await fetch(url, { ...options, headers });
+      const response = await fetch(url, { ...fetchOptions, headers });
       if (response.status === 401 || response.status === 403) {
         this.setOnlineStatus(false, 'Sai API Key');
+        if (throwOnError) throw new Error('Sai API Key hoặc không có quyền truy cập.');
         return null;
       }
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Lỗi HTTP ${response.status}`);
+        throw new Error(errorData.detail || errorData.message || `Lỗi HTTP ${response.status}`);
       }
       return await response.json();
     } catch (err) {
       console.warn(`Fetch error for ${endpoint}:`, err);
+      if (throwOnError) throw err;
       return null;
     }
   }
@@ -474,6 +479,19 @@ class DashboardApp {
       this.statusIndicator.classList.remove('online');
       this.statusText.textContent = text || 'Offline';
     }
+  }
+
+  escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  escapeAttr(value) {
+    return this.escapeHtml(value).replace(/`/g, '&#96;');
   }
 
   loadCurrentViewData() {
@@ -510,13 +528,13 @@ class DashboardApp {
       } else {
         this.tableRecentJobs.innerHTML = jobsData.items.map(job => `
           <tr>
-            <td><span style="font-family:monospace; color:var(--accent-secondary); font-weight:600;">${job.id.substring(0, 8)}...</span></td>
-            <td><strong>${job.action}</strong></td>
-            <td>${this.getStatusPill(job.status)}</td>
+            <td><span style="font-family:monospace; color:var(--accent-secondary); font-weight:600;">${this.escapeHtml(job.id.substring(0, 8))}...</span></td>
+            <td><strong>${this.escapeHtml(job.action)}</strong></td>
+            <td>${this.getStatusPill(this.escapeHtml(job.status))}</td>
             <td>${job.completed_targets || 0}/${job.requested_targets || 0} (${job.discovered_users || 0} leads)</td>
             <td>${new Date(job.created_at).toLocaleTimeString('vi-VN')}</td>
             <td>
-              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewJobDetails('${job.id}')">Chi tiết</button>
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewJobDetails('${this.escapeAttr(job.id)}')">Chi tiết</button>
             </td>
           </tr>
         `).join('');
@@ -528,17 +546,24 @@ class DashboardApp {
       if (usersData.items.length === 0) {
         this.tableRecentLeads.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">Chưa có khách hàng nào.</td></tr>`;
       } else {
-        this.tableRecentLeads.innerHTML = usersData.items.map(u => `
+        this.tableRecentLeads.innerHTML = usersData.items.map(u => {
+          const fbUrl = u.profile_url || (u.facebook_uid ? `https://www.facebook.com/${encodeURIComponent(u.facebook_uid)}` : (u.username ? `https://www.facebook.com/${encodeURIComponent(u.username)}` : ''));
+          const displayName = this.escapeHtml(u.name || u.username || (u.facebook_uid ? `UID: ${u.facebook_uid}` : 'Ẩn danh'));
+          const nameHtml = fbUrl
+            ? `<a href="${this.escapeAttr(fbUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-primary); text-decoration:none; font-weight:600;" title="Mở trang Facebook">${displayName} ↗</a>`
+            : `<span style="font-weight:600;">${displayName}</span>`;
+          return `
           <tr>
             <td>
-              <div style="font-weight:600;">${u.name || u.username || u.facebook_uid || 'Ẩn danh'}</div>
-              <div style="font-size:0.75rem; color:var(--text-muted);">UID: ${u.facebook_uid || 'N/A'}</div>
+              <div>${nameHtml}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">UID: ${this.escapeHtml(u.facebook_uid || 'N/A')}</div>
             </td>
-            <td>${u.phone_1 ? `<span class="pill success">📞 ${u.phone_1}</span>` : `<span class="pill info">Chưa có SĐT</span>`}</td>
-            <td>${u.address || 'N/A'}</td>
-            <td>${u.profile_url ? `<a href="${u.profile_url}" target="_blank" class="btn btn-secondary btn-sm">Xem FB</a>` : ''}</td>
+            <td>${u.phone_1 ? `<span class="pill success">📞 ${this.escapeHtml(u.phone_1)}</span>` : `<span class="pill info">Chưa có SĐT</span>`}</td>
+            <td>${this.escapeHtml(u.address || 'N/A')}</td>
+            <td>${fbUrl ? `<a href="${this.escapeAttr(fbUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">Xem FB</a>` : ''}</td>
           </tr>
-        `).join('');
+        `;
+        }).join('');
       }
     }
   }
@@ -570,19 +595,19 @@ class DashboardApp {
 
       return `
         <tr>
-          <td><span style="font-family:monospace; color:var(--accent-secondary); font-weight:600;">${job.id.substring(0, 8)}...</span></td>
-          <td><strong>${job.action}</strong></td>
-          <td>${this.getStatusPill(job.status)}</td>
+          <td><span style="font-family:monospace; color:var(--accent-secondary); font-weight:600;">${this.escapeHtml(job.id.substring(0, 8))}...</span></td>
+          <td><strong>${this.escapeHtml(job.action)}</strong></td>
+          <td>${this.getStatusPill(this.escapeHtml(job.status))}</td>
           <td>${job.completed_targets || 0}/${job.requested_targets || 0}</td>
           <td>${job.discovered_users || 0}</td>
           <td><span style="color:var(--accent-success); font-weight:600;">${job.persisted_users || 0}</span></td>
           <td>${new Date(job.created_at).toLocaleString('vi-VN')}</td>
           <td>
             <div style="display:flex; gap:6px;">
-              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewJobDetails('${job.id}')">Chi tiết</button>
-              ${isRunning ? `<button class="btn btn-warning btn-sm" onclick="window.dashboardApp.cancelJob('${job.id}')">Hủy</button>` : ''}
-              ${isFailed ? `<button class="btn btn-primary btn-sm" onclick="window.dashboardApp.retryJob('${job.id}')">Thử lại</button>` : ''}
-              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteJob('${job.id}')">Xóa</button>
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewJobDetails('${this.escapeAttr(job.id)}')">Chi tiết</button>
+              ${isRunning ? `<button class="btn btn-warning btn-sm" onclick="window.dashboardApp.cancelJob('${this.escapeAttr(job.id)}')">Hủy</button>` : ''}
+              ${isFailed ? `<button class="btn btn-primary btn-sm" onclick="window.dashboardApp.retryJob('${this.escapeAttr(job.id)}')">Thử lại</button>` : ''}
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteJob('${this.escapeAttr(job.id)}')">Xóa</button>
             </div>
           </td>
         </tr>
@@ -613,13 +638,13 @@ class DashboardApp {
     }
 
     const rawMaxUsers = parseInt(document.getElementById('job-opt-max-users')?.value, 10);
-    const maxUsers = isNaN(rawMaxUsers) ? 1000 : rawMaxUsers;
+    const maxUsers = isNaN(rawMaxUsers) ? 100 : rawMaxUsers;
 
     const rawSteps = parseInt(document.getElementById('job-opt-steps')?.value, 10);
-    const steps = isNaN(rawSteps) ? 20 : rawSteps;
+    const steps = isNaN(rawSteps) ? 5 : rawSteps;
 
-    const maxDuration = parseInt(document.getElementById('job-opt-duration')?.value, 10) || 1800;
-    const navDelay = parseInt(document.getElementById('job-opt-delay')?.value, 10) || 8;
+    const maxDuration = parseInt(document.getElementById('job-opt-duration')?.value, 10) || 300;
+    const navDelay = parseInt(document.getElementById('job-opt-delay')?.value, 10) || 12;
     const depth = parseInt(document.getElementById('job-opt-depth')?.value, 10) || 1;
     const enrichProfiles = !!document.getElementById('job-opt-enrich-profiles')?.checked;
     const profileLimit = parseInt(document.getElementById('job-opt-profile-limit')?.value, 10) || 20;
@@ -631,13 +656,16 @@ class DashboardApp {
     const callFbnumber = document.getElementById('job-opt-call-fbnumber') ? !!document.getElementById('job-opt-call-fbnumber').checked : true;
 
     const options = {
-      steps: steps <= 0 ? 0 : Math.min(Math.max(steps, 1), 100),
-      max_users: maxUsers <= 0 ? 0 : Math.min(Math.max(maxUsers, 1), 100000),
+      steps: steps <= 0 ? 0 : Math.min(Math.max(steps, 1), 20),
       max_duration_seconds: Math.min(Math.max(maxDuration, 1), 1800),
       navigation_delay_seconds: Math.min(Math.max(navDelay, 8), 1800),
       call_fbnumber: callFbnumber,
       enrich_profiles: enrichProfiles
     };
+
+    if (['members', 'friends', 'followers'].includes(action)) {
+      options.max_users = maxUsers <= 0 ? 0 : Math.min(Math.max(maxUsers, 1), 1000);
+    }
 
     if (action.includes('friends') || action.includes('followers') || action.includes('relationships')) {
       options.depth = depth;
@@ -661,6 +689,17 @@ class DashboardApp {
       targets: targets,
       options: options
     };
+    const autoBatch = action === 'members' && !!document.getElementById('job-opt-auto-batch')?.checked;
+    const batchCount = parseInt(document.getElementById('job-opt-batch-count')?.value, 10) || 5;
+    const batchBody = {
+      group_url: targets[0],
+      batch_count: Math.min(Math.max(batchCount, 1), 100),
+      batch_size: options.max_users > 0 ? options.max_users : 300,
+      batch_duration_seconds: options.max_duration_seconds,
+      navigation_delay_seconds: options.navigation_delay_seconds,
+      steps: options.steps,
+      call_fbnumber: options.call_fbnumber
+    };
 
     const submitBtn = document.getElementById('btn-submit-create-job');
     if (submitBtn) {
@@ -669,13 +708,24 @@ class DashboardApp {
     }
 
     try {
-      const res = await this.fetchApi('/api/v1/jobs', {
+      if (autoBatch && targets.length !== 1) {
+        alert('Auto Batch chỉ nhận 1 group URL mỗi lần để tránh trộn checkpoint/progress.');
+        return;
+      }
+
+      const res = await this.fetchApi(autoBatch ? '/api/v1/jobs/group-batches' : '/api/v1/jobs', {
         method: 'POST',
         headers: { 'Idempotency-Key': idempotencyKey },
-        body: JSON.stringify(body)
+        body: JSON.stringify(autoBatch ? batchBody : body),
+        throwOnError: true
       });
 
-      if (res && res.id) {
+      if (autoBatch && res && Array.isArray(res.items)) {
+        this.closeModal(this.modalCreateJob);
+        this.formCreateJob.reset();
+        this.showToast(`Đã tạo ${res.items.length} batch job cho group. Worker sẽ chạy lần lượt.`);
+        this.loadJobsData();
+      } else if (res && res.id) {
         this.closeModal(this.modalCreateJob);
         this.formCreateJob.reset();
         this.showToast(`Đã tạo Crawl Job ${res.id.substring(0, 8)} thành công!`);
@@ -684,7 +734,7 @@ class DashboardApp {
         this.showToast('Không thể tạo Job. Vui lòng kiểm tra lại cấu hình!');
       }
     } catch (err) {
-      alert('Lỗi tạo Job: ' + err.message);
+      this.showToast(`Lỗi tạo Job: ${err.message}`, 'error');
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
@@ -781,7 +831,7 @@ class DashboardApp {
     const data = await this.fetchApi(`/api/v1/users?${params.toString()}`);
 
     if (!data || !data.items || data.items.length === 0) {
-      this.tableAllLeads.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:30px;">Không tìm thấy khách hàng nào phù hợp với bộ lọc.</td></tr>`;
+      this.tableAllLeads.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:30px;">Không tìm thấy khách hàng nào phù hợp với bộ lọc.</td></tr>`;
       this.updateLeadsPaginationUI(0, false);
       return;
     }
@@ -791,20 +841,27 @@ class DashboardApp {
     this.updateLeadsPaginationUI(data.items.length, data.has_more);
 
     this.tableAllLeads.innerHTML = data.items.map(u => {
-      const p1 = u.phone_1 ? `<span class="pill success">📞 ${u.phone_1}</span>` : '<span style="color:var(--text-muted);">N/A</span>';
-      const p2 = u.phone_2 ? `<span class="pill info">📞 ${u.phone_2}</span>` : '<span style="color:var(--text-muted);">-</span>';
+      const p1 = u.phone_1 ? `<span class="pill success">📞 ${this.escapeHtml(u.phone_1)}</span>` : '<span style="color:var(--text-muted);">N/A</span>';
+      const p2 = u.phone_2 ? `<span class="pill info">📞 ${this.escapeHtml(u.phone_2)}</span>` : '<span style="color:var(--text-muted);">-</span>';
+      const birthDate = u.birth_date ? `<span style="font-family:monospace;">${this.escapeHtml(u.birth_date)}</span>` : '<span style="color:var(--text-muted);">-</span>';
+      const fbUrl = u.profile_url || (u.facebook_uid ? `https://www.facebook.com/${encodeURIComponent(u.facebook_uid)}` : (u.username ? `https://www.facebook.com/${encodeURIComponent(u.username)}` : ''));
+      const displayName = this.escapeHtml(u.name || u.username || (u.facebook_uid ? `UID: ${u.facebook_uid}` : 'Ẩn danh'));
+      const nameHtml = fbUrl
+        ? `<a href="${this.escapeAttr(fbUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-primary); text-decoration:none; font-weight:600;" title="Mở trang Facebook cá nhân">${displayName} ↗</a>`
+        : `<span style="font-weight:600;">${displayName}</span>`;
 
       return `
         <tr>
           <td>
-            <div style="font-weight:600;">${u.name || u.username || 'Ẩn danh'}</div>
-            <div style="font-size:0.75rem; color:var(--text-muted);">UID: ${u.facebook_uid || 'N/A'}</div>
+            <div>${nameHtml}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">UID: ${this.escapeHtml(u.facebook_uid || 'N/A')}</div>
           </td>
-          <td>${u.username || '<span style="color:var(--text-muted);">-</span>'}</td>
+          <td>${u.username ? this.escapeHtml(u.username) : '<span style="color:var(--text-muted);">-</span>'}</td>
           <td>${p1}</td>
           <td>${p2}</td>
-          <td>${u.address || '<span style="color:var(--text-muted);">-</span>'}</td>
-          <td>${u.gender || '<span style="color:var(--text-muted);">-</span>'}</td>
+          <td>${u.address ? this.escapeHtml(u.address) : '<span style="color:var(--text-muted);">-</span>'}</td>
+          <td>${u.gender ? this.escapeHtml(u.gender) : '<span style="color:var(--text-muted);">-</span>'}</td>
+          <td>${birthDate}</td>
           <td>${new Date(u.created_at).toLocaleDateString('vi-VN')}</td>
           <td>
             <div style="display:flex; gap:6px;">
@@ -935,6 +992,8 @@ class DashboardApp {
       this.closeModal(this.modalEditUser);
       this.showToast(`Đã cập nhật thông tin khách hàng #${id} thành công!`);
       this.loadLeadsData();
+    } else {
+      alert('Không thể sửa khách hàng. Kiểm tra dữ liệu nhập hoặc log API.');
     }
   }
 
@@ -981,27 +1040,35 @@ class DashboardApp {
     this.updateSessionsPaginationUI(items.length, pageIndex + 1, totalPages);
 
     this.tableAllSessions.innerHTML = paginated.map(s => {
-      const statusClass = s.status === 'healthy' ? 'success' : s.status === 'cooldown' ? 'warning' : 'danger';
+      const statusClass = s.status === 'healthy'
+        ? 'success'
+        : ['unknown', 'cooldown'].includes(s.status)
+          ? 'warning'
+          : 'danger';
+      const sessionName = this.escapeHtml(s.name);
+      const sessionAttr = this.escapeAttr(s.name);
+      const proxyLabel = s.proxy ? this.escapeHtml(s.proxy) : null;
+      const statusLabel = this.escapeHtml(s.status);
       return `
         <tr>
-          <td><strong style="color:var(--text-primary);">${s.name}</strong></td>
-          <td>${s.proxy ? `<span style="font-family:monospace; color:var(--accent-secondary);">${s.proxy}</span>` : '<span style="color:var(--text-muted);">Tự động xoay Proxy</span>'}</td>
-          <td><span class="pill ${statusClass}">${s.status}</span></td>
+          <td><strong style="color:var(--text-primary);">${sessionName}</strong></td>
+          <td>${proxyLabel ? `<span style="font-family:monospace; color:var(--accent-secondary);">${proxyLabel}</span>` : '<span style="color:var(--text-muted);">Tự động xoay Proxy</span>'}</td>
+          <td><span class="pill ${statusClass}">${statusLabel}</span></td>
           <td><span style="color:var(--accent-success); font-weight:600;">${s.success_count || 0}</span></td>
           <td><span style="color:var(--accent-danger); font-weight:600;">${s.failure_count || 0}</span></td>
           <td>${s.is_available ? '✅ Sẵn sàng' : '⏳ Tạm khóa/Nghỉ'}</td>
           <td>
             <div style="display:flex; gap:6px;">
-              <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.launchSessionBrowser('${s.name}')" title="Mở trình duyệt đăng nhập sẵn nick này">
+              <button class="btn btn-primary btn-sm" onclick="window.dashboardApp.launchSessionBrowser('${sessionAttr}')" title="Mở trình duyệt đăng nhập sẵn nick này">
                 Vào FB
               </button>
-              <button class="btn btn-info btn-sm" onclick="window.dashboardApp.checkSessionLive('${s.name}')" title="Kiểm tra Cookie còn Live không">
+              <button class="btn btn-info btn-sm" onclick="window.dashboardApp.checkSessionLive('${sessionAttr}')" title="Kiểm tra Cookie còn Live không">
                 Kiểm tra
               </button>
-              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.openEditSessionModal('${s.name}')">
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.openEditSessionModal('${sessionAttr}')">
                 Sửa
               </button>
-              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteSession('${s.name}')">
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteSession('${sessionAttr}')">
                 Xóa
               </button>
             </div>
@@ -1060,7 +1127,7 @@ class DashboardApp {
     if (nameInput) nameInput.value = session.name;
     if (displayInput) displayInput.value = session.name;
     if (proxyInput) proxyInput.value = session.proxy || '';
-    if (statusSelect) statusSelect.value = session.status || 'healthy';
+    if (statusSelect) statusSelect.value = session.status || 'unknown';
 
     this.openModal(this.modalEditSession);
   }
@@ -1099,11 +1166,11 @@ class DashboardApp {
   async launchSessionBrowser(sessionName) {
     this.showToast(`⏳ Đang khởi động trình duyệt cho ${sessionName}...`);
     try {
-      const res = await this.fetchApi(`/api/v1/sessions/${encodeURIComponent(sessionName)}/launch`, {
+      const res = await this.fetchApi(`/api/v1/sessions/${encodeURIComponent(sessionName)}/launch-login`, {
         method: 'POST'
       });
-      if (res && res.status === 'success') {
-        this.showToast(`✅ Đã mở trình duyệt đăng nhập nick ${sessionName}!`);
+      if (res && (res.status === 'accepted' || res.status === 'success')) {
+        this.showToast(`✅ Đã mở browser local cho ${sessionName}. Chỉ nhập mật khẩu trong cửa sổ Facebook.`);
       } else {
         alert(res?.detail || 'Không thể mở trình duyệt.');
       }
@@ -1174,44 +1241,39 @@ class DashboardApp {
   async handleExtractSession(e) {
     e.preventDefault();
     const name = document.getElementById('extract-name').value.trim();
-    const email = document.getElementById('extract-email').value.trim();
-    const password = document.getElementById('extract-password').value.trim();
-    const twoFactorCode = document.getElementById('extract-2fa').value.trim() || null;
     const proxy = document.getElementById('extract-proxy').value.trim() || null;
     const submitBtn = document.getElementById('btn-submit-extract-session');
 
+    if (!name) {
+      alert('Vui lòng nhập tên session!');
+      return;
+    }
+
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = '⏳ Đang Đăng Nhập & Bóc Tách...';
+      submitBtn.textContent = '⏳ Đang mở browser local...';
     }
 
     try {
-      const res = await this.fetchApi('/api/v1/sessions/extract', {
+      const res = await this.fetchApi(`/api/v1/sessions/${encodeURIComponent(name)}/launch-login`, {
         method: 'POST',
-        body: JSON.stringify({
-          name: name,
-          email: email,
-          password: password,
-          two_factor_code: twoFactorCode,
-          proxy: proxy,
-          headless: true
-        })
+        body: JSON.stringify({ proxy: proxy }),
       });
 
       if (res && res.name) {
         this.closeModal(this.modalExtractSession);
         this.formExtractSession.reset();
-        this.showToast(`Đã tự động lấy và lưu thành công Session ${res.name}!`);
+        this.showToast(`Đã mở browser local cho session ${res.name}. Nhập tài khoản trực tiếp trong cửa sổ Facebook.`);
         this.loadSessionsData();
       } else {
-        alert('Không thể bóc tách session. Vui lòng kiểm tra tài khoản/mật khẩu hoặc kết nối mạng.');
+        alert('Không thể mở browser local. Kiểm tra API có đang chạy trên localhost không.');
       }
     } catch (err) {
-      alert('Lỗi đăng nhập: ' + err.message);
+      alert('Lỗi mở browser local: ' + err.message);
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = '🚀 Bắt Đầu Đăng Nhập & Lấy Cookie';
+        submitBtn.textContent = '🚀 Mở Browser Đăng Nhập Local';
       }
     }
   }
@@ -1245,22 +1307,24 @@ class DashboardApp {
 
     this.tableAllProxies.innerHTML = paginated.map(p => {
       const statusClass = p.status === 'active' ? 'success' : p.status === 'cooldown' ? 'warning' : 'danger';
+      const proxyKey = this.escapeAttr(p.display_url);
+      const proxyLabel = this.escapeHtml(p.display_url);
       return `
         <tr>
-          <td><span style="font-family:monospace; color:var(--text-primary);">${p.raw_url}</span></td>
-          <td><span class="pill info">${p.scheme.toUpperCase()}</span></td>
-          <td><strong>${p.host}</strong></td>
+          <td><span style="font-family:monospace; color:var(--text-primary);">${proxyLabel}</span></td>
+          <td><span class="pill info">${this.escapeHtml(p.scheme.toUpperCase())}</span></td>
+          <td><strong>${this.escapeHtml(p.host)}</strong></td>
           <td><code>${p.port}</code></td>
-          <td><span class="pill ${statusClass}">${p.status}</span></td>
+          <td><span class="pill ${statusClass}">${this.escapeHtml(p.status)}</span></td>
           <td><span style="color:var(--accent-success); font-weight:600;">${p.success_count || 0}</span></td>
           <td><span style="color:var(--accent-danger); font-weight:600;">${p.failure_count || 0}</span></td>
           <td>${p.is_available ? '✅ Hoạt động' : '❌ Ngắt/Cooldown'}</td>
           <td>
             <div style="display:flex; gap:6px;">
-              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.openEditProxyModal('${encodeURIComponent(p.raw_url)}')">
+              <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.openEditProxyModal('${encodeURIComponent(proxyKey)}')">
                 Sửa
               </button>
-              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteProxy('${encodeURIComponent(p.raw_url)}')">
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteProxy('${encodeURIComponent(proxyKey)}')">
                 Xóa
               </button>
             </div>
@@ -1272,7 +1336,7 @@ class DashboardApp {
 
   openEditProxyModal(encodedUrl) {
     const rawUrl = decodeURIComponent(encodedUrl);
-    const proxy = this.proxiesPagination.allItems.find(p => p.raw_url === rawUrl);
+    const proxy = this.proxiesPagination.allItems.find(p => p.display_url === rawUrl);
     if (!proxy) {
       this.showToast('Không tìm thấy thông tin proxy!');
       return;
@@ -1282,8 +1346,8 @@ class DashboardApp {
     const urlInput = document.getElementById('edit-proxy-url');
     const statusSelect = document.getElementById('edit-proxy-status');
 
-    if (rawInput) rawInput.value = proxy.raw_url;
-    if (urlInput) urlInput.value = proxy.raw_url;
+    if (rawInput) rawInput.value = proxy.display_url;
+    if (urlInput) urlInput.value = proxy.display_url;
     if (statusSelect) statusSelect.value = proxy.status || 'active';
 
     this.openModal(this.modalEditProxy);
@@ -1366,7 +1430,9 @@ class DashboardApp {
     if (s === 'failed' || s === 'dead') return `<span class="pill danger">Lỗi</span>`;
     if (s === 'cancelled') return `<span class="pill warning">Đã hủy</span>`;
     if (s === 'cooldown') return `<span class="pill warning">Cooldown</span>`;
-    return `<span class="pill info">${status}</span>`;
+    if (s === 'unknown') return `<span class="pill warning">Chưa kiểm tra</span>`;
+    if (s === 'manual_review') return `<span class="pill danger">Cần xử lý tay</span>`;
+    return `<span class="pill info">${this.escapeHtml(status)}</span>`;
   }
 
   // ==========================================
@@ -1383,7 +1449,11 @@ class DashboardApp {
     const countryInput = document.getElementById('cfg-country-code');
 
     if (urlInput) urlInput.value = data.api_url || '';
-    if (tokenInput) tokenInput.value = data.api_token || '';
+    if (tokenInput) {
+      tokenInput.value = data.api_token || '';
+      tokenInput.required = false;
+      tokenInput.placeholder = data['api_token_configured'] ? 'Đang dùng token từ .env - để trống vẫn giữ token này' : 'Bearer Token...';
+    }
     if (timeoutInput) timeoutInput.value = data.timeout_seconds || 15;
     if (retriesInput) retriesInput.value = data.max_retries || 2;
     if (countryInput) countryInput.value = data.default_country_code || '84';
@@ -1397,9 +1467,12 @@ class DashboardApp {
       btn.textContent = '⏳ Đang lưu...';
     }
 
+    const tokenInput = document.getElementById('cfg-fbnumber-token');
+    const tokenValue = tokenInput.value.trim();
+
     const payload = {
       api_url: document.getElementById('cfg-fbnumber-url').value.trim(),
-      api_token: document.getElementById('cfg-fbnumber-token').value.trim(),
+      api_token: tokenValue || null,
       timeout_seconds: parseFloat(document.getElementById('cfg-fbnumber-timeout').value) || 15.0,
       max_retries: parseInt(document.getElementById('cfg-fbnumber-retries').value, 10) || 2,
       default_country_code: document.getElementById('cfg-country-code').value.trim() || '84'
@@ -1463,12 +1536,12 @@ class DashboardApp {
         resultBox.style.background = 'rgba(16, 185, 129, 0.15)';
         resultBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
         statusText.style.color = 'var(--accent-success)';
-        statusText.innerHTML = `✅ ${res.message}`;
+        statusText.textContent = `✅ ${res.message}`;
       } else {
         resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
         resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
         statusText.style.color = 'var(--accent-danger)';
-        statusText.innerHTML = `❌ ${res.message}`;
+        statusText.textContent = `❌ ${res.message}`;
       }
       latencyText.textContent = `⏱️ Độ trễ phản hồi: ${res.latency_ms} ms (HTTP ${res.status_code})`;
       rawBox.textContent = res.raw_response || '(Không có dữ liệu phản hồi)';
@@ -1509,7 +1582,7 @@ class DashboardApp {
     }
   }
 
-  showToast(message) {
+  showToast(message, type = 'info') {
     let container = document.querySelector('.toast-container');
     if (!container) {
       container = document.createElement('div');
@@ -1518,8 +1591,13 @@ class DashboardApp {
     }
 
     const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.innerHTML = `<span>⚡</span><span>${message}</span>`;
+    toast.className = `toast toast-${type}`;
+    const icon = document.createElement('span');
+    icon.textContent = type === 'error' ? '⚠️' : '⚡';
+    const text = document.createElement('span');
+    text.textContent = message;
+    toast.appendChild(icon);
+    toast.appendChild(text);
     container.appendChild(toast);
 
     setTimeout(() => {

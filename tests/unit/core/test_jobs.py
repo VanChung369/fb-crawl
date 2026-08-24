@@ -134,7 +134,6 @@ def test_safe_options_default_to_the_api_owned_limits() -> None:
         ),
         (AuthenticatedAction.MEMBERS, {"force_uid_refresh": True}),
         (AuthenticatedAction.MEMBERS, {"depth": 2}),
-        (AuthenticatedAction.MEMBERS, {"max_users": 25}),
     ],
 )
 def test_safe_options_reject_unsafe_or_action_incompatible_values(
@@ -178,6 +177,53 @@ def test_safe_options_normalize_fields_and_build_a_resumable_request() -> None:
     assert request.phone_post_steps == 3
     assert request.phone_post_duration_seconds == 60
     assert request.force_uid_refresh is False
+
+
+def test_members_jobs_accept_max_users_for_safe_group_batches() -> None:
+    """Break caught: group batch planning cannot bound each members crawl by users."""
+
+    options = SafeJobOptions.from_mapping(
+        AuthenticatedAction.MEMBERS,
+        {"max_users": 300, "steps": 0, "max_duration_seconds": 900},
+    )
+    request = options.to_scrape_request(
+        AuthenticatedAction.MEMBERS,
+        ("https://www.facebook.com/groups/123/members",),
+        checkpoint_path="runtime/checkpoints/jobs/job/target.json",
+    )
+
+    assert options.max_users == 300
+    assert request.max_nodes == 300
+    assert request.steps is None
+
+
+def test_profile_jobs_tolerate_stale_ui_max_users_option() -> None:
+    """Break caught: an older open WebUI tab sends max_users for profile jobs."""
+
+    options = SafeJobOptions.from_mapping(
+        AuthenticatedAction.PROFILE,
+        {
+            "max_users": 100,
+            "enrich_profiles": True,
+            "profile_fields": ["phone", "bio", "workplace"],
+            "profile_limit": 1,
+        },
+    )
+
+    request = options.to_scrape_request(
+        AuthenticatedAction.PROFILE,
+        ("https://www.facebook.com/profile.php?id=61592062670316",),
+        checkpoint_path="runtime/checkpoints/jobs/job/target.json",
+    )
+
+    assert options.max_users == 100
+    assert request.action is AuthenticatedAction.PROFILE
+    assert request.enrich_profiles is True
+    assert request.profile_fields == (
+        ProfileField.PHONE,
+        ProfileField.BIO,
+        ProfileField.WORKPLACE,
+    )
 
 
 @pytest.mark.parametrize(

@@ -10,6 +10,7 @@ import signal
 import socket
 import time
 from typing import Protocol
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from fb_crawl.config import BrowserSettings, load_browser_settings
@@ -66,20 +67,23 @@ def _require_saved_session(settings: BrowserSettings) -> None:
         valid = False
 
     if not valid:
-        pool_dir = Path("runtime/sessions")
-        if pool_dir.is_dir():
-            pool_sessions = sorted(pool_dir.glob("*.json"))
-            if pool_sessions:
-                import shutil
-                session_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(pool_sessions[0], session_path)
-                valid = True
-
-    if not valid:
         raise ConfigurationError(
             "FB_CRAWL_SESSION_PATH must reference an existing saved Facebook "
             "session file."
         )
+
+
+def _safe_database_label(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    if not parsed.scheme or not parsed.hostname:
+        return "[configured]"
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    database = parsed.path.rsplit("/", 1)[-1] if parsed.path else ""
+    path = f"/{database}" if database else ""
+    return urlunsplit((parsed.scheme, f"{host}{port}", path, "", ""))
 
 
 
@@ -220,7 +224,10 @@ def _execute_worker_process(
 
     try:
         print("[INFO] Background Crawl Worker started successfully.", flush=True)
-        print(f"[INFO] Connected to Database: {pipeline_settings.database_url}", flush=True)
+        print(
+            f"[INFO] Connected to Database: {_safe_database_label(pipeline_settings.database_url)}",
+            flush=True,
+        )
         print("[INFO] Polling for crawl jobs in the background (Press Ctrl+C to stop)...", flush=True)
         repository.recover_stale_jobs()
         while True:

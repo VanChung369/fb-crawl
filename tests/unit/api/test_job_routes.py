@@ -323,6 +323,46 @@ def test_create_requires_auth_and_idempotency_and_returns_accepted_job() -> None
 
 
 @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
+def test_create_group_batches_queues_multiple_safe_members_jobs() -> None:
+    """Break caught: full-group crawl cannot be split into durable safe batches."""
+
+    client, _, service = _client()
+
+    response = client.post(
+        "/api/v1/jobs/group-batches",
+        headers=_headers(idempotency_key="group-full-123"),
+        json={
+            "group_url": "https://www.facebook.com/groups/123",
+            "batch_count": 3,
+            "batch_size": 300,
+            "batch_duration_seconds": 900,
+            "navigation_delay_seconds": 20,
+            "steps": 0,
+            "call_fbnumber": True,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["total_created"] == 3
+    assert len(payload["items"]) == 3
+    assert set(service.created_by_key) == {
+        "group-full-123:batch:1",
+        "group-full-123:batch:2",
+        "group-full-123:batch:3",
+    }
+    first_command = service.created_by_key["group-full-123:batch:1"][0]
+    assert first_command.action is AuthenticatedAction.MEMBERS
+    assert first_command.options.max_users == 300
+    assert first_command.options.max_duration_seconds == 900
+    assert first_command.options.navigation_delay_seconds == 20
+    assert first_command.options.steps == 0
+    assert first_command.targets[0].target_url == (
+        "https://www.facebook.com/groups/123/members"
+    )
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
 @pytest.mark.parametrize(
     "body",
     [

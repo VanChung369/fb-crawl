@@ -569,7 +569,7 @@ def _load_runtime() -> AuthenticatedRuntime:
 
 def _load_repair_runtime() -> IdentityRepairRuntime:
     try:
-        from fb_crawl.adapters.browser.driver import create_firefox_driver
+        from fb_crawl.adapters.browser.driver import create_browser
         from fb_crawl.adapters.browser.login import SessionManager
         from fb_crawl.adapters.browser.profile_identity import (
             ProfileIdentityResolver,
@@ -609,7 +609,7 @@ def _load_repair_runtime() -> IdentityRepairRuntime:
         )
 
     return IdentityRepairRuntime(
-        create_browser=create_firefox_driver,
+        create_browser=create_browser,
         create_service=create_service,
         read_rows=read_identity_csv,
         write_result=write_identity_csv,

@@ -241,6 +241,33 @@ def test_detail_pages_map_only_documented_stored_fields() -> None:
     assert attempt_params is not None and attempt_params[-1] == 6
 
 
+def test_update_user_normalizes_manual_phone_numbers_before_writing_slots() -> None:
+    """Break caught: dashboard edit writes raw 091... into E.164-only phone key."""
+
+    cursor = RecordingCursor([user_row()])
+    repository = UserQueryRepository(
+        "postgresql://hidden",
+        connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+
+    updated = repository.update_user(7, phone_1="0912 345 678")
+
+    phone_insert = next(
+        params
+        for sql, params in cursor.commands
+        if "INSERT INTO phone_numbers" in sql
+    )
+    evidence_insert = next(
+        params
+        for sql, params in cursor.commands
+        if "INSERT INTO user_phone_evidence" in sql
+    )
+    assert updated is not None
+    assert phone_insert == ("+84912345678", "0912 345 678")
+    assert evidence_insert is not None
+    assert evidence_insert[2] == "fbnumber"
+
+
 @pytest.mark.parametrize("method", ["list_users", "list_phone_evidence", "list_enrichment_attempts"])
 def test_repository_rejects_invalid_keyset_cursors_before_connecting(method: str) -> None:
     """Break caught: malformed cursors reach PostgreSQL and change pagination semantics."""

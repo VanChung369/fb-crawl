@@ -174,11 +174,18 @@ _SUPPORTED_JOB_ACTIONS = frozenset(
 _RELATIONSHIP_ACTIONS = frozenset(
     {AuthenticatedAction.FRIENDS, AuthenticatedAction.FOLLOWERS}
 )
+_MAX_USER_ACTIONS = frozenset(
+    {
+        AuthenticatedAction.MEMBERS,
+        AuthenticatedAction.PROFILE,
+        AuthenticatedAction.FRIENDS,
+        AuthenticatedAction.FOLLOWERS,
+    }
+)
 
 _COMMON_OPTION_NAMES = frozenset(
     {
         "steps",
-        "max_users",
         "max_duration_seconds",
         "navigation_delay_seconds",
         "max_retries",
@@ -194,6 +201,7 @@ _COMMON_OPTION_NAMES = frozenset(
 
 
 _RELATIONSHIP_OPTION_NAMES = frozenset({"depth"})
+_MAX_USER_OPTION_NAMES = frozenset({"max_users"})
 
 
 def _integer(value: object, *, option: str, minimum: int, maximum: int) -> int:
@@ -274,7 +282,7 @@ class SafeJobOptions:
 
 
     def __post_init__(self) -> None:
-        _integer(self.steps, option="steps", minimum=0, maximum=100)
+        _integer(self.steps, option="steps", minimum=0, maximum=20)
         _seconds(
             self.max_duration_seconds,
             option="max_duration_seconds",
@@ -289,7 +297,7 @@ class SafeJobOptions:
         )
         _integer(self.max_retries, option="max_retries", minimum=0, maximum=1)
         _integer(self.depth, option="depth", minimum=1, maximum=2)
-        _integer(self.max_users, option="max_users", minimum=0, maximum=100000)
+        _integer(self.max_users, option="max_users", minimum=0, maximum=1000)
         _integer(self.profile_limit, option="profile_limit", minimum=1, maximum=50)
         _integer(
             self.phone_post_steps,
@@ -339,6 +347,8 @@ class SafeJobOptions:
         allowed = _COMMON_OPTION_NAMES
         if action in _RELATIONSHIP_ACTIONS:
             allowed = allowed | _RELATIONSHIP_OPTION_NAMES
+        if action in _MAX_USER_ACTIONS:
+            allowed = allowed | _MAX_USER_OPTION_NAMES
         unknown = set(values) - allowed
         if unknown:
             raise ValidationError("Unsupported job option.")
@@ -346,7 +356,7 @@ class SafeJobOptions:
         fields = _profile_fields(values["profile_fields"]) if "profile_fields" in values else ()
         duration = values.get("phone_post_duration_seconds")
         return cls(
-            steps=_integer(values.get("steps", 10), option="steps", minimum=0, maximum=100),
+            steps=_integer(values.get("steps", 10), option="steps", minimum=0, maximum=20),
             max_duration_seconds=_seconds(
                 values.get("max_duration_seconds", 300),
                 option="max_duration_seconds",
@@ -364,7 +374,7 @@ class SafeJobOptions:
             ),
             depth=_integer(values.get("depth", 1), option="depth", minimum=1, maximum=2),
             max_users=_integer(
-                values.get("max_users", 1000), option="max_users", minimum=0, maximum=100000
+                values.get("max_users", 1000), option="max_users", minimum=0, maximum=1000
             ),
             call_fbnumber=bool(values.get("call_fbnumber", values.get("enrich_phone", True))),
             enrich_profiles=values.get("enrich_profiles", False),
@@ -425,7 +435,7 @@ class SafeJobOptions:
             mode=ScrapeMode.AUTHENTICATED,
             action=action,
             targets=targets,
-            steps=self.steps,
+            steps=(self.steps or None),
             max_duration_seconds=self.max_duration_seconds,
             depth=self.depth,
             max_nodes=self.max_users,

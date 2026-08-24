@@ -273,6 +273,38 @@ def test_enrichment_v2_parses_visible_labelled_fields() -> None:
     assert details.relationship_status == "Single"
 
 
+def test_personal_details_section_extracts_vietnamese_mobile_and_gender() -> None:
+    """Break caught: visible Vietnamese basic-info rows are skipped unless labelled DOM matches exactly."""
+
+    html = """
+    <main>
+      <h2 id="basic">Thông tin cơ bản</h2>
+      <div role="list" aria-labelledby="basic">
+        <div role="listitem">
+          <span>Di động</span>
+          <span>+84 912 345 678</span>
+        </div>
+        <div role="listitem">
+          <span>Nữ</span>
+        </div>
+      </div>
+    </main>
+    """
+
+    details = ProfileParser().parse(
+        html,
+        source_url=(
+            "https://www.facebook.com/profile.php"
+            "?id=61592062670316&sk=directory_personal_details"
+        ),
+        requested_fields=(ProfileField.PHONE, ProfileField.GENDER),
+    )
+
+    assert details.phone_numbers == ("+84 912 345 678",)
+    assert details.phone_sources == ("facebook:profile_contact",)
+    assert details.gender == "Nữ"
+
+
 def test_profile_root_extracts_phone_from_intro_and_visible_post_text() -> None:
     html = """
     <main>
@@ -372,3 +404,72 @@ def test_profile_intro_heading_finds_nearby_phone_without_aria_label() -> None:
 
     assert details.phone_numbers == ("0987 654 321",)
     assert details.phone_sources == ("facebook:profile_intro_text",)
+
+
+def test_profile_root_plain_text_sections_extract_contact_and_gender() -> None:
+    details = ProfileParser().parse(
+        """
+        <main>
+          <div>Nootea Synthetic</div>
+          <div>Thông tin cá nhân</div>
+          <div>30 tháng 6, 2001</div>
+          <div>Nữ</div>
+          <div>Thông tin liên hệ</div>
+          <div>Điện thoại:</div>
+          <div>+84854012555</div>
+          <div>Tin nổi bật</div>
+        </main>
+        """,
+        source_url="https://www.facebook.com/profile.php?id=61592062670316",
+        requested_fields=(
+            ProfileField.PHONE,
+            ProfileField.GENDER,
+            ProfileField.BIRTH_DATE,
+        ),
+    )
+
+    assert details.phone_numbers == ("+84854012555",)
+    assert details.phone_sources == ("facebook:profile_contact",)
+    assert details.gender == "Nữ"
+    assert details.birth_date == "2001-06-30"
+    assert details.birth_year == 2001
+
+
+def test_profile_root_ignores_messenger_chat_overlay_articles() -> None:
+    details = ProfileParser().parse(
+        """
+        <main>
+          <section aria-label="Intro">
+            <h2>Intro</h2>
+            <div>Contact Zalo 0912 345 678</div>
+          </section>
+        </main>
+        <div role="log" aria-label="Messages in conversation with Someone">
+          <div role="article" style="--chat-composer-button-color: red; --mwp-message-row-background: blue;">
+            <div data-ad-preview="message">message says zalo 0794247222</div>
+          </div>
+        </div>
+        """,
+        source_url="https://www.facebook.com/synthetic.user",
+        requested_fields=(ProfileField.PHONE,),
+    )
+
+    assert details.phone_numbers == ("0912 345 678",)
+    assert details.phone_sources == ("facebook:profile_intro_text",)
+
+
+def test_profile_root_name_falls_back_to_first_visible_profile_line() -> None:
+    details = ProfileParser().parse(
+        """
+        <main>
+          <div>Nootea Synthetic</div>
+          <div>888</div>
+          <div>người theo dõi</div>
+          <div>Thông tin cá nhân</div>
+        </main>
+        """,
+        source_url="https://www.facebook.com/profile.php?id=61592062670316",
+        requested_fields=(ProfileField.PHONE,),
+    )
+
+    assert details.name == "Nootea Synthetic"

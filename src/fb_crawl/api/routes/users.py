@@ -290,7 +290,7 @@ def create_users_router(
     )
     def update_user(
         user_id: Annotated[int, Path(gt=0, le=9223372036854775807)],
-        request: "UserUpdateRequest",
+        request: UserUpdateRequest,
     ) -> UserResponse:
         require_user(user_repository, user_id)
         updated = user_repository.update_user(
@@ -304,7 +304,7 @@ def create_users_router(
             birth_date=request.birth_date,
         )
         if updated is None:
-            raise UserNotFound("Không thể cập nhật thông tin khách hàng.")
+            raise UserNotFound("Persisted user was not found.")
         return UserResponse(**user_response_values(updated))
 
     @router.delete(
@@ -315,7 +315,9 @@ def create_users_router(
         user_id: Annotated[int, Path(gt=0, le=9223372036854775807)],
     ) -> dict[str, object]:
         require_user(user_repository, user_id)
-        user_repository.delete_user(user_id)
-        return {"status": "success", "message": f"Khách hàng #{user_id} đã được xóa thành công."}
+        deleted = user_repository.delete_user(user_id)
+        if deleted is False:
+            raise UserNotFound("Persisted user was not found.")
+        return {"status": "success", "message": f"User #{user_id} was deleted."}
 
     return router

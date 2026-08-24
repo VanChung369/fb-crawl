@@ -27,6 +27,7 @@ class FBNumberSettingsResponse(BaseModel):
 
     api_url: str
     api_token: str
+    api_token_configured: bool
     timeout_seconds: float
     max_retries: int
     default_country_code: str
@@ -37,7 +38,7 @@ class FBNumberSettingsUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_url: str = Field(min_length=1, max_length=1024)
-    api_token: str = Field(min_length=1, max_length=2048)
+    api_token: str | None = Field(default=None, max_length=2048)
     timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
     max_retries: int = Field(default=2, ge=0, le=10)
     default_country_code: str = Field(default="84", min_length=1, max_length=10)
@@ -87,6 +88,52 @@ def update_env_file(updates: dict[str, str], env_path: Path | str = ".env") -> N
         os.environ[key] = value
 
 
+def read_env_file_values(env_path: Path | str = ".env") -> dict[str, str]:
+    path = Path(env_path)
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def effective_fbnumber_config() -> dict[str, str]:
+    settings = load_pipeline_settings()
+    env_file = read_env_file_values()
+    return {
+        "api_url": (
+            os.environ.get("FB_NUMBER_API_URL")
+            or env_file.get("FB_NUMBER_API_URL")
+            or settings.fb_number_api_url
+        ).strip(),
+        "api_token": (
+            os.environ.get("FB_NUMBER_API_TOKEN")
+            or env_file.get("FB_NUMBER_API_TOKEN")
+            or settings.fb_number_api_token
+        ).strip(),
+        "timeout_seconds": (
+            os.environ.get("FB_NUMBER_TIMEOUT_SECONDS")
+            or env_file.get("FB_NUMBER_TIMEOUT_SECONDS")
+            or str(settings.fb_number_timeout_seconds)
+        ).strip(),
+        "max_retries": (
+            os.environ.get("FB_NUMBER_MAX_RETRIES")
+            or env_file.get("FB_NUMBER_MAX_RETRIES")
+            or str(settings.fb_number_max_retries)
+        ).strip(),
+        "default_country_code": (
+            os.environ.get("PIPELINE_DEFAULT_COUNTRY_CODE")
+            or env_file.get("PIPELINE_DEFAULT_COUNTRY_CODE")
+            or settings.default_country_code
+        ).strip(),
+    }
+
+
 def create_settings_router(*, auth: ApiKeyAuth) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1/settings",
@@ -96,41 +143,52 @@ def create_settings_router(*, auth: ApiKeyAuth) -> APIRouter:
 
     @router.get("/fbnumber", response_model=FBNumberSettingsResponse, responses=ERROR_RESPONSES)
     def get_fbnumber_settings() -> FBNumberSettingsResponse:
-        settings = load_pipeline_settings()
+        config = effective_fbnumber_config()
+        token = config["api_token"]
         return FBNumberSettingsResponse(
-            api_url=settings.fb_number_api_url,
-            api_token=settings.fb_number_api_token,
-            timeout_seconds=settings.fb_number_timeout_seconds,
-            max_retries=settings.fb_number_max_retries,
-            default_country_code=settings.default_country_code,
-            is_configured=bool(settings.fb_number_api_url and settings.fb_number_api_token),
+            api_url=config["api_url"],
+            api_token=token,
+            api_token_configured=bool(token),
+            timeout_seconds=float(config["timeout_seconds"]),
+            max_retries=int(config["max_retries"]),
+            default_country_code=config["default_country_code"],
+            is_configured=bool(config["api_url"] and token),
         )
 
     @router.post("/fbnumber", response_model=FBNumberSettingsResponse, responses=ERROR_RESPONSES)
     def update_fbnumber_settings(request: FBNumberSettingsUpdateRequest) -> FBNumberSettingsResponse:
+        current_config = effective_fbnumber_config()
+        token = (request.api_token or current_config["api_token"]).strip()
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="FB_NUMBER_API_TOKEN is required before FBNumber can be enabled.",
+            )
         updates = {
             "FB_NUMBER_API_URL": request.api_url.strip(),
-            "FB_NUMBER_API_TOKEN": request.api_token.strip(),
+            "FB_NUMBER_API_TOKEN": token,
             "FB_NUMBER_TIMEOUT_SECONDS": str(request.timeout_seconds),
             "FB_NUMBER_MAX_RETRIES": str(request.max_retries),
             "PIPELINE_DEFAULT_COUNTRY_CODE": request.default_country_code.strip(),
         }
         update_env_file(updates)
-        settings = load_pipeline_settings()
+        config = effective_fbnumber_config()
+        token = config["api_token"]
         return FBNumberSettingsResponse(
-            api_url=settings.fb_number_api_url,
-            api_token=settings.fb_number_api_token,
-            timeout_seconds=settings.fb_number_timeout_seconds,
-            max_retries=settings.fb_number_max_retries,
-            default_country_code=settings.default_country_code,
-            is_configured=bool(settings.fb_number_api_url and settings.fb_number_api_token),
+            api_url=config["api_url"],
+            api_token=token,
+            api_token_configured=bool(token),
+            timeout_seconds=float(config["timeout_seconds"]),
+            max_retries=int(config["max_retries"]),
+            default_country_code=config["default_country_code"],
+            is_configured=bool(config["api_url"] and token),
         )
 
     @router.post("/fbnumber/test", response_model=FBNumberTestResponse, responses=ERROR_RESPONSES)
     def test_fbnumber_connection(request: FBNumberTestRequest) -> FBNumberTestResponse:
-        current_settings = load_pipeline_settings()
-        url = (request.api_url or current_settings.fb_number_api_url).strip()
-        token = (request.api_token or current_settings.fb_number_api_token).strip()
+        current_config = effective_fbnumber_config()
+        url = (request.api_url or current_config["api_url"]).strip()
+        token = (request.api_token or current_config["api_token"]).strip()
 
         if not url or not token:
             raise HTTPException(
@@ -157,15 +215,15 @@ def create_settings_router(*, auth: ApiKeyAuth) -> APIRouter:
                     status_code=res.status_code,
                     latency_ms=latency,
                     message=msg,
-                    raw_response=res.text[:500],
+                    raw_response="",
                 )
-        except Exception as err:
+        except Exception:
             latency = round((time.monotonic() - start_time) * 1000, 2)
             return FBNumberTestResponse(
                 success=False,
                 status_code=0,
                 latency_ms=latency,
-                message=f"Không thể kết nối đến máy chủ FBNumber: {str(err)}",
+                message="Could not connect to the FBNumber server.",
                 raw_response="",
             )
 

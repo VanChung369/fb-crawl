@@ -69,6 +69,17 @@ class JobCreateRequest(BaseModel):
         return data
 
 
+class GroupBatchCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    group_url: TargetUrl
+    batch_count: int = Field(default=5, ge=1, le=100)
+    batch_size: int = Field(default=300, ge=1, le=1000)
+    batch_duration_seconds: float = Field(default=900, ge=60, le=1800)
+    navigation_delay_seconds: float = Field(default=20, ge=8, le=1800)
+    steps: int = Field(default=0, ge=0, le=20)
+    call_fbnumber: bool = True
+
 
 class JobOptionsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -170,6 +181,14 @@ class JobPageResponse(BaseModel):
 
     items: list[JobResponse]
     next_cursor: str | None
+
+
+class GroupBatchCreateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_requested: int
+    total_created: int
+    items: list[JobResponse]
 
 
 class JobTargetPageResponse(BaseModel):
@@ -293,7 +312,7 @@ class ApiErrorResponse(BaseModel):
 class ProxyItemResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    raw_url: str
+    display_url: str
     scheme: str
     host: str
     port: int
@@ -339,21 +358,9 @@ class SessionListResponse(BaseModel):
 class SessionImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=128)
     cookies: list[dict[str, JsonValue]] | str
     proxy: str | None = None
-
-
-
-class SessionExtractRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=128)
-    email: str = Field(min_length=1, max_length=256)
-    password: str = Field(min_length=1, max_length=256)
-    two_factor_code: str | None = None
-    proxy: str | None = None
-    headless: bool = True
 
 
 
@@ -400,4 +407,3 @@ class ProxyDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raw_url: str
-

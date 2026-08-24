@@ -371,7 +371,11 @@ class UserQueryRepository:
             # Update phone evidence if phone_1 or phone_2 is provided
             for phone_val, origin in [(phone_1, "fbnumber"), (phone_2, "fb_crawl")]:
                 if phone_val is not None and phone_val.strip():
-                    norm = phone_val.strip()
+                    display_phone = phone_val.strip()
+                    try:
+                        norm = normalize_phone(display_phone)
+                    except InvalidPhoneNumber as error:
+                        raise ValidationError("Invalid phone number.") from error
                     # Ensure phone number exists in phone_numbers table
                     cursor.execute(
                         """
@@ -380,7 +384,7 @@ class UserQueryRepository:
                         ON CONFLICT (normalized_phone) DO NOTHING
                         RETURNING id
                         """,
-                        (norm, norm),
+                        (norm, display_phone),
                     )
                     row = cursor.fetchone()
                     if row is None:

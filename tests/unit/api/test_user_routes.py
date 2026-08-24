@@ -173,6 +173,22 @@ class RecordingUserRepository:
         self.calls.append(("list_enrichment_attempts", (user_id, limit, cursor)))
         return Page((_attempt(),), "next-attempts")
 
+    def update_user(self, user_id: int, **updates: object) -> UserSummary | None:
+        self.calls.append(("update_user", (user_id, updates)))
+        if self.user is None:
+            return None
+        values = {field: getattr(self.user, field) for field in self.user.__slots__}
+        values.update({key: value for key, value in updates.items() if value is not None})
+        self.user = UserSummary(**values)
+        return self.user
+
+    def delete_user(self, user_id: int) -> bool:
+        self.calls.append(("delete_user", user_id))
+        if self.user is None:
+            return False
+        self.user = None
+        return True
+
 
 def test_query_user_page_passes_one_typed_query_and_preserves_keyset_cursor() -> None:
     """Break caught: list filters are forwarded separately or pagination is discarded."""
@@ -438,7 +454,7 @@ def test_user_router_has_exact_ordered_bounded_authenticated_read_surface() -> N
     ]
     assert 'prefix="/api/v1/users"' in source
     assert "dependencies=[Depends(auth)]" in source
-    assert source.count("response_model=") == 4
+    assert source.count("response_model=") == 5
     assert "Query(ge=1, le=100)" in source
     assert "Path(gt=0, le=9223372036854775807)" in source
     assert "OFFSET" not in source.upper()
@@ -647,3 +663,47 @@ def test_enrichment_attempt_empty_error_code_serializes_as_json_null() -> None:
 
     assert response.status_code == 200
     assert response.json()["items"][0]["error_code"] is None
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
+def test_user_update_and_delete_routes_support_dashboard_management() -> None:
+    """Break caught: dashboard lead edit/delete buttons lose their API backing."""
+
+    repository = RecordingUserRepository(_user())
+    client = _client(repository)
+
+    updated = client.patch(
+        "/api/v1/users/7",
+        headers=_headers(),
+        json={"name": "Updated Name", "address": "Da Nang"},
+    )
+    deleted = client.delete("/api/v1/users/7", headers=_headers())
+
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Updated Name"
+    assert updated.json()["address"] == "Da Nang"
+    assert deleted.status_code == 200
+    assert deleted.json() == {
+        "status": "success",
+        "message": "User #7 was deleted.",
+    }
+    assert repository.calls[-4:] == [
+        ("get_user", 7),
+        (
+            "update_user",
+            (
+                7,
+                {
+                    "name": "Updated Name",
+                    "username": None,
+                    "phone_1": None,
+                    "phone_2": None,
+                    "address": "Da Nang",
+                    "gender": None,
+                    "birth_date": None,
+                },
+            ),
+        ),
+        ("get_user", 7),
+        ("delete_user", 7),
+    ]

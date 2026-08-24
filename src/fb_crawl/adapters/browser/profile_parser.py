@@ -106,6 +106,35 @@ WEBSITE_LABELS = frozenset(
 )
 BIO_LABELS = frozenset({"bio", "details about", "gioi thieu", "tieu su"})
 INTRO_HEADINGS = frozenset({"intro", "introduction", "gioi thieu"})
+ROOT_SECTION_STOP_HEADINGS = frozenset(
+    {
+        "all",
+        "anh",
+        "bai viet",
+        "ban be",
+        "check in",
+        "featured",
+        "photos",
+        "posts",
+        "quyen rieng tu",
+        "tin noi bat",
+        "xem them",
+    }
+)
+PROFILE_NAME_SKIP_LINES = frozenset(
+    {
+        "ban be",
+        "facebook",
+        "gioi thieu",
+        "nhan tin",
+        "nhom",
+        "photos",
+        "search",
+        "them ban be",
+        "tim kiem",
+        "trang chu",
+    }
+)
 WORKPLACE_LABELS = frozenset(
     {"cong viec", "noi lam viec", "work", "workplace", "works at"}
 )
@@ -117,6 +146,7 @@ LANGUAGE_LABELS = frozenset({"languages", "ngon ngu"})
 RELATIONSHIP_LABELS = frozenset(
     {"relationship", "relationship status", "tinh trang moi quan he"}
 )
+GENDER_VALUES = frozenset({"female", "male", "nam", "nu"})
 FIELD_LABELS = frozenset().union(
     CURRENT_CITY_LABELS,
     HOMETOWN_LABELS,
@@ -208,6 +238,18 @@ def _fold(value: str) -> str:
     return " ".join(without_marks.casefold().replace("đ", "d").split())
 
 
+def _field_key(value: str) -> str:
+    return _fold(value).strip(" :：")
+
+
+def _document_lines(soup: BeautifulSoup) -> tuple[str, ...]:
+    return tuple(
+        " ".join(str(value).split())
+        for value in soup.stripped_strings
+        if str(value).strip()
+    )
+
+
 def _requested(
     requested_fields: tuple[ProfileField, ...],
 ) -> frozenset[ProfileField]:
@@ -270,13 +312,75 @@ def _labelled_row(label_node, label: str):
         candidates = tuple(
             value
             for value in values
-            if _fold(value) != label and _fold(value) not in FIELD_LABELS
+            if _field_key(value) != label and _field_key(value) not in FIELD_LABELS
         )
 
         if candidates:
             return current, candidates[0]
 
         current = current.parent
+
+    return None
+
+
+def _gender_value(value: str) -> str | None:
+    folded = _fold(value)
+    return value.strip() if folded in GENDER_VALUES else None
+
+
+def _is_messenger_overlay_node(node) -> bool:
+    current = node
+
+    for _ in range(30):
+        if current is None or not hasattr(current, "get"):
+            return False
+
+        label = _fold(str(current.get("aria-label") or ""))
+        role = str(current.get("role") or "").casefold()
+        style = str(current.get("style") or "").casefold()
+
+        if role == "log" and (
+            "messages in conversation" in label
+            or "tin nhan trong cuoc tro chuyen" in label
+        ):
+            return True
+
+        if (
+            "doan chat" in label
+            or "cuoc tro chuyen" in label
+            or "messages in conversation" in label
+            or "--chat-" in style
+            or "--mwp-" in style
+        ):
+            return True
+
+        current = current.parent
+
+    return False
+
+
+def _fallback_profile_root_name(lines: tuple[str, ...]) -> str | None:
+    for line in lines[:60]:
+        key = _field_key(line)
+
+        if (
+            not key
+            or key in PROFILE_NAME_SKIP_LINES
+            or key in ROOT_SECTION_STOP_HEADINGS
+            or key in PERSONAL_HEADINGS
+            or key in CONTACT_HEADINGS
+            or key in INTRO_HEADINGS
+            or "dang theo doi" in key
+            or "nguoi theo doi" in key
+            or "followers" in key
+            or "following" in key
+            or len(line) > 80
+            or re.search(r"https?://", line)
+        ):
+            continue
+
+        if any(character.isalpha() for character in line):
+            return line
 
     return None
 
@@ -401,6 +505,9 @@ class ProfileParser:
                 else None
             ) or None
 
+        if not name and _is_profile_root(source_url):
+            name = _fallback_profile_root_name(_document_lines(soup))
+
         phones: dict[str, str] = {}
         phone_sources: list[str] = []
         phone_evidence: dict[tuple[str, str, str], PhoneEvidence] = {}
@@ -515,6 +622,9 @@ class ProfileParser:
                     if ProfileField.BIRTH_DATE in requested and birth_year is None:
                         birth_date, birth_year = _birthday(text)
 
+                    if ProfileField.GENDER in requested and gender is None:
+                        gender = _gender_value(text)
+
                 if is_contact or is_phone:
                     if ProfileField.PHONE in requested:
                         add_phones(
@@ -559,7 +669,7 @@ class ProfileParser:
                     education = text or None
 
         for text_node in soup.find_all(string=True):
-            label = _fold(str(text_node))
+            label = _field_key(str(text_node))
 
             if label not in FIELD_LABELS:
                 continue
@@ -666,6 +776,50 @@ class ProfileParser:
             ):
                 relationship_status = value
 
+        if _is_profile_root(source_url):
+            in_personal_section = False
+            in_contact_section = False
+            lines = _document_lines(soup)
+
+            for index, line in enumerate(lines):
+                key = _field_key(line)
+
+                if key in PERSONAL_HEADINGS:
+                    in_personal_section = True
+                    in_contact_section = False
+                    continue
+
+                if key in CONTACT_HEADINGS:
+                    in_personal_section = False
+                    in_contact_section = True
+                    continue
+
+                if key in ROOT_SECTION_STOP_HEADINGS:
+                    in_personal_section = False
+                    in_contact_section = False
+                    continue
+
+                if in_personal_section:
+                    if ProfileField.BIRTH_DATE in requested and birth_year is None:
+                        birth_date, birth_year = _birthday(line)
+
+                    if ProfileField.GENDER in requested and gender is None:
+                        gender = _gender_value(line)
+
+                if in_contact_section and ProfileField.PHONE in requested:
+                    add_phones(
+                        extract_phone_numbers(line),
+                        "facebook:profile_contact",
+                        confidence="profile_field",
+                    )
+
+                    if key in PHONE_LABELS and index + 1 < len(lines):
+                        add_phones(
+                            extract_phone_numbers(lines[index + 1]),
+                            "facebook:profile_contact",
+                            confidence="profile_field",
+                        )
+
         if ProfileField.PHONE in requested and _is_profile_root(source_url):
             intro_nodes = []
 
@@ -708,6 +862,9 @@ class ProfileParser:
             )
 
             for post in post_nodes:
+                if _is_messenger_overlay_node(post):
+                    continue
+
                 related_to_intro = any(
                     post is intro
                     or intro in post.parents

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import ast
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
@@ -13,6 +14,9 @@ from fb_data_pipeline.repositories.users import UserSummary
 
 API_KEY = "k" * 32
 HEADERS = {"X-API-Key": API_KEY}
+ROOT = Path(__file__).parents[3]
+SESSIONS_ROUTE_PATH = ROOT / "src" / "fb_crawl" / "api" / "routes" / "sessions.py"
+SCHEMAS_PATH = ROOT / "src" / "fb_crawl" / "api" / "schemas.py"
 
 
 def _create_test_app(tmp_path: Path):
@@ -69,6 +73,32 @@ def test_proxies_api_crud(tmp_path: Path) -> None:
     assert add_res.json()["total_count"] == 2
 
 
+def test_proxy_list_masks_credentials(tmp_path: Path) -> None:
+    """Break caught: proxy usernames/passwords leak through the dashboard API."""
+
+    proxy_pool = ProxyPool(["http://proxy-user:proxy-secret@127.0.0.1:8080"])
+    app = create_app(
+        ApiSettings(api_key=API_KEY),
+        job_service=MagicMock(),
+        job_repository=MagicMock(),
+        user_repository=MagicMock(),
+        readiness=lambda m: True,
+        proxy_pool=proxy_pool,
+        session_pool=SessionPool(sessions_dir=tmp_path / "sessions", proxy_pool=proxy_pool),
+        sessions_dir=tmp_path / "sessions",
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/v1/proxies", headers=HEADERS)
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["display_url"] == "http://127.0.0.1:8080"
+    assert "raw_url" not in item
+    assert "proxy-user" not in response.text
+    assert "proxy-secret" not in response.text
+
+
 def test_sessions_api_crud(tmp_path: Path) -> None:
     app, _, session_pool, _ = _create_test_app(tmp_path)
     client = TestClient(app)
@@ -93,6 +123,107 @@ def test_sessions_api_crud(tmp_path: Path) -> None:
     assert import_res.json()["proxy"] == "http://127.0.0.1:8080"
 
 
+def test_sessions_api_lists_unchecked_cookie_files_as_unknown(
+    tmp_path: Path,
+) -> None:
+    """Break caught: dashboard reload paints unmanaged session files green."""
+
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    (sessions_dir / "account_01.json").write_text(
+        '[{"name": "c_user", "value": "1000123"}]',
+        encoding="utf-8",
+    )
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/api/v1/sessions", headers=HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_count"] == 1
+    assert body["available_count"] == 0
+    assert body["items"][0]["status"] == "unknown"
+    assert body["items"][0]["is_available"] is False
+
+
+def test_session_import_rejects_path_traversal_name(tmp_path: Path) -> None:
+    """Break caught: a submitted session name can write outside sessions_dir."""
+
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/sessions",
+        headers=HEADERS,
+        json={
+            "name": "../outside",
+            "cookies": [{"name": "c_user", "value": "1000123"}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert not (tmp_path / "outside.json").exists()
+
+
+def test_session_api_no_longer_accepts_facebook_password_payloads() -> None:
+    """Break caught: WebUI/API can receive Facebook password or 2FA secrets."""
+
+    schema_source = SCHEMAS_PATH.read_text(encoding="utf-8")
+    route_source = SESSIONS_ROUTE_PATH.read_text(encoding="utf-8")
+    schema_tree = ast.parse(schema_source)
+    route_tree = ast.parse(route_source)
+
+    schema_classes = {
+        node.name
+        for node in schema_tree.body
+        if isinstance(node, ast.ClassDef)
+    }
+    route_paths = [
+        decorator.args[0].value
+        for node in ast.walk(route_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for decorator in node.decorator_list
+        if (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.args
+            and isinstance(decorator.args[0], ast.Constant)
+        )
+    ]
+
+    assert "SessionExtractRequest" not in schema_classes
+    assert "/extract" not in route_paths
+    assert "password" not in schema_source
+    assert "two_factor" not in schema_source
+    assert "extract_session_from_credentials" not in route_source
+
+
+def test_session_launch_login_is_local_only(tmp_path: Path) -> None:
+    """Break caught: a LAN/public API can start a local browser with session cookies."""
+
+    proxy_pool = ProxyPool([])
+    session_pool = SessionPool(sessions_dir=tmp_path / "sessions", proxy_pool=proxy_pool)
+    app = create_app(
+        ApiSettings(api_key=API_KEY, host="0.0.0.0"),
+        job_service=MagicMock(),
+        job_repository=MagicMock(),
+        user_repository=MagicMock(),
+        readiness=lambda m: True,
+        proxy_pool=proxy_pool,
+        session_pool=session_pool,
+        sessions_dir=tmp_path / "sessions",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/sessions/account_01/launch-login",
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 403
+
+
 def test_stats_overview_api(tmp_path: Path) -> None:
     app, _, _, _ = _create_test_app(tmp_path)
     client = TestClient(app)
@@ -103,6 +234,109 @@ def test_stats_overview_api(tmp_path: Path) -> None:
     assert "total_users" in data
     assert "total_proxies" in data
     assert data["total_proxies"] == 1
+
+
+def test_fbnumber_settings_response_returns_configured_token_for_local_dashboard(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Break caught: local settings UI cannot see/edit the configured JWT."""
+
+    monkeypatch.setenv("FB_NUMBER_API_URL", "https://api.example.test/search")
+    monkeypatch.setenv("FB_NUMBER_API_TOKEN", "fbnumber-private-token")
+
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    response = client.get("/api/v1/settings/fbnumber", headers=HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_url"] == "https://api.example.test/search"
+    assert body["is_configured"] is True
+    assert body["api_token_configured"] is True
+    assert body["api_token"] == "fbnumber-private-token"
+
+
+def test_fbnumber_settings_update_preserves_existing_token_when_ui_keeps_mask(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Break caught: saving settings with a masked token overwrites the real JWT."""
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FB_NUMBER_API_URL", "https://api.example.test/search")
+    monkeypatch.setenv("FB_NUMBER_API_TOKEN", "fbnumber-private-token")
+
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/settings/fbnumber",
+        headers=HEADERS,
+        json={
+            "api_url": "https://api2.example.test/search",
+            "api_token": None,
+            "timeout_seconds": 20,
+            "max_retries": 3,
+            "default_country_code": "84",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["api_token"] == "fbnumber-private-token"
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "FB_NUMBER_API_URL=https://api2.example.test/search" in env_text
+    assert "FB_NUMBER_API_TOKEN=fbnumber-private-token" in env_text
+    assert "FB_NUMBER_API_TOKEN=********" not in env_text
+
+
+def test_fbnumber_settings_falls_back_to_dotenv_when_process_env_is_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Break caught: saving settings loses JWT when the API process has not loaded .env."""
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FB_NUMBER_API_URL", raising=False)
+    monkeypatch.delenv("FB_NUMBER_API_TOKEN", raising=False)
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "FB_NUMBER_API_URL=https://dotenv.example.test/search",
+                "FB_NUMBER_API_TOKEN=fbnumber-private-token",
+                "FB_NUMBER_TIMEOUT_SECONDS=11",
+                "FB_NUMBER_MAX_RETRIES=1",
+                "PIPELINE_DEFAULT_COUNTRY_CODE=84",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    loaded = client.get("/api/v1/settings/fbnumber", headers=HEADERS)
+    saved = client.post(
+        "/api/v1/settings/fbnumber",
+        headers=HEADERS,
+        json={
+            "api_url": "https://dotenv2.example.test/search",
+            "api_token": None,
+            "timeout_seconds": 12,
+            "max_retries": 2,
+            "default_country_code": "84",
+        },
+    )
+
+    assert loaded.status_code == 200
+    assert loaded.json()["api_url"] == "https://dotenv.example.test/search"
+    assert loaded.json()["api_token"] == "fbnumber-private-token"
+    assert saved.status_code == 200
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "FB_NUMBER_API_URL=https://dotenv2.example.test/search" in env_text
+    assert "FB_NUMBER_API_TOKEN=fbnumber-private-token" in env_text
 
 
 def test_export_users_csv_and_json(tmp_path: Path) -> None:
