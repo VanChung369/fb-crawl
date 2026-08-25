@@ -200,9 +200,7 @@ class DashboardApp {
       btnJobsNext.addEventListener('click', () => {
         if (this.jobsPagination.nextCursor) {
           this.jobsPagination.pageIndex++;
-          if (this.jobsPagination.cursorHistory.length <= this.jobsPagination.pageIndex) {
-            this.jobsPagination.cursorHistory.push(this.jobsPagination.nextCursor);
-          }
+          this.jobsPagination.cursorHistory[this.jobsPagination.pageIndex] = this.jobsPagination.nextCursor;
           this.loadJobsData(this.jobsPagination.nextCursor);
         }
       });
@@ -232,9 +230,7 @@ class DashboardApp {
       btnLeadsNext.addEventListener('click', () => {
         if (this.leadsPagination.nextCursor) {
           this.leadsPagination.pageIndex++;
-          if (this.leadsPagination.cursorHistory.length <= this.leadsPagination.pageIndex) {
-            this.leadsPagination.cursorHistory.push(this.leadsPagination.nextCursor);
-          }
+          this.leadsPagination.cursorHistory[this.leadsPagination.pageIndex] = this.leadsPagination.nextCursor;
           this.loadLeadsData(this.leadsPagination.nextCursor);
         }
       });
@@ -579,6 +575,10 @@ class DashboardApp {
   // ==========================================
   async loadJobsData(cursor = null) {
     if (!this.tableAllJobs) return;
+    if (cursor === null) {
+      this.jobsPagination.pageIndex = 0;
+      this.jobsPagination.cursorHistory = [null];
+    }
     const limit = this.jobsPagination.limit;
     const url = cursor
       ? `/api/v1/jobs?limit=${limit}&cursor=${encodeURIComponent(cursor)}`
@@ -587,13 +587,15 @@ class DashboardApp {
     const data = await this.fetchApi(url);
     if (!data || !data.items || data.items.length === 0) {
       this.tableAllJobs.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:30px;">Chưa có Crawl Job nào. Bấm "+ Tạo Job Mới" để bắt đầu quét.</td></tr>`;
+      this.jobsPagination.nextCursor = null;
+      this.jobsPagination.hasMore = false;
       this.updateJobsPaginationUI(0, false);
       return;
     }
 
     this.jobsPagination.nextCursor = data.next_cursor || null;
-    this.jobsPagination.hasMore = !!data.has_more;
-    this.updateJobsPaginationUI(data.items.length, data.has_more);
+    this.jobsPagination.hasMore = Boolean(data.next_cursor);
+    this.updateJobsPaginationUI(data.items.length, this.jobsPagination.hasMore);
 
     this.tableAllJobs.innerHTML = data.items.map(job => {
       const isRunning = (job.status || '').toLowerCase() === 'running';
@@ -613,7 +615,7 @@ class DashboardApp {
               <button class="btn btn-secondary btn-sm" onclick="window.dashboardApp.viewJobDetails('${this.escapeAttr(job.id)}')">Chi tiết</button>
               ${isRunning ? `<button class="btn btn-warning btn-sm" onclick="window.dashboardApp.cancelJob('${this.escapeAttr(job.id)}')">Hủy</button>` : ''}
               ${isFailed ? `<button class="btn btn-primary btn-sm" onclick="window.dashboardApp.retryJob('${this.escapeAttr(job.id)}')">Thử lại</button>` : ''}
-              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteJob('${this.escapeAttr(job.id)}')">Xóa</button>
+              <button class="btn btn-danger btn-sm" onclick="window.dashboardApp.deleteJob('${this.escapeAttr(job.id)}', ${isRunning})">Xóa</button>
             </div>
           </td>
         </tr>
@@ -816,8 +818,11 @@ class DashboardApp {
     }
   }
 
-  async deleteJob(jobId) {
-    if (!confirm(`Bạn có chắc chắn muốn XÓA Job ${jobId.substring(0, 8)}...? (Dữ liệu khách hàng đã cào vẫn được giữ nguyên)`)) return;
+  async deleteJob(jobId, isRunning = false) {
+    const msg = isRunning
+      ? `Job này ĐANG CHẠY. Bạn có chắc chắn muốn DỪNG & XÓA Job ${jobId.substring(0, 8)}...?`
+      : `Bạn có chắc chắn muốn XÓA Job ${jobId.substring(0, 8)}...? (Dữ liệu khách hàng đã cào vẫn được giữ nguyên)`;
+    if (!confirm(msg)) return;
     const res = await this.fetchApi(`/api/v1/jobs/${jobId}`, { method: 'DELETE' });
     if (res) {
       this.showToast('Đã xóa Crawl Job thành công!');
@@ -830,6 +835,10 @@ class DashboardApp {
   // ==========================================
   async loadLeadsData(cursor = null) {
     if (!this.tableAllLeads) return;
+    if (cursor === null) {
+      this.leadsPagination.pageIndex = 0;
+      this.leadsPagination.cursorHistory = [null];
+    }
     const limit = this.leadsPagination.limit;
     const params = new URLSearchParams({ limit, ...this.leadsPagination.filters });
     if (cursor) params.set('cursor', cursor);
@@ -838,13 +847,15 @@ class DashboardApp {
 
     if (!data || !data.items || data.items.length === 0) {
       this.tableAllLeads.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:30px;">Không tìm thấy khách hàng nào phù hợp với bộ lọc.</td></tr>`;
+      this.leadsPagination.nextCursor = null;
+      this.leadsPagination.hasMore = false;
       this.updateLeadsPaginationUI(0, false);
       return;
     }
 
     this.leadsPagination.nextCursor = data.next_cursor || null;
-    this.leadsPagination.hasMore = !!data.has_more;
-    this.updateLeadsPaginationUI(data.items.length, data.has_more);
+    this.leadsPagination.hasMore = Boolean(data.next_cursor);
+    this.updateLeadsPaginationUI(data.items.length, this.leadsPagination.hasMore);
 
     this.tableAllLeads.innerHTML = data.items.map(u => {
       const p1 = u.phone_1 ? `<span class="pill success">📞 ${this.escapeHtml(u.phone_1)}</span>` : '<span style="color:var(--text-muted);">N/A</span>';

@@ -157,7 +157,12 @@ def create_jobs_router(
         responses=ERROR_RESPONSES,
     )
     def delete_job(job_id: UUID) -> dict[str, Any]:
-        _require_job(job_repository, job_id)
+        job = _require_job(job_repository, job_id)
+        if job.status in {JobStatus.RUNNING, JobStatus.CANCELLING}:
+            try:
+                job_service.cancel(job_id)
+            except Exception:
+                pass
         job_repository.delete_job(job_id)
         return {"status": "success", "message": f"Job {job_id} đã được xóa thành công."}
 
