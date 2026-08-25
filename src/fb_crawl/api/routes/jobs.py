@@ -29,6 +29,7 @@ from fb_crawl.core.jobs import (
     CrawlTarget,
     JobCreateCommand,
     JobNotFound,
+    JobStatus,
     SafeJobOptions,
     canonical_job_target,
 )
