@@ -29,7 +29,14 @@ def canonical_profile_url(value: str | None) -> str:
 
     parsed = urlparse(raw)
     host = parsed.netloc.casefold().removeprefix("www.")
-    if host not in {"facebook.com", "m.facebook.com", "mbasic.facebook.com"}:
+    if host not in {
+        "facebook.com",
+        "m.facebook.com",
+        "mbasic.facebook.com",
+        "web.facebook.com",
+        "fb.com",
+        "m.fb.com",
+    }:
         return raw
 
     path = "/" + "/".join(

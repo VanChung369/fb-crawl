@@ -170,15 +170,20 @@ def create_users_router(
         ApiErrorResponse,
         EnrichmentAttemptPageResponse,
         EnrichmentAttemptResponse,
+        FBNumberScansItemResponse,
+        FBNumberScansSyncRequest,
+        FBNumberScansSyncResponse,
         PhoneEvidencePageResponse,
         PhoneEvidenceResponse,
         UserPageResponse,
         UserResponse,
         UserUpdateRequest,
     )
+    from fastapi import HTTPException, status
 
     error_responses = {
         400: {"model": ApiErrorResponse},
+        401: {"model": ApiErrorResponse},
         404: {"model": ApiErrorResponse},
     }
     router = APIRouter(
@@ -186,6 +191,112 @@ def create_users_router(
         tags=["users"],
         dependencies=[Depends(auth)],
     )
+
+    @router.post(
+        "/sync-fbnumber-scans",
+        response_model=FBNumberScansSyncResponse,
+        responses=error_responses,
+    )
+    def sync_fbnumber_scans(
+        request: FBNumberScansSyncRequest,
+    ) -> FBNumberScansSyncResponse:
+        from fb_crawl.api.routes.settings import effective_fbnumber_config
+        from fb_data_pipeline.importers.fbnumber_scans import (
+            DEFAULT_FBNUMBER_SCANS_URL,
+            fetch_fbnumber_scans,
+            import_scan_item,
+            sync_scans_data_to_repository,
+        )
+        from fb_data_pipeline.repositories.postgres import PostgresRepository
+
+        config = effective_fbnumber_config()
+        token = (request.api_token or config.get("api_token") or "").strip()
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="FB_NUMBER_API_TOKEN là bắt buộc. Vui lòng cấu hình trong Cài đặt hoặc nhập trực tiếp.",
+            )
+
+        api_url = request.api_url or DEFAULT_FBNUMBER_SCANS_URL
+
+        try:
+            raw_response = fetch_fbnumber_scans(
+                api_token=token,
+                page_number=request.page_number,
+                page_size=request.page_size,
+                filter_query=request.filter,
+                api_url=api_url,
+            )
+        except PermissionError as err:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(err),
+            )
+        except Exception as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Lỗi khi gọi FBNumber Scans API: {str(err)}",
+            )
+
+        data_items = raw_response.get("data") if isinstance(raw_response.get("data"), list) else []
+        total_count = int(raw_response.get("totalCount") or len(data_items))
+
+        if request.preview:
+            preview_items: list[FBNumberScansItemResponse] = []
+            for item in data_items:
+                enriched = import_scan_item(
+                    item,
+                    default_country_code=config.get("default_country_code", "84"),
+                )
+                if enriched:
+                    phones = [ev.normalized_phone for ev in enriched.bundle.evidence]
+                    preview_items.append(
+                        FBNumberScansItemResponse(
+                            uid=enriched.bundle.identity.uid or None,
+                            username=enriched.bundle.identity.username or None,
+                            name=enriched.bundle.identity.name or None,
+                            profile_url=enriched.bundle.identity.profile_url or None,
+                            phone_1=phones[0] if len(phones) > 0 else None,
+                            phone_2=phones[1] if len(phones) > 1 else None,
+                            address=enriched.bundle.profile.address or None,
+                            gender=enriched.bundle.profile.gender or None,
+                            birthday=enriched.bundle.profile.birth_date or None,
+                            scan_at=item.get("scanAt"),
+                        )
+                    )
+            return FBNumberScansSyncResponse(
+                success=True,
+                total_count=total_count,
+                fetched_count=len(data_items),
+                imported_count=0,
+                skipped_count=max(0, len(data_items) - len(preview_items)),
+                preview=True,
+                message=f"Đã lấy thành công {len(preview_items)} bản ghi xem trước từ FBNumber (Tổng trên hệ thống: {total_count}).",
+                items=preview_items,
+            )
+
+        postgres_repo = PostgresRepository(
+            user_repository.database_url,
+            statement_timeout_seconds=getattr(user_repository, "statement_timeout_ms", 5000) / 1000.0,
+        )
+        sync_result = sync_scans_data_to_repository(
+            data_items,
+            postgres_repo,
+            default_country_code=config.get("default_country_code", "84"),
+        )
+
+        return FBNumberScansSyncResponse(
+            success=True,
+            total_count=total_count,
+            fetched_count=sync_result.fetched_count,
+            imported_count=sync_result.imported_count,
+            skipped_count=sync_result.skipped_count,
+            preview=False,
+            message=f"Đã đồng bộ và cập nhật thành công {sync_result.imported_count}/{sync_result.fetched_count} bản ghi vào cơ sở dữ liệu (Tổng trên FBNumber: {total_count}).",
+            items=[FBNumberScansItemResponse(**item) for item in sync_result.items],
+            errors=sync_result.errors,
+        )
+
 
     @router.get(
         "",

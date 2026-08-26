@@ -407,3 +407,44 @@ class ProxyDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raw_url: str
+
+
+class FBNumberScansSyncRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_number: int = Field(default=1, ge=1)
+    page_size: int = Field(default=100, ge=1, le=10000)
+    filter: str = Field(default="", max_length=256)
+    api_token: str | None = Field(default=None, max_length=2048)
+    api_url: str | None = Field(default=None, max_length=1024)
+    preview: bool = Field(default=False)
+
+
+class FBNumberScansItemResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    user_id: int | None = None
+    uid: str | None = None
+    username: str | None = None
+    name: str | None = None
+    profile_url: str | None = None
+    phone_1: str | None = None
+    phone_2: str | None = None
+    address: str | None = None
+    gender: str | None = None
+    birthday: str | None = None
+    scan_at: str | None = None
+
+
+class FBNumberScansSyncResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool
+    total_count: int
+    fetched_count: int
+    imported_count: int
+    skipped_count: int
+    preview: bool = False
+    message: str
+    items: list[FBNumberScansItemResponse] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)

@@ -57,6 +57,7 @@ class DashboardApp {
     this.modalEditUser = document.getElementById('modal-edit-user');
     this.modalEditSession = document.getElementById('modal-edit-session');
     this.modalEditProxy = document.getElementById('modal-edit-proxy');
+    this.modalSyncScans = document.getElementById('modal-sync-fbnumber-scans');
 
     // Forms
     this.formCreateJob = document.getElementById('form-create-job');
@@ -67,6 +68,7 @@ class DashboardApp {
     this.formEditUser = document.getElementById('form-edit-user');
     this.formEditSession = document.getElementById('form-edit-session');
     this.formEditProxy = document.getElementById('form-edit-proxy');
+    this.formSyncScans = document.getElementById('form-sync-fbnumber-scans');
 
     // Settings Input
     this.inputApiKey = document.getElementById('input-api-key');
@@ -81,6 +83,9 @@ class DashboardApp {
     this.btnOpenImportSession = document.getElementById('btn-open-import-session');
     this.btnOpenExtractSession = document.getElementById('btn-open-extract-session');
     this.btnOpenAddProxies = document.getElementById('btn-open-add-proxies');
+    this.btnOpenSyncScans = document.getElementById('btn-open-sync-scans');
+    this.btnPreviewSyncScans = document.getElementById('btn-preview-sync-scans');
+    this.btnToggleSyncToken = document.getElementById('btn-toggle-sync-token');
 
     // Pagination States
     this.jobsPagination = {
@@ -336,6 +341,26 @@ class DashboardApp {
     // Export Triggers
     if (this.btnExportCsv) this.btnExportCsv.addEventListener('click', () => this.exportLeads('csv'));
     if (this.btnExportJson) this.btnExportJson.addEventListener('click', () => this.exportLeads('json'));
+
+    // FBNumber Scans Sync Triggers
+    if (this.btnOpenSyncScans) {
+      this.btnOpenSyncScans.addEventListener('click', () => this.handleOpenSyncScansModal());
+    }
+    if (this.formSyncScans) {
+      this.formSyncScans.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.handleExecuteSyncScans(false);
+      });
+    }
+    if (this.btnPreviewSyncScans) {
+      this.btnPreviewSyncScans.addEventListener('click', () => this.handleExecuteSyncScans(true));
+    }
+    if (this.btnToggleSyncToken) {
+      this.btnToggleSyncToken.addEventListener('click', () => {
+        const input = document.getElementById('sync-scans-token');
+        if (input) input.type = input.type === 'password' ? 'text' : 'password';
+      });
+    }
   }
 
   handleJobActionChange(action) {
@@ -1660,6 +1685,149 @@ class DashboardApp {
       }
       latencyText.textContent = `⏱️ Độ trễ phản hồi: ${res.latency_ms} ms (HTTP ${res.status_code})`;
       rawBox.textContent = res.raw_response || '(Không có dữ liệu phản hồi)';
+    }
+  }
+
+  async handleOpenSyncScansModal() {
+    const tokenInput = document.getElementById('sync-scans-token');
+    const settingsToken = document.getElementById('cfg-fbnumber-token');
+
+    if (tokenInput && (!tokenInput.value || !tokenInput.value.trim())) {
+      if (settingsToken && settingsToken.value.trim()) {
+        tokenInput.value = settingsToken.value.trim();
+      } else {
+        // Fetch current settings token
+        const cfg = await this.fetchApi('/api/v1/settings/fbnumber');
+        if (cfg && cfg.api_token) {
+          tokenInput.value = cfg.api_token;
+        }
+      }
+    }
+
+    // Reset results area
+    const resultBox = document.getElementById('sync-scans-result-container');
+    if (resultBox) resultBox.style.display = 'none';
+
+    this.openModal(this.modalSyncScans);
+  }
+
+  async handleExecuteSyncScans(preview = false) {
+    const pageNumberInput = document.getElementById('sync-scans-page-number');
+    const pageSizeInput = document.getElementById('sync-scans-page-size');
+    const filterInput = document.getElementById('sync-scans-filter');
+    const tokenInput = document.getElementById('sync-scans-token');
+
+    const btnSubmit = document.getElementById('btn-submit-sync-scans');
+    const btnPreview = document.getElementById('btn-preview-sync-scans');
+    const resultBox = document.getElementById('sync-scans-result-container');
+    const statusBadge = document.getElementById('sync-scans-status-badge');
+    const tbody = document.getElementById('table-sync-scans-preview-body');
+
+    const pageNumber = parseInt(pageNumberInput?.value || '1', 10) || 1;
+    const pageSize = parseInt(pageSizeInput?.value || '100', 10) || 100;
+    const filter = (filterInput?.value || '').trim();
+    const token = (tokenInput?.value || '').trim();
+
+    if (btnSubmit) btnSubmit.disabled = true;
+    if (btnPreview) btnPreview.disabled = true;
+
+    const originalSubmitText = btnSubmit?.textContent || '🚀 Bắt Đầu Đồng Bộ & Lưu Vào Database';
+    const originalPreviewText = btnPreview?.textContent || '🔍 Xem Trước Dữ Liệu (Preview)';
+
+    if (preview && btnPreview) {
+      btnPreview.textContent = '⏳ Đang tải xem trước...';
+    } else if (btnSubmit) {
+      btnSubmit.textContent = '⏳ Đang tải và lưu vào Database...';
+    }
+
+    try {
+      const res = await this.fetchApi('/api/v1/users/sync-fbnumber-scans', {
+        method: 'POST',
+        body: JSON.stringify({
+          page_number: pageNumber,
+          page_size: pageSize,
+          filter: filter,
+          api_token: token || undefined,
+          preview: preview,
+        }),
+      });
+
+      if (res && res.success) {
+        if (resultBox) resultBox.style.display = 'block';
+        if (statusBadge) {
+          statusBadge.innerHTML = `
+            <span class="pill success" style="padding: 6px 12px; font-size: 0.85rem;">
+              ✅ ${res.message}
+            </span>
+            <span style="font-size: 0.8rem; color: var(--text-muted); margin-left: 10px;">
+              Tổng hệ thống: <strong>${res.total_count}</strong> | Lấy về: <strong>${res.fetched_count}</strong> ${preview ? '' : `| Đã lưu/cập nhật DB: <strong>${res.imported_count}</strong>`}
+            </span>
+          `;
+        }
+
+        if (tbody) {
+          tbody.innerHTML = '';
+          if (res.items && res.items.length > 0) {
+            res.items.forEach(item => {
+              const tr = document.createElement('tr');
+              const uidOrName = item.name ? `<strong>${item.name}</strong><br><span style="color: var(--text-muted); font-size: 0.75rem;">${item.uid || item.username || '-'}</span>` : (item.uid || '-');
+              const phone1 = item.phone_1 ? `<span class="pill success" style="font-size: 0.75rem;">${item.phone_1}</span>` : '-';
+              const phone2 = item.phone_2 ? `<span class="pill info" style="font-size: 0.75rem;">${item.phone_2}</span>` : '-';
+              const addr = item.address || '-';
+              const gender = item.gender || '-';
+              const birthday = item.birthday || '-';
+              const scanAt = item.scan_at ? new Date(item.scan_at).toLocaleString('vi-VN') : '-';
+
+              tr.innerHTML = `
+                <td>${uidOrName}</td>
+                <td>${phone1}</td>
+                <td>${phone2}</td>
+                <td>${addr}</td>
+                <td>${gender}</td>
+                <td>${birthday}</td>
+                <td>${scanAt}</td>
+              `;
+              tbody.appendChild(tr);
+            });
+          } else {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 16px;">Không tìm thấy bản ghi nào phù hợp.</td></tr>';
+          }
+        }
+
+        if (!preview) {
+          this.showToast(res.message, 'success');
+          // Reload leads and dashboard
+          this.loadLeadsData();
+          this.loadDashboardData();
+        }
+      } else {
+        if (resultBox) resultBox.style.display = 'block';
+        if (statusBadge) {
+          statusBadge.innerHTML = `
+            <span class="pill danger" style="padding: 6px 12px; font-size: 0.85rem;">
+              ❌ Lỗi: ${res?.message || 'Không thể đồng bộ dữ liệu từ FBNumber'}
+            </span>
+          `;
+        }
+      }
+    } catch (err) {
+      if (resultBox) resultBox.style.display = 'block';
+      if (statusBadge) {
+        statusBadge.innerHTML = `
+          <span class="pill danger" style="padding: 6px 12px; font-size: 0.85rem;">
+            ❌ Lỗi kết nối: ${err.message || str(err)}
+          </span>
+        `;
+      }
+    } finally {
+      if (btnSubmit) {
+        btnSubmit.disabled = false;
+        btnSubmit.textContent = originalSubmitText;
+      }
+      if (btnPreview) {
+        btnPreview.disabled = false;
+        btnPreview.textContent = originalPreviewText;
+      }
     }
   }
 

@@ -376,12 +376,16 @@
                 Tra cứu, lọc danh sách khách hàng và xuất file CSV / JSON
               </p>
             </div>
-            <div style="display: flex; gap: 10px">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-primary" id="btn-open-sync-scans" style="display: inline-flex; align-items: center; gap: 6px;">
+                <span>📥</span>
+                <span>Nhận Dữ Liệu FBNumber (Get Scans)</span>
+              </button>
               <button class="btn btn-secondary" id="btn-export-csv">
-                📥 Xuất File CSV
+                📊 Xuất File CSV
               </button>
               <button class="btn btn-secondary" id="btn-export-json">
-                📥 Xuất File JSON
+                📄 Xuất File JSON
               </button>
             </div>
           </div>
@@ -2164,6 +2168,122 @@
             >
               Cập Nhật Proxy
             </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: SYNC FBNUMBER SCANS -->
+    <div class="modal-backdrop" id="modal-sync-fbnumber-scans">
+      <div class="modal" style="max-width: 860px; max-height: 90vh; overflow-y: auto;">
+        <div class="modal-header">
+          <h3>📥 Đồng Bộ Dữ Liệu Quét Từ FBNumber (Get Scans API)</h3>
+          <button class="modal-close" data-close>&times;</button>
+        </div>
+        <form id="form-sync-fbnumber-scans">
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+            Lấy dữ liệu quét số điện thoại từ API <code>/v1/scans</code> và tự động thêm mới hoặc cập nhật hồ sơ khách hàng vào hệ thống database.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group">
+              <label for="sync-scans-page-number">Trang Số (pageNumber)</label>
+              <input
+                type="number"
+                id="sync-scans-page-number"
+                class="form-control"
+                value="1"
+                min="1"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="sync-scans-page-size">Số Lượng / Trang (pageSize)</label>
+              <input
+                type="number"
+                id="sync-scans-page-size"
+                class="form-control"
+                value="100"
+                min="1"
+                max="10000"
+                placeholder="vd: 100 hoặc 9999"
+                required
+              />
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">
+                Nhập <strong>9999</strong> để lấy toàn bộ dữ liệu quét.
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="sync-scans-filter">Bộ Lọc Từ Khóa (filter - Tùy chọn)</label>
+            <input
+              type="text"
+              id="sync-scans-filter"
+              class="form-control"
+              placeholder="Để trống để lấy tất cả hoặc nhập từ khóa..."
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="sync-scans-token">FB_NUMBER_API_TOKEN (Tùy chọn - mặc định lấy từ Cài Đặt)</label>
+            <div style="position: relative;">
+              <input
+                type="password"
+                id="sync-scans-token"
+                class="form-control"
+                placeholder="Bearer JWT Token..."
+                style="padding-right: 40px; font-family: monospace;"
+              />
+              <button
+                type="button"
+                id="btn-toggle-sync-token"
+                style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer;"
+              >
+                👁️
+              </button>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 12px; margin-top: 18px;">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              id="btn-preview-sync-scans"
+              style="flex: 1; height: 42px; font-weight: 600;"
+            >
+              🔍 Xem Trước Dữ Liệu (Preview)
+            </button>
+            <button
+              type="submit"
+              class="btn btn-primary"
+              id="btn-submit-sync-scans"
+              style="flex: 1.5; height: 42px; font-weight: 600;"
+            >
+              🚀 Bắt Đầu Đồng Bộ & Lưu Vào Database
+            </button>
+          </div>
+
+          <!-- Status & Result Area -->
+          <div id="sync-scans-result-container" style="display: none; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+            <div id="sync-scans-status-badge" style="margin-bottom: 12px; font-weight: 600; font-size: 0.9rem;"></div>
+            
+            <div class="table-container" style="max-height: 280px; overflow-y: auto;">
+              <table class="custom-table" style="font-size: 0.8rem;">
+                <thead>
+                  <tr>
+                    <th>UID / Name</th>
+                    <th>Số Điện Thoại 1</th>
+                    <th>Số Điện Thoại 2</th>
+                    <th>Địa Chỉ</th>
+                    <th>Giới Tính</th>
+                    <th>Ngày Sinh</th>
+                    <th>Thời Gian Quét</th>
+                  </tr>
+                </thead>
+                <tbody id="table-sync-scans-preview-body"></tbody>
+              </table>
+            </div>
           </div>
         </form>
       </div>
