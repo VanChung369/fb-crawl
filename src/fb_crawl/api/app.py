@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
@@ -15,6 +16,9 @@ from fb_crawl.api.dependencies import (
     AUTH_ERROR_BODY,
     ApiAuthenticationError,
     ApiKeyAuth,
+    CsrfValidationError,
+    ProductAccountAuth,
+    ProductAuthenticationError,
 )
 from fb_crawl.api.routes.health import ReadinessCheck, create_health_router
 from fb_crawl.api.routes.account import create_account_router
@@ -31,6 +35,16 @@ from fb_crawl.core.exceptions import FbCrawlError, ValidationError
 from fb_crawl.api.safe_logging import log_unexpected_api_error
 from fb_crawl.core.jobs import IdempotencyConflict, JobConflict, JobNotFound
 from pathlib import Path
+from fb_crawl.composition.product import ProductServices
+from fb_crawl.accounts.repository import AccountNotFound, DeviceNotFound
+from fb_crawl.auth.rate_limit import AuthRateLimited
+from fb_crawl.auth.service import (
+    AccountAlreadyRegistered,
+    AccountUnavailable,
+    DeviceBindingMismatch,
+    EmailVerificationRequired,
+    InvalidCredentials,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +60,8 @@ def create_app(
     proxy_pool: ProxyPool | None = None,
     session_pool: SessionPool | None = None,
     sessions_dir: Path | None = None,
+    product_services: ProductServices | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> FastAPI:
     """Build an API process from injected services without browser ownership."""
 
@@ -66,6 +82,7 @@ def create_app(
     app.state.api_key_auth = auth
     app.state.proxy_pool = resolved_proxy_pool
     app.state.session_pool = resolved_session_pool
+    app.state.product_services = product_services
 
     _install_exception_handlers(app)
     app.include_router(create_health_router(readiness))
@@ -85,6 +102,32 @@ def create_app(
     app.include_router(create_export_router(user_repository, auth))
     app.include_router(create_settings_router(job_repository=job_repository, auth=auth))
 
+    if product_services is not None:
+        from fb_crawl.api.routes.auth import create_product_auth_router
+        from fb_crawl.api.routes.product_account import create_product_account_router
+
+        product_auth = ProductAccountAuth(
+            product_services.account_repository,
+            product_services.token_service,
+            allowed_origins=settings.cors_origins,
+            clock=clock,
+        )
+        app.include_router(
+            create_product_auth_router(
+                product_services.auth_service,
+                product_auth,
+                allowed_origins=settings.cors_origins,
+                clock=clock,
+            )
+        )
+        app.include_router(
+            create_product_account_router(
+                product_services.account_repository,
+                product_auth,
+                clock=clock,
+            )
+        )
+
     _install_api_authentication(app, auth)
 
     if settings.docs_enabled:
@@ -94,9 +137,16 @@ def create_app(
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(settings.cors_origins),
-            allow_credentials=False,
+            allow_credentials=True,
             allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["X-API-Key", "Idempotency-Key", "Content-Type"],
+            allow_headers=[
+                "Authorization",
+                "X-Installation-ID",
+                "X-CSRF-Token",
+                "X-API-Key",
+                "Idempotency-Key",
+                "Content-Type",
+            ],
         )
 
     ui_dir = Path(__file__).parents[2] / "fb_ui"
@@ -166,7 +216,7 @@ def _install_api_authentication(app: FastAPI, auth: ApiKeyAuth) -> None:
             request.method == "OPTIONS"
             and "access-control-request-method" in request.headers
         )
-        if (path == "/api/v1" or path.startswith("/api/v1/")) and not is_preflight:
+        if _requires_internal_api_key(path) and not is_preflight:
             try:
                 auth.verify(request.headers.get("X-API-Key"))
             except ApiAuthenticationError:
@@ -176,6 +226,21 @@ def _install_api_authentication(app: FastAPI, auth: ApiKeyAuth) -> None:
                     headers={"WWW-Authenticate": "ApiKey"},
                 )
         return await call_next(request)
+
+
+def _requires_internal_api_key(path: str) -> bool:
+    if path == "/api/v1/account/default" or path.startswith(
+        "/api/v1/account/default/"
+    ):
+        return True
+    product_prefixes = (
+        "/api/v1/auth",
+        "/api/v1/account",
+        "/api/v1/devices",
+    )
+    if any(path == prefix or path.startswith(f"{prefix}/") for prefix in product_prefixes):
+        return False
+    return path == "/api/v1" or path.startswith("/api/v1/")
 
 
 def _install_protected_docs(app: FastAPI, auth: ApiKeyAuth) -> None:
@@ -224,15 +289,48 @@ def _install_exception_handlers(app: FastAPI) -> None:
             headers={"WWW-Authenticate": "ApiKey"},
         )
 
+    @app.exception_handler(ProductAuthenticationError)
+    async def product_authentication_error_handler(
+        _request: Request,
+        _error: ProductAuthenticationError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "code": "product_unauthorized",
+                "message": "Product authentication failed.",
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.exception_handler(CsrfValidationError)
+    async def csrf_validation_error_handler(
+        _request: Request,
+        error: CsrfValidationError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=403,
+            content={"code": error.code, "message": error.safe_message},
+        )
+
     @app.exception_handler(FbCrawlError)
     async def fb_crawl_error_handler(
         _request: Request,
         error: FbCrawlError,
     ) -> JSONResponse:
-        if isinstance(error, (JobNotFound, UserNotFound)):
+        if isinstance(error, (JobNotFound, UserNotFound, AccountNotFound, DeviceNotFound)):
             status_code = 404
-        elif isinstance(error, (IdempotencyConflict, JobConflict)):
+        elif isinstance(error, (IdempotencyConflict, JobConflict, AccountAlreadyRegistered)):
             status_code = 409
+        elif isinstance(error, InvalidCredentials):
+            status_code = 401
+        elif isinstance(error, AuthRateLimited):
+            status_code = 429
+        elif isinstance(
+            error,
+            (EmailVerificationRequired, AccountUnavailable, DeviceBindingMismatch),
+        ):
+            status_code = 403
         elif isinstance(error, ValidationError):
             status_code = 400
         else:

@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from collections.abc import Mapping
+
+from fb_crawl.accounts.postgres import PostgresAccountRepository
+from fb_crawl.accounts.repository import AccountRepository
+from fb_crawl.auth.config import AuthSettings
+from fb_crawl.auth.email import SmtpEmailDelivery
+from fb_crawl.auth.passwords import PasswordHasher
+from fb_crawl.auth.rate_limit import RateLimitService
+from fb_crawl.auth.service import AccountAuthService
+from fb_crawl.auth.tokens import TokenService
+from fb_crawl.core.exceptions import ConfigurationError
+
+
+@dataclass(frozen=True, slots=True)
+class ProductServices:
+    auth_service: AccountAuthService
+    account_repository: AccountRepository
+    token_service: TokenService
+
+
+def compose_product_services(
+    database_url: str,
+    auth_settings: AuthSettings,
+    env: Mapping[str, str],
+    *,
+    statement_timeout_seconds: float = 5.0,
+) -> ProductServices:
+    """Compose product-only services without importing browser code."""
+
+    repository = PostgresAccountRepository(
+        database_url,
+        statement_timeout_seconds=statement_timeout_seconds,
+    )
+    token_service = TokenService(
+        jwt_secret=auth_settings.jwt_secret,
+        token_hmac_secret=auth_settings.token_hmac_secret,
+        access_ttl_seconds=auth_settings.access_ttl_seconds,
+    )
+    try:
+        smtp_port = int(env.get("LEAD_FINDER_SMTP_PORT", "587"))
+    except ValueError as error:
+        raise ConfigurationError(
+            "LEAD_FINDER_SMTP_PORT must be an integer."
+        ) from error
+    email_delivery = SmtpEmailDelivery(
+        host=env.get("LEAD_FINDER_SMTP_HOST", "localhost").strip(),
+        port=smtp_port,
+        username=env.get("LEAD_FINDER_SMTP_USERNAME", ""),
+        password=env.get("LEAD_FINDER_SMTP_PASSWORD", ""),
+        sender=env.get(
+            "LEAD_FINDER_SMTP_SENDER",
+            "Lead Finder <noreply@localhost>",
+        ),
+    )
+    password_hasher = PasswordHasher()
+    rate_limiter = RateLimitService(
+        repository,
+        auth_settings.token_hmac_secret,
+    )
+    auth_service = AccountAuthService(
+        repository=repository,
+        password_hasher=password_hasher,
+        token_service=token_service,
+        email_delivery=email_delivery,
+        rate_limiter=rate_limiter,
+        public_base_url=auth_settings.public_base_url,
+    )
+    return ProductServices(auth_service, repository, token_service)

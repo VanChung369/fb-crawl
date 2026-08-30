@@ -284,7 +284,7 @@ git commit -m "feat: add verified account auth service"
 - Produces: `ProductServices(auth_service, account_repository, token_service)` and `CurrentAccount(account, device, session)` dependency.
 - Public routes match the spec; bearer routes include `/account/me`, `/account`, `/devices`, and `/auth/logout`.
 
-- [ ] **Step 1: Add failing route-policy tests**
+- [x] **Step 1: Add failing route-policy tests**
 
 ```python
 def test_product_login_does_not_require_internal_api_key(client) -> None:
@@ -300,13 +300,13 @@ def test_cookie_authenticated_state_change_requires_csrf(client, web_session_coo
     assert response.json()["code"] == "csrf_validation_failed"
 ```
 
-- [ ] **Step 2: Run route tests and see the global middleware failure**
+- [x] **Step 2: Run route tests and see the global middleware failure**
 
 Run: `python -m pytest tests/unit/api/test_auth.py tests/unit/api/test_product_auth_routes.py tests/unit/api/test_product_account_routes.py -q`
 
 Expected: FAIL because the current middleware requires `X-API-Key` for every `/api/v1` route.
 
-- [ ] **Step 3: Implement explicit policy routing**
+- [x] **Step 3: Implement explicit policy routing**
 
 Replace the broad middleware condition with exact internal-prefix classification. Product auth routers use injected services; bearer dependency decodes JWT then reloads session, device, account status, and allowed-device state. Web login/refresh may set secure refresh cookies and must pass an Origin-bound double-submit CSRF token for state changes, while extension responses return the opaque refresh token in the JSON contract. Add exact CORS headers `Authorization`, `X-Installation-ID`, `X-CSRF-Token`, `Content-Type`, and existing internal headers.
 
@@ -321,13 +321,13 @@ INTERNAL_API_PREFIXES = (
 def current_account(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> CurrentAccount: ...
 ```
 
-- [ ] **Step 4: Run API and CLI regression tests**
+- [x] **Step 4: Run API and CLI regression tests**
 
 Run: `python -m pytest tests/unit/api tests/integration/test_api_cli.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/api src/fb_crawl/cli/api.py src/fb_crawl/composition/product.py tests/unit/api tests/integration/test_api_cli.py

@@ -11,12 +11,23 @@ from types import SimpleNamespace
 import pytest
 
 from fb_crawl.api.config import ApiSettings
+from fb_crawl.auth.config import AuthSettings
 from fb_crawl.cli import app
 from fb_crawl.core.exceptions import ConfigurationError
 from fb_data_pipeline.config import PipelineSettings
+from zoneinfo import ZoneInfo
 
 
 API_KEY = "a" * 32
+
+
+def _valid_auth_settings() -> AuthSettings:
+    return AuthSettings(
+        jwt_secret="j" * 32,
+        token_hmac_secret="h" * 32,
+        public_base_url="https://leads.example.com",
+        product_timezone=ZoneInfo("Asia/Ho_Chi_Minh"),
+    )
 
 
 def _serve_args(*, host: str = "127.0.0.1", port: int = 8000) -> argparse.Namespace:
@@ -30,6 +41,12 @@ def test_execute_api_validates_configuration_then_runs_built_app(monkeypatch) ->
     events: list[object] = []
     pipeline = PipelineSettings(database_url="postgresql://configured")
     settings = ApiSettings(api_key=API_KEY)
+    auth_settings = AuthSettings(
+        jwt_secret="j" * 32,
+        token_hmac_secret="h" * 32,
+        public_base_url="https://leads.example.com",
+        product_timezone=ZoneInfo("Asia/Ho_Chi_Minh"),
+    )
     built_app = object()
 
     monkeypatch.setattr(
@@ -42,9 +59,17 @@ def test_execute_api_validates_configuration_then_runs_built_app(monkeypatch) ->
         "load_api_settings",
         lambda values: events.append(("api_settings", values is os.environ)) or settings,
     )
+    monkeypatch.setattr(
+        api_cli,
+        "load_auth_settings",
+        lambda values: events.append(("auth_settings", values is os.environ))
+        or auth_settings,
+    )
 
-    def compose(pipeline_settings, api_settings):
-        events.append(("compose", pipeline_settings, api_settings))
+    def compose(pipeline_settings, api_settings, product_auth_settings):
+        events.append(
+            ("compose", pipeline_settings, api_settings, product_auth_settings)
+        )
         return built_app
 
     monkeypatch.setattr(api_cli, "_compose_api", compose)
@@ -58,7 +83,8 @@ def test_execute_api_validates_configuration_then_runs_built_app(monkeypatch) ->
     assert events == [
         "pipeline_settings",
         ("api_settings", True),
-        ("compose", pipeline, settings),
+        ("auth_settings", True),
+        ("compose", pipeline, settings, auth_settings),
         (
             "uvicorn",
             built_app,
@@ -149,6 +175,9 @@ def test_ctrl_c_during_api_startup_or_server_returns_130(
         "load_api_settings",
         lambda _values: ApiSettings(api_key=API_KEY),
     )
+    monkeypatch.setattr(
+        api_cli, "load_auth_settings", lambda _values: _valid_auth_settings()
+    )
     if stage == "compose":
         monkeypatch.setattr(
             api_cli,
@@ -203,6 +232,9 @@ def test_missing_api_framework_root_returns_safe_exit_two(
         "load_api_settings",
         lambda _values: ApiSettings(api_key=API_KEY),
     )
+    monkeypatch.setattr(
+        api_cli, "load_auth_settings", lambda _values: _valid_auth_settings()
+    )
     missing = ModuleNotFoundError(f"No module named '{missing_root}'")
     missing.name = missing_root
     monkeypatch.setattr(
@@ -235,6 +267,9 @@ def test_missing_uvicorn_root_returns_safe_exit_two(
         api_cli,
         "load_api_settings",
         lambda _values: ApiSettings(api_key=API_KEY),
+    )
+    monkeypatch.setattr(
+        api_cli, "load_auth_settings", lambda _values: _valid_auth_settings()
     )
     monkeypatch.setattr(api_cli, "_compose_api", lambda *_args: object())
     original_import = builtins.__import__
@@ -273,6 +308,9 @@ def test_internal_missing_module_is_not_mislabeled_as_missing_api_extra(
         api_cli,
         "load_api_settings",
         lambda _values: ApiSettings(api_key=API_KEY),
+    )
+    monkeypatch.setattr(
+        api_cli, "load_auth_settings", lambda _values: _valid_auth_settings()
     )
     missing = ModuleNotFoundError("No module named 'internal_runtime_dependency'")
     missing.name = "internal_runtime_dependency"
@@ -355,6 +393,7 @@ def test_real_api_composition_uses_postgres_repositories_without_browser_imports
     """Break caught: production API composition owns a browser or fake repository."""
     from fb_crawl.cli.api import _compose_api
     from fb_crawl.services.jobs import JobService
+    from fb_crawl.accounts.postgres import PostgresAccountRepository
     from fb_data_pipeline.repositories.jobs import JobRepository
     from fb_data_pipeline.repositories.migrations import MigrationRunner
     from fb_data_pipeline.repositories.users import UserQueryRepository
@@ -363,20 +402,32 @@ def test_real_api_composition_uses_postgres_repositories_without_browser_imports
     built = _compose_api(
         PipelineSettings(database_url="postgresql://not-connected"),
         ApiSettings(api_key=API_KEY),
+        AuthSettings(
+            jwt_secret="j" * 32,
+            token_hmac_secret="h" * 32,
+            public_base_url="https://leads.example.com",
+            product_timezone=ZoneInfo("Asia/Ho_Chi_Minh"),
+        ),
     )
 
     assert isinstance(built.state.job_service, JobService)
     assert isinstance(built.state.job_repository, JobRepository)
     assert isinstance(built.state.user_repository, UserQueryRepository)
+    assert isinstance(
+        built.state.product_services.account_repository,
+        PostgresAccountRepository,
+    )
     code = (
         "import sys\n"
         "from fb_crawl.cli.api import _compose_api\n"
         "from fb_crawl.api.config import ApiSettings\n"
+        "from fb_crawl.auth.config import AuthSettings\n"
         "from fb_data_pipeline.config import PipelineSettings\n"
+        "from zoneinfo import ZoneInfo\n"
         "from fb_data_pipeline.repositories.migrations import MigrationRunner\n"
         "from unittest.mock import patch\n"
         "with patch.object(MigrationRunner, 'apply', return_value=()):\n"
-        "    _compose_api(PipelineSettings(database_url='postgresql://not-connected'), ApiSettings(api_key='x'*32))\n"
+        "    _compose_api(PipelineSettings(database_url='postgresql://not-connected'), ApiSettings(api_key='x'*32), AuthSettings(jwt_secret='j'*32, token_hmac_secret='h'*32, public_base_url='https://leads.example.com', product_timezone=ZoneInfo('Asia/Ho_Chi_Minh')))\n"
         "assert 'selenium' not in sys.modules\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)

@@ -7,6 +7,7 @@ import os
 from typing import NoReturn
 
 from fb_crawl.api.config import ApiSettings, load_api_settings
+from fb_crawl.auth.config import AuthSettings, load_auth_settings
 from fb_crawl.core.exceptions import ConfigurationError
 from fb_data_pipeline.config import PipelineSettings, load_pipeline_settings
 from fb_data_pipeline.repositories.errors import DatabaseError
@@ -85,10 +86,12 @@ def _compose_dev_api():
 def _compose_api(
     pipeline_settings: PipelineSettings,
     api_settings: ApiSettings,
+    auth_settings: AuthSettings,
 ):
     """Build real API dependencies without importing any browser runtime."""
     from fb_crawl.api.app import create_app
     from fb_crawl.services.jobs import JobService
+    from fb_crawl.composition.product import compose_product_services
     from fb_data_pipeline.repositories.jobs import JobRepository
     from fb_data_pipeline.repositories.migrations import MigrationRunner
     from fb_data_pipeline.repositories.users import UserQueryRepository
@@ -105,12 +108,19 @@ def _compose_api(
         pipeline_settings.database_url,
         statement_timeout_seconds=statement_timeout,
     )
+    product_services = compose_product_services(
+        pipeline_settings.database_url,
+        auth_settings,
+        os.environ,
+        statement_timeout_seconds=statement_timeout,
+    )
     return create_app(
         api_settings,
         JobService(job_repository),
         job_repository,
         user_repository,
         migration_runner.is_applied,
+        product_services=product_services,
     )
 
 
@@ -127,8 +137,13 @@ def execute_api(args: argparse.Namespace) -> int:
             pipeline_settings = load_pipeline_settings()
             _require_database(pipeline_settings)
             api_settings = load_api_settings(os.environ)
+            auth_settings = load_auth_settings(os.environ)
             try:
-                application = _compose_api(pipeline_settings, api_settings)
+                application = _compose_api(
+                    pipeline_settings,
+                    api_settings,
+                    auth_settings,
+                )
             except ModuleNotFoundError as error:
                 _raise_optional_dependency(error)
 
