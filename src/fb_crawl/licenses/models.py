@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -51,6 +52,33 @@ class LicenseGrant:
 class SubscriptionStatus(StrEnum):
     VALID = "valid"
     REVOKED = "revoked"
+
+
+class LicenseKeyStatus(StrEnum):
+    AVAILABLE = "available"
+    REDEEMED = "redeemed"
+    REVOKED = "revoked"
+
+
+@dataclass(frozen=True, slots=True)
+class LicenseKey:
+    id: int
+    key_digest: str = field(repr=False)
+    key_version: int
+    masked_key: str
+    grant: LicenseGrant
+    status: LicenseKeyStatus
+    created_by_account_id: int | None
+    redeemed_by_account_id: int | None
+    redeemed_at: datetime | None
+    created_at: datetime
+    revoked_at: datetime | None
+
+    def __post_init__(self) -> None:
+        if self.id <= 0 or self.key_version <= 0:
+            raise ValueError("license key identifiers must be positive")
+        if not self.key_digest:
+            raise ValueError("license key digest is required")
 
 
 @dataclass(frozen=True, slots=True)

@@ -157,7 +157,7 @@ git commit -m "feat: model licenses and entitlements"
 - Produces `PostgresLicenseRepository.create_key`, `redeem`, `effective_entitlements`, `list_subscriptions`, `revoke_key`, `start_subscription_now`, and `write_audit`.
 - `redeem(account_id: int, key_digest: str, now: datetime) -> Subscription` locks the key and account subscription schedule.
 
-- [ ] **Step 1: Write concurrency and lifecycle tests**
+- [x] **Step 1: Write concurrency and lifecycle tests**
 
 ```python
 def test_second_account_cannot_redeem_used_key(repository, key) -> None:
@@ -171,13 +171,13 @@ def test_second_key_starts_after_existing_end(repository) -> None:
     assert second.starts_at == first.ends_at
 ```
 
-- [ ] **Step 2: Run repository tests**
+- [x] **Step 2: Run repository tests**
 
 Run: `python -m pytest tests/unit/licenses/test_postgres.py tests/integration/data_pipeline/test_license_repository.py -q`
 
 Expected: FAIL because repository is missing.
 
-- [ ] **Step 3: Implement short transactions and effective selection**
+- [x] **Step 3: Implement short transactions and effective selection**
 
 Use `SELECT ... FOR UPDATE` on the license and an account-scoped advisory transaction lock for schedule serialization. Redemption writes the immutable entitlement snapshot and audit event. `effective_entitlements` selects `starts_at <= now < ends_at AND status='valid'`, otherwise selects the protected default plan. Immediate start is allowed only for the earliest scheduled row: end the current row at `now`, recalculate that row from its original duration, shift every later valid row to remain contiguous, and audit all affected IDs.
 
@@ -190,13 +190,13 @@ def redeem(self, account_id: int, key_digest: str, now: datetime) -> Subscriptio
         return self._insert_subscription(cursor, account_id, grant, starts_at)
 ```
 
-- [ ] **Step 4: Re-run tests including two-connection race**
+- [x] **Step 4: Re-run tests including two-connection race**
 
 Run: `python -m pytest tests/unit/licenses/test_postgres.py tests/integration/data_pipeline/test_license_repository.py -q`
 
 Expected: PASS or configured database skip; concurrent redemption has exactly one winner.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/licenses tests/unit/licenses/test_postgres.py tests/integration/data_pipeline/test_license_repository.py
