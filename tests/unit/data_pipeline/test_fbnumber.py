@@ -42,6 +42,112 @@ def test_fbnumber_maps_identity_and_returns_phone_1() -> None:
     assert '"uid":"10001"' in str(observed["body"]).replace(" ", "")
 
 
+def test_fbnumber_returns_consistent_resolved_identity_from_selected_data() -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "facebook_uid": 100123,
+                            "facebook_username": "sample.user",
+                            "phone": "0981 234 567",
+                        }
+                    },
+                )
+            )
+        ),
+    )
+
+    result = provider.search(FacebookIdentity(username="sample.user"))
+
+    assert result.status is ProviderStatus.FOUND
+    assert result.resolved_identity == FacebookIdentity(
+        uid="100123",
+        username="sample.user",
+    )
+
+
+def test_fbnumber_rejects_conflicting_returned_username() -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "uid": "100123",
+                        "username": "other.user",
+                        "phone": "0981 234 567",
+                    },
+                )
+            )
+        ),
+    )
+
+    result = provider.search(FacebookIdentity(username="sample.user"))
+
+    assert result.status is ProviderStatus.FAILED
+    assert result.error_code == "provider_identity_conflict"
+    assert result.evidence == ()
+
+
+def test_fbnumber_rejects_conflicting_returned_uid() -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "uid": "100999",
+                        "phone": "0981 234 567",
+                    },
+                )
+            )
+        ),
+    )
+
+    result = provider.search(FacebookIdentity(uid="100123"))
+
+    assert result.status is ProviderStatus.FAILED
+    assert result.error_code == "provider_identity_conflict"
+    assert result.evidence == ()
+
+
+def test_fbnumber_does_not_treat_nested_metadata_as_resolved_identity() -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "phone": "0981 234 567",
+                            "metadata": {
+                                "uid": "999999",
+                                "username": "unrelated.user",
+                            },
+                        }
+                    },
+                )
+            )
+        ),
+    )
+
+    result = provider.search(FacebookIdentity(username="sample.user"))
+
+    assert result.status is ProviderStatus.FOUND
+    assert result.resolved_identity is None
+
+
 def test_fbnumber_returns_safe_error_without_response_body() -> None:
     provider = FBNumberProvider(
         api_url="https://api.example.test/v1/phone/search",
@@ -110,4 +216,3 @@ def test_fbnumber_retries_rate_limit_with_bound() -> None:
     assert result.error_code == "provider_rate_limited"
     assert calls == 2
     assert sleeps == [0.25]
-

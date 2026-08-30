@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -18,11 +19,17 @@ from fb_data_pipeline.core.models import (
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
 
 
-def _extract_profile_data(payload: Any, checked_at: datetime) -> tuple[ProfileData, str]:
+def _selected_data(payload: Any) -> Mapping[str, Any] | None:
     if not isinstance(payload, Mapping):
-        return ProfileData(), ""
+        return None
+    nested = payload.get("data")
+    return nested if isinstance(nested, Mapping) else payload
 
-    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else payload
+
+def _extract_profile_data(payload: Any, checked_at: datetime) -> tuple[ProfileData, str]:
+    data = _selected_data(payload)
+    if data is None:
+        return ProfileData(), ""
 
     gender = str(data.get("gender") or data.get("sex") or "").strip()
     birthday = str(data.get("birthday") or data.get("birth_date") or data.get("birthDate") or data.get("dob") or "").strip()
@@ -37,6 +44,61 @@ def _extract_profile_data(payload: Any, checked_at: datetime) -> tuple[ProfileDa
         observed_at=checked_at,
     )
     return profile, name
+
+
+UID_KEYS = ("uid", "user_id", "facebook_uid")
+USERNAME_KEYS = ("username", "facebook_username")
+FACEBOOK_UID = re.compile(r"[0-9]+")
+FACEBOOK_USERNAME = re.compile(r"[A-Za-z0-9.]+")
+
+
+def _provider_uid(data: Mapping[str, Any]) -> str:
+    for key in UID_KEYS:
+        raw = data.get(key)
+        if raw is None or isinstance(raw, bool):
+            continue
+        value = str(raw).strip()
+        if FACEBOOK_UID.fullmatch(value):
+            return value
+    return ""
+
+
+def _provider_username(data: Mapping[str, Any]) -> str:
+    for key in USERNAME_KEYS:
+        raw = data.get(key)
+        if raw is None or isinstance(raw, bool):
+            continue
+        value = str(raw).strip()
+        if FACEBOOK_USERNAME.fullmatch(value):
+            return value
+    return ""
+
+
+def _resolved_identity(payload: Any) -> FacebookIdentity | None:
+    data = _selected_data(payload)
+    if data is None:
+        return None
+    resolved = FacebookIdentity(
+        uid=_provider_uid(data),
+        username=_provider_username(data),
+    )
+    return resolved if resolved.uid or resolved.username else None
+
+
+def _identity_conflicts(
+    requested: FacebookIdentity,
+    resolved: FacebookIdentity | None,
+) -> bool:
+    if resolved is None:
+        return False
+    return bool(
+        (requested.uid and resolved.uid and requested.uid != resolved.uid)
+        or (
+            requested.username
+            and resolved.username
+            and requested.username.casefold() != resolved.username.casefold()
+        )
+    )
 
 
 
@@ -232,6 +294,16 @@ class FBNumberProvider:
                 )
 
             correlation_id = _correlation_id(response_body, response)
+            resolved_identity = _resolved_identity(response_body)
+            if _identity_conflicts(identity, resolved_identity):
+                return ProviderResult(
+                    provider=self.name,
+                    status=ProviderStatus.FAILED,
+                    checked_at=checked_at,
+                    correlation_id=correlation_id,
+                    error_code="provider_identity_conflict",
+                )
+
             evidence: list[PhoneEvidence] = []
             seen: set[str] = set()
             for phone in _phone_candidates(response_body):
@@ -258,7 +330,12 @@ class FBNumberProvider:
                 )
 
             profile, extracted_name = _extract_profile_data(response_body, checked_at)
-            has_data = bool(evidence or not profile.is_empty or extracted_name)
+            has_data = bool(
+                evidence
+                or not profile.is_empty
+                or extracted_name
+                or resolved_identity
+            )
 
             return ProviderResult(
                 provider=self.name,
@@ -267,6 +344,7 @@ class FBNumberProvider:
                     if has_data
                     else ProviderStatus.NOT_FOUND
                 ),
+                resolved_identity=resolved_identity,
                 evidence=tuple(evidence),
                 checked_at=checked_at,
                 correlation_id=correlation_id,
@@ -275,4 +353,3 @@ class FBNumberProvider:
             )
 
         raise AssertionError("Provider retry loop exhausted unexpectedly.")
-

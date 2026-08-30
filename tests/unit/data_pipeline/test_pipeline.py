@@ -11,6 +11,7 @@ from fb_data_pipeline.core.models import (
     PhoneEvidence,
     ProviderResult,
     ProviderStatus,
+    UserBundle,
 )
 from fb_data_pipeline.services.pipeline import EnrichmentPipeline
 
@@ -105,3 +106,32 @@ def test_provider_failure_keeps_crawler_phone_2() -> None:
     assert run.users[0].bundle.phone_1 is None
     assert run.users[0].bundle.phone_2 == "+84912345678"
     assert run.report.provider_failed == 1
+
+
+def test_pipeline_completes_missing_uid_from_provider_identity() -> None:
+    provider = FakeProvider(
+        ProviderResult(
+            provider="fbnumber",
+            status=ProviderStatus.FOUND,
+            resolved_identity=FacebookIdentity(
+                uid="100123",
+                username="sample.user",
+            ),
+        )
+    )
+    original = FacebookIdentity(
+        username="sample.user",
+        name="Sample User",
+        profile_url="https://www.facebook.com/sample.user",
+    )
+
+    run = EnrichmentPipeline(provider).run_bundles(
+        (UserBundle(identity=original),)
+    )
+
+    assert run.users[0].bundle.identity == FacebookIdentity(
+        uid="100123",
+        username="sample.user",
+        name="Sample User",
+        profile_url="https://www.facebook.com/sample.user",
+    )

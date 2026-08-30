@@ -84,6 +84,16 @@ class EnrichmentPipeline:
 
             # Merge name if original identity was missing name or had default
             merged_identity = original.identity
+            if provider_result.resolved_identity is not None:
+                resolved = provider_result.resolved_identity
+                merged_identity = FacebookIdentity(
+                    uid=merged_identity.uid or resolved.uid,
+                    username=merged_identity.username or resolved.username,
+                    name=merged_identity.name or resolved.name,
+                    profile_url=(
+                        merged_identity.profile_url or resolved.profile_url
+                    ),
+                )
             if (not merged_identity.name or merged_identity.name.startswith("User_")) and hasattr(provider_result, "name") and provider_result.name:
                 merged_identity = FacebookIdentity(
                     uid=merged_identity.uid,

@@ -7,6 +7,8 @@ from fb_data_pipeline.core.models import (
     FacebookIdentity,
     PhoneEvidence,
     PhoneSlot,
+    ProviderResult,
+    ProviderStatus,
     UserBundle,
 )
 
@@ -30,6 +32,18 @@ def test_user_bundle_defaults_to_empty_profile_data() -> None:
     bundle = UserBundle(FacebookIdentity(uid="100"))
 
     assert bundle.profile.is_empty is True
+
+
+def test_provider_result_can_report_a_resolved_facebook_identity() -> None:
+    resolved = FacebookIdentity(uid="100123", username="sample.user")
+
+    result = ProviderResult(
+        provider="fbnumber",
+        status=ProviderStatus.FOUND,
+        resolved_identity=resolved,
+    )
+
+    assert result.resolved_identity == resolved
 
 
 def test_identity_canonicalizes_mobile_and_tracking_profile_urls() -> None:

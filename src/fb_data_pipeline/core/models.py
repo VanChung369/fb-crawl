@@ -189,4 +189,4 @@ class ProviderResult:
     error_code: str = ""
     profile: ProfileData = field(default_factory=ProfileData)
     name: str = ""
-
+    resolved_identity: FacebookIdentity | None = None
