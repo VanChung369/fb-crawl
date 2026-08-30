@@ -217,7 +217,7 @@ git commit -m "feat: persist license subscription lifecycle"
 - Produces `ContactQuotaService.precheck(account_id, facebook_user_id, now) -> QuotaPrecheck` and `reserve(account_id, facebook_user_id, phone_number_id, lookup_event_id, now) -> RevealDecision`.
 - `RevealDecision` fields are `allowed`, `charged`, `reveal_id`, `used`, and `limit`.
 
-- [ ] **Step 1: Write quota invariants**
+- [x] **Step 1: Write quota invariants**
 
 ```python
 def test_same_user_in_same_month_is_not_charged_twice(quota) -> None:
@@ -233,13 +233,13 @@ def test_upgrade_keeps_usage_and_raises_limit(quota, entitlements) -> None:
     assert decision.limit == 1000
 ```
 
-- [ ] **Step 2: Run service tests**
+- [x] **Step 2: Run service tests**
 
 Run: `python -m pytest tests/unit/entitlements tests/integration/data_pipeline/test_contact_quota.py -q`
 
 Expected: FAIL on missing services.
 
-- [ ] **Step 3: Implement atomic reservation**
+- [x] **Step 3: Implement atomic reservation**
 
 Within one transaction, lock/upsert `(account_id, period_start)` in `usage_monthly`, return the existing reveal before checking the limit, reject at `used >= limit`, otherwise insert the unique reveal and increment exactly once. Resolve quota period with configured product timezone. Block over-limit devices for contact operations but allow account/device/license recovery operations.
 
@@ -253,13 +253,13 @@ def reserve(self, account_id: int, facebook_user_id: int, phone_number_id: int, 
         return usage.insert_and_increment(facebook_user_id, phone_number_id, lookup_event_id)
 ```
 
-- [ ] **Step 4: Re-run including concurrent final-slot test**
+- [x] **Step 4: Re-run including concurrent final-slot test**
 
 Run: `python -m pytest tests/unit/entitlements tests/integration/data_pipeline/test_contact_quota.py -q`
 
 Expected: PASS or configured database skip; two concurrent reservations for the final unit yield one allowed result.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/entitlements tests/unit/entitlements tests/integration/data_pipeline/test_contact_quota.py
