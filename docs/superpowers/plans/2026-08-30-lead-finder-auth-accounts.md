@@ -160,7 +160,7 @@ git commit -m "feat: add account authentication primitives"
 - Required operations: `create_account`, `find_account_by_email`, `verify_email_token`, `create_device`, `list_devices`, `revoke_device`, `create_session`, `rotate_session`, `revoke_session`, `revoke_account_sessions`, `request_account_deletion`, `purge_due_deleted_accounts`, and `record_rate_limit_hit`.
 - `rotate_session(old_digest, new_digest, now, expires_at) -> AuthSession` must revoke the whole family when `old_digest` already has `rotated_from_id`/replacement state.
 
-- [ ] **Step 1: Write repository contract tests**
+- [x] **Step 1: Write repository contract tests**
 
 ```python
 def test_rotate_refresh_token_is_single_use(repository) -> None:
@@ -171,13 +171,13 @@ def test_rotate_refresh_token_is_single_use(repository) -> None:
     assert repository.family_is_revoked(first.id)
 ```
 
-- [ ] **Step 2: Run unit and PostgreSQL tests**
+- [x] **Step 2: Run unit and PostgreSQL tests**
 
 Run: `python -m pytest tests/unit/accounts/test_postgres.py tests/integration/data_pipeline/test_account_repository.py -q`
 
 Expected: FAIL because repository types are missing; integration tests skip only when `TEST_DATABASE_URL` is absent.
 
-- [ ] **Step 3: Implement repository transactions**
+- [x] **Step 3: Implement repository transactions**
 
 Use one short psycopg transaction per operation, `SELECT ... FOR UPDATE` for token rotation/device revocation, database-generated timestamps where possible, safe `DatabaseError` mapping, and injectable connection factories matching existing repository tests. Never return password hashes or token hashes from list APIs.
 
@@ -188,13 +188,13 @@ class AccountRepository(Protocol):
     def revoke_device(self, account_id: int, device_id: int, now: datetime) -> None: ...
 ```
 
-- [ ] **Step 4: Re-run repository tests**
+- [x] **Step 4: Re-run repository tests**
 
 Run: `python -m pytest tests/unit/accounts/test_postgres.py tests/integration/data_pipeline/test_account_repository.py -q`
 
 Expected: PASS or documented PostgreSQL skips.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/accounts tests/unit/accounts/test_postgres.py tests/integration/data_pipeline/test_account_repository.py
