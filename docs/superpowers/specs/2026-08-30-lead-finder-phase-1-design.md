@@ -225,7 +225,9 @@ paid subscription at the override timestamp, changes the selected scheduled
 subscription to start at that timestamp, and recalculates its end from the new
 key's original duration. The admin UI warns that unused time on the current
 subscription is forfeited and records both subscription IDs in the audit
-event. This prevents overlapping active paid entitlements.
+event. Only the earliest scheduled subscription may be started this way; all
+later valid subscriptions are shifted to remain contiguous after its new end.
+This prevents overlaps and accidental gaps in paid entitlements.
 
 ### Effective entitlement
 
