@@ -34,6 +34,12 @@ class ContactRepository(Protocol):
         now: datetime,
     ) -> LookupEvent: ...
 
+    def get_lookup_event(
+        self,
+        account_id: int,
+        event_id: int,
+    ) -> LookupEvent | None: ...
+
     def complete_lookup_event(
         self,
         account_id: int,
@@ -85,4 +91,7 @@ class ContactRepository(Protocol):
         checked_at: datetime,
         refresh_after: datetime,
         latest_attempt_id: int | None = None,
-    ) -> LookupState: ...
+        *,
+        owner_token: str,
+        now: datetime,
+    ) -> LookupState | None: ...

@@ -10,7 +10,13 @@ import psycopg
 import pytest
 
 from fb_crawl.contacts.postgres import PostgresContactRepository
+from fb_crawl.contacts.models import (
+    ContactIdentity,
+    LookupOutcome,
+    LookupSource,
+)
 from fb_data_pipeline.core.models import FacebookIdentity
+from fb_data_pipeline.core.models import ProviderStatus
 from fb_data_pipeline.repositories.migrations import MigrationRunner
 from fb_data_pipeline.repositories.postgres import PostgresRepository
 
@@ -95,3 +101,124 @@ def test_live_lease_has_one_winner_and_expired_lease_can_be_reclaimed() -> None:
         NOW + timedelta(seconds=61),
     )
     assert reclaimed.acquired is True
+
+
+def test_lookup_event_reads_and_completion_are_account_scoped() -> None:
+    identity = FacebookIdentity(uid="100123", username="sample.user")
+    user_id = PostgresRepository(TEST_DATABASE_URL).upsert_identity(identity)
+    with psycopg.connect(TEST_DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            account_ids = []
+            for index in (1, 2):
+                cursor.execute(
+                    """
+                    INSERT INTO accounts (
+                        normalized_email, display_email, password_hash,
+                        status, email_verified_at
+                    ) VALUES (%s, %s, %s, 'active', %s)
+                    RETURNING id
+                    """,
+                    (
+                        f"owner-{index}@example.test",
+                        f"owner-{index}@example.test",
+                        "test-password-hash",
+                        NOW,
+                    ),
+                )
+                account_ids.append(int(cursor.fetchone()[0]))
+
+    repository = PostgresContactRepository(TEST_DATABASE_URL)
+    event = repository.create_lookup_event(
+        account_ids[0],
+        None,
+        ContactIdentity(user_id, identity),
+        identity,
+        NOW,
+    )
+
+    assert repository.get_lookup_event(account_ids[0], event.id) == event
+    assert repository.get_lookup_event(account_ids[1], event.id) is None
+    assert repository.complete_lookup_event(
+        account_ids[1],
+        event.id,
+        LookupOutcome.FOUND,
+        LookupSource.CACHE,
+        provider_called=False,
+        quota_charged=False,
+        safe_error_code="",
+        now=NOW + timedelta(seconds=1),
+    ) is None
+    completed = repository.complete_lookup_event(
+        account_ids[0],
+        event.id,
+        LookupOutcome.FOUND,
+        LookupSource.CACHE,
+        provider_called=False,
+        quota_charged=False,
+        safe_error_code="",
+        now=NOW + timedelta(seconds=1),
+    )
+    assert completed is not None
+    assert completed.outcome is LookupOutcome.FOUND
+    assert repository.complete_lookup_event(
+        account_ids[0],
+        event.id,
+        LookupOutcome.FAILED,
+        LookupSource.NONE,
+        provider_called=False,
+        quota_charged=False,
+        safe_error_code="late_completion",
+        now=NOW + timedelta(seconds=2),
+    ) is None
+
+
+def test_reclaimed_lease_fences_the_expired_owner_state_update() -> None:
+    user_id = PostgresRepository(TEST_DATABASE_URL).upsert_identity(
+        FacebookIdentity(uid="100123")
+    )
+    repository = PostgresContactRepository(TEST_DATABASE_URL)
+    assert repository.claim_lease(
+        user_id,
+        "fbnumber",
+        "phone",
+        "owner-old",
+        NOW,
+        NOW + timedelta(seconds=1),
+    ).acquired
+    next_now = NOW + timedelta(seconds=2)
+    assert repository.claim_lease(
+        user_id,
+        "fbnumber",
+        "phone",
+        "owner-new",
+        next_now,
+        next_now + timedelta(seconds=30),
+    ).acquired
+
+    current = repository.update_provider_state(
+        user_id,
+        "fbnumber",
+        "phone",
+        ProviderStatus.FOUND,
+        next_now,
+        next_now + timedelta(days=30),
+        owner_token="owner-new",
+        now=next_now,
+    )
+    stale = repository.update_provider_state(
+        user_id,
+        "fbnumber",
+        "phone",
+        ProviderStatus.NOT_FOUND,
+        NOW,
+        NOW + timedelta(days=7),
+        owner_token="owner-old",
+        now=next_now,
+    )
+
+    assert current is not None
+    assert current.latest_status is ProviderStatus.FOUND
+    assert stale is None
+    cached = repository.get_cached_contact(user_id)
+    assert cached is not None
+    assert cached.state == current

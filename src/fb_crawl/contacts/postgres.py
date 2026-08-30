@@ -230,6 +230,28 @@ class PostgresContactRepository:
             raise DatabaseError("Database lookup event creation failed.")
         return self._event_from_row(row)
 
+    def get_lookup_event(
+        self,
+        account_id: int,
+        event_id: int,
+    ) -> LookupEvent | None:
+        try:
+            with self.connect_factory(self.database_url) as connection:
+                with connection.cursor() as cursor:
+                    self._set_timeout(cursor)
+                    cursor.execute(
+                        f"""
+                        SELECT {self._event_columns()}
+                        FROM lookup_events
+                        WHERE id = %s AND account_id = %s
+                        """,
+                        (event_id, account_id),
+                    )
+                    row = cursor.fetchone()
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database operation failed.") from error
+        return self._event_from_row(row) if row is not None else None
+
     def complete_lookup_event(
         self,
         account_id: int,
@@ -416,7 +438,10 @@ class PostgresContactRepository:
         checked_at: datetime,
         refresh_after: datetime,
         latest_attempt_id: int | None = None,
-    ) -> LookupState:
+        *,
+        owner_token: str,
+        now: datetime,
+    ) -> LookupState | None:
         if refresh_after < checked_at:
             raise ValueError("provider state refresh cannot precede check")
         try:
@@ -430,13 +455,21 @@ class PostgresContactRepository:
                             checked_at, refresh_after, latest_attempt_id,
                             updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        SELECT %s, %s, %s, %s, %s, %s, %s, %s
+                        FROM enrichment_leases AS leases
+                        WHERE leases.facebook_user_id = %s
+                          AND leases.provider = %s
+                          AND leases.field = %s
+                          AND leases.owner_token = %s
+                          AND leases.leased_until > %s
                         ON CONFLICT (facebook_user_id, provider, field) DO UPDATE
                         SET latest_status = EXCLUDED.latest_status,
                             checked_at = EXCLUDED.checked_at,
                             refresh_after = EXCLUDED.refresh_after,
                             latest_attempt_id = EXCLUDED.latest_attempt_id,
                             updated_at = EXCLUDED.updated_at
+                        WHERE provider_lookup_state.checked_at
+                              <= EXCLUDED.checked_at
                         RETURNING latest_status, checked_at, refresh_after,
                                   latest_attempt_id, updated_at
                         """,
@@ -449,14 +482,17 @@ class PostgresContactRepository:
                             refresh_after,
                             latest_attempt_id,
                             checked_at,
+                            facebook_user_id,
+                            provider,
+                            field,
+                            owner_token,
+                            now,
                         ),
                     )
                     row = cursor.fetchone()
         except (psycopg.Error, OSError) as error:
             raise DatabaseError("Database operation failed.") from error
         if row is None:
-            raise DatabaseError("Database provider state update failed.")
+            return None
         state = self._state_from_row(facebook_user_id, provider, field, row)
-        if state is None:
-            raise DatabaseError("Database provider state update failed.")
         return state
