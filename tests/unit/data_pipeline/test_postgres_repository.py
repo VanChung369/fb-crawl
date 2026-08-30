@@ -272,6 +272,29 @@ def test_repository_updates_one_matching_identity() -> None:
     )
 
 
+def test_upsert_identity_reuses_alias_locking_without_enrichment_writes() -> None:
+    cursor = RecordingCursor()
+    repository = PostgresRepository(
+        "postgresql://hidden",
+        connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+    identity = FacebookIdentity(uid="100123", username="sample.user")
+
+    assert repository.upsert_identity(identity) == 41
+
+    lock_params = [
+        params
+        for sql, params in cursor.commands
+        if "pg_advisory_xact_lock" in sql
+    ]
+    assert lock_params == [(alias,) for alias in sorted(identity.aliases)]
+    assert not any(
+        "INSERT INTO enrichment_attempts" in sql
+        or "INSERT INTO user_phone_evidence" in sql
+        for sql, _params in cursor.commands
+    )
+
+
 def test_repository_rolls_back_when_aliases_match_multiple_users() -> None:
     cursor = RecordingCursor(matching_user_ids=[[(11,), (12,)]])
     connection = RecordingConnection(cursor)

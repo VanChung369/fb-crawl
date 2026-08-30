@@ -213,6 +213,24 @@ class PostgresRepository:
         except (psycopg.Error, OSError) as error:
             raise DatabaseError("Database operation failed.") from error
 
+    def upsert_identity(self, identity: FacebookIdentity) -> int:
+        if not identity.is_usable:
+            raise DatabaseIdentityConflict(
+                "Cannot persist a Facebook user without an identity alias."
+            )
+        try:
+            with self.connect_factory(self.database_url) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (f"{self.statement_timeout_ms}ms",),
+                    )
+                    return self._upsert_user(cursor, identity)
+        except DatabaseError:
+            raise
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database operation failed.") from error
+
     def _save_enriched_user(self, enriched: EnrichedUser) -> int:
         if not enriched.bundle.identity.is_usable:
             raise DatabaseIdentityConflict(
