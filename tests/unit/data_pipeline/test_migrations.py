@@ -9,6 +9,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "002_profile_attributes",
         "003_job_orchestration",
         "004_product_accounts",
+        "005_product_licenses",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql
@@ -35,7 +36,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
 
 
 def test_product_account_migration_is_fourth_and_isolated_from_shared_identity() -> None:
-    migration = load_migrations()[-1]
+    migration = load_migrations()[3]
 
     assert migration.version == "004_product_accounts"
     assert "CREATE TABLE accounts" in migration.sql
@@ -52,6 +53,33 @@ def test_product_account_migration_is_fourth_and_isolated_from_shared_identity()
     assert "account_tokens_expires_at_idx" in migration.sql
     assert "auth_sessions_expires_at_idx" in migration.sql
     assert "facebook_users" not in migration.sql
+
+
+def test_license_migration_seeds_default_plan_and_unique_reveal_ledger() -> None:
+    migration = load_migrations()[-1]
+
+    assert migration.version == "005_product_licenses"
+    for table in (
+        "plans",
+        "license_keys",
+        "account_subscriptions",
+        "usage_monthly",
+        "account_contact_reveals",
+        "admin_audit_events",
+    ):
+        assert f"CREATE TABLE {table}" in migration.sql
+    assert (
+        "VALUES ('default', 'Default', 100, 1, false, false, true)"
+        in migration.sql
+    )
+    assert "license_keys_key_digest_idx" in migration.sql
+    assert "account_subscriptions_account_time_idx" in migration.sql
+    assert "UNIQUE (account_id, period_start)" in migration.sql
+    assert "UNIQUE (account_id, facebook_user_id, period_start)" in migration.sql
+    assert "lookup_event_id bigint" in migration.sql
+    assert "REFERENCES lookup_events" not in migration.sql
+    assert "monthly_contact_limit >= 0" in migration.sql
+    assert "max_devices >= 1" in migration.sql
 
 
 def test_migrations_are_sorted_by_version() -> None:

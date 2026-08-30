@@ -34,7 +34,7 @@
 - Produces tables `plans`, `license_keys`, `account_subscriptions`, `usage_monthly`, `account_contact_reveals`, and `admin_audit_events`.
 - Seeds protected plan `default` with limit `100`, `max_devices=1`, and both crawl flags false.
 
-- [ ] **Step 1: Write schema contract tests**
+- [x] **Step 1: Write schema contract tests**
 
 ```python
 def test_license_migration_seeds_default_plan() -> None:
@@ -44,13 +44,13 @@ def test_license_migration_seeds_default_plan() -> None:
     assert "UNIQUE (account_id, facebook_user_id, period_start)" in migration.sql
 ```
 
-- [ ] **Step 2: Run tests and confirm migration is missing**
+- [x] **Step 2: Run tests and confirm migration is missing**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_migrations.py tests/integration/data_pipeline/test_license_schema.py -q`
 
 Expected: FAIL on missing version 5; integration test skips only without `TEST_DATABASE_URL`.
 
-- [ ] **Step 3: Implement migration**
+- [x] **Step 3: Implement migration**
 
 Use the exact statuses/constraints from the spec. Add lookup indexes for digest, account/time subscription selection, monthly usage, account reveal history, and audit actor/time. `account_contact_reveals` initially contains a nullable `lookup_event_id bigint` without a foreign key; migration `006` will add its FK after creating `lookup_events`.
 
@@ -60,13 +60,13 @@ CREATE UNIQUE INDEX account_contact_reveals_period_key
 ON account_contact_reveals (account_id, facebook_user_id, period_start);
 ```
 
-- [ ] **Step 4: Re-run schema tests**
+- [x] **Step 4: Re-run schema tests**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_migrations.py tests/integration/data_pipeline/test_license_schema.py -q`
 
 Expected: PASS or configured database skip.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_data_pipeline/migrations/005_product_licenses.sql tests/unit/data_pipeline/test_migrations.py tests/integration/data_pipeline/test_license_schema.py
