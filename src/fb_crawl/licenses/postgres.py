@@ -102,6 +102,23 @@ class PostgresLicenseRepository:
                 ),
             )
             row = cursor.fetchone()
+            if row is not None:
+                self._write_audit(
+                    cursor,
+                    actor_account_id=created_by_account_id,
+                    action="license_key_created",
+                    target_type="license_key",
+                    target_id=str(row[0]),
+                    details={
+                        "duration_unit": grant.duration.unit,
+                        "duration_value": grant.duration.value,
+                        "monthly_contact_limit": grant.monthly_contact_limit,
+                        "max_devices": grant.max_devices,
+                        "allow_group_crawl": grant.allow_group_crawl,
+                        "allow_comment_crawl": grant.allow_comment_crawl,
+                    },
+                    now=now,
+                )
         if row is None:
             raise DatabaseError("Database license-key write failed.")
         return self._key(row)
@@ -251,20 +268,26 @@ class PostgresLicenseRepository:
             rows = cursor.fetchall()
         return tuple(self._subscription(row) for row in rows)
 
-    def list_keys(self, *, limit: int = 100) -> tuple[LicenseKey, ...]:
-        if not 1 <= limit <= 100:
-            raise ValueError("license key list limit must be from 1 to 100")
-        with self._connect() as cursor:
-            cursor.execute(
+    def list_keys(
+        self, *, limit: int = 100, cursor: int | None = None
+    ) -> tuple[LicenseKey, ...]:
+        if not 1 <= limit <= 101:
+            raise ValueError("license key list limit must be from 1 to 101")
+        if cursor is not None and cursor <= 0:
+            raise ValueError("license key cursor must be positive")
+        cursor_id = cursor
+        with self._connect() as database_cursor:
+            database_cursor.execute(
                 f"""
                 SELECT {_KEY_COLUMNS}
                 FROM license_keys
-                ORDER BY created_at DESC, id DESC
+                WHERE (%s IS NULL OR id < %s)
+                ORDER BY id DESC
                 LIMIT %s
                 """,
-                (limit,),
+                (cursor_id, cursor_id, limit),
             )
-            rows = cursor.fetchall()
+            rows = database_cursor.fetchall()
         return tuple(self._key(row) for row in rows)
 
     def revoke_key(

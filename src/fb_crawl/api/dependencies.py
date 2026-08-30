@@ -3,7 +3,7 @@ from __future__ import annotations
 import hmac
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 from uuid import UUID
 
 from fastapi import Cookie, Depends, Header, Request
@@ -70,6 +70,7 @@ class CurrentAccount:
     session: AuthSession
     claims: AccessClaims
     cookie_authenticated: bool
+    device_allowed: bool = True
 
 
 _BEARER = HTTPBearer(auto_error=False)
@@ -83,11 +84,13 @@ class ProductAccountAuth:
         token_service: TokenService,
         *,
         allowed_origins: tuple[str, ...],
+        entitlement_service: Any | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._repository = repository
         self._token_service = token_service
         self._allowed_origins = frozenset(allowed_origins)
+        self._entitlement_service = entitlement_service
         self._clock = clock
 
     async def __call__(
@@ -137,12 +140,28 @@ class ProductAccountAuth:
 
         if cookie_authenticated and request.method in _UNSAFE_METHODS:
             validate_cookie_csrf(request, self._allowed_origins)
+        device_allowed = True
+        if self._entitlement_service is not None:
+            entitlements = self._entitlement_service.for_account(account.id, now)
+            active_devices = sorted(
+                (
+                    item
+                    for item in self._repository.list_devices(account.id)
+                    if item.status is DeviceStatus.ACTIVE
+                ),
+                key=lambda item: (item.first_seen_at, item.id),
+            )
+            allowed_ids = {
+                item.id for item in active_devices[: entitlements.max_devices]
+            }
+            device_allowed = device.id in allowed_ids
         return CurrentAccount(
             account=account,
             device=device,
             session=session,
             claims=claims,
             cookie_authenticated=cookie_authenticated,
+            device_allowed=device_allowed,
         )
 
 

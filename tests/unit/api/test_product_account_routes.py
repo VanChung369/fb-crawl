@@ -24,6 +24,7 @@ def test_account_me_and_devices_expose_no_password_or_session_hashes() -> None:
         "role": "user",
         "status": "active",
         "email_verified_at": "2026-08-30T08:00:00Z",
+        "device_allowed": True,
     }
     assert devices.json()["items"][0]["installation_id"] == str(INSTALLATION_ID)
     combined = account.text + devices.text

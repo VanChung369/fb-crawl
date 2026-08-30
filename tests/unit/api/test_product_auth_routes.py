@@ -21,12 +21,24 @@ API_KEY = "a" * 32
 WEB_ORIGIN = "https://leads.example.com"
 
 
-def product_client() -> tuple[TestClient, ProductRepositoryFake, ProductAuthServiceFake, str]:
+def product_client(
+    *,
+    license_service=None,
+    entitlement_service=None,
+    quota_service=None,
+) -> tuple[TestClient, ProductRepositoryFake, ProductAuthServiceFake, str]:
     repository = ProductRepositoryFake()
     tokens = TokenService(jwt_secret="j" * 32, token_hmac_secret="h" * 32)
     access = tokens.issue_access(7, SESSION_ID, 9, NOW)
     auth_service = ProductAuthServiceFake(access)
-    services = ProductServices(auth_service, repository, tokens)
+    services = ProductServices(
+        auth_service,
+        repository,
+        tokens,
+        license_service=license_service,
+        entitlement_service=entitlement_service,
+        quota_service=quota_service,
+    )
     app = create_app(
         ApiSettings(api_key=API_KEY, cors_origins=(WEB_ORIGIN,)),
         job_service=object(),

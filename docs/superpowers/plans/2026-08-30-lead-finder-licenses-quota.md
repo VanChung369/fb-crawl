@@ -282,7 +282,7 @@ git commit -m "feat: enforce account contact quotas"
 - Admin: create/list/revoke keys, list/suspend accounts, revoke devices/sessions, inspect subscriptions, and start a scheduled subscription now.
 - Create-key response contains plaintext exactly once; list responses contain only masked key.
 
-- [ ] **Step 1: Write API authorization and plaintext-once tests**
+- [x] **Step 1: Write API authorization and plaintext-once tests**
 
 ```python
 def test_user_cannot_create_license(client, user_headers) -> None:
@@ -301,13 +301,13 @@ def test_oldest_devices_fill_reduced_entitlement_slots(client, account_with_two_
     assert client.get("/api/v1/account/me", headers=second.headers).json()["device_allowed"] is False
 ```
 
-- [ ] **Step 2: Verify failing endpoints**
+- [x] **Step 2: Verify failing endpoints**
 
 Run: `python -m pytest tests/unit/api/test_license_routes.py tests/unit/api/test_product_admin_routes.py -q`
 
 Expected: FAIL with 404/missing routers.
 
-- [ ] **Step 3: Implement closed schemas and role checks**
+- [x] **Step 3: Implement closed schemas and role checks**
 
 Add duration discriminated validation, bounded quota/device values, exact crawl booleans, generic invalid-key response, recent-auth requirement for destructive device/session operations, cursor pagination, and immutable audit writes. Extend `ProductServices` with license, entitlement, and quota services. Update `CurrentAccount` loading to rank active devices by `first_seen_at,id`; blocked devices may call account/device/logout/redeem routes but receive `device_limit_exceeded` on contact/export routes.
 
@@ -317,13 +317,13 @@ def redeem_license(request: RedeemLicenseRequest, current: CurrentAccount = Depe
     return licenses.redeem(current.account.id, request.key, clock())
 ```
 
-- [ ] **Step 4: Run focused and API regression tests**
+- [x] **Step 4: Run focused and API regression tests**
 
 Run: `python -m pytest tests/unit/api -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/api src/fb_crawl/composition/product.py tests/unit/api

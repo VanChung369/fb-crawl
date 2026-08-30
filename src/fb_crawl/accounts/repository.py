@@ -51,6 +51,12 @@ class AccountRepository(Protocol):
 
     def get_account(self, account_id: int) -> Account | None: ...
 
+    def list_accounts(
+        self, *, limit: int = 100, cursor: int | None = None
+    ) -> tuple[Account, ...]: ...
+
+    def suspend_account(self, account_id: int, now: datetime) -> Account: ...
+
     def create_account_token(
         self,
         account_id: int,

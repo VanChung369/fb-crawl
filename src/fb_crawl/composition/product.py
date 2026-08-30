@@ -12,6 +12,12 @@ from fb_crawl.auth.rate_limit import RateLimitService
 from fb_crawl.auth.service import AccountAuthService
 from fb_crawl.auth.tokens import TokenService
 from fb_crawl.core.exceptions import ConfigurationError
+from fb_crawl.entitlements.quota import ContactQuotaService, PostgresContactQuotaRepository
+from fb_crawl.entitlements.service import EntitlementService
+from fb_crawl.licenses.config import load_license_keyring
+from fb_crawl.licenses.keys import LicenseKeyService
+from fb_crawl.licenses.postgres import PostgresLicenseRepository
+from fb_crawl.licenses.service import LicenseService
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +25,9 @@ class ProductServices:
     auth_service: AccountAuthService
     account_repository: AccountRepository
     token_service: TokenService
+    license_service: LicenseService | None = None
+    entitlement_service: EntitlementService | None = None
+    quota_service: ContactQuotaService | None = None
 
 
 def compose_product_services(
@@ -68,4 +77,27 @@ def compose_product_services(
         rate_limiter=rate_limiter,
         public_base_url=auth_settings.public_base_url,
     )
-    return ProductServices(auth_service, repository, token_service)
+    license_repository = PostgresLicenseRepository(
+        database_url,
+        statement_timeout_seconds=statement_timeout_seconds,
+    )
+    license_service = LicenseService(
+        license_repository,
+        LicenseKeyService(load_license_keyring(env)),
+    )
+    entitlement_service = EntitlementService(license_repository)
+    quota_service = ContactQuotaService(
+        PostgresContactQuotaRepository(
+            database_url,
+            statement_timeout_seconds=statement_timeout_seconds,
+        ),
+        auth_settings.product_timezone,
+    )
+    return ProductServices(
+        auth_service,
+        repository,
+        token_service,
+        license_service,
+        entitlement_service,
+        quota_service,
+    )

@@ -54,6 +54,9 @@ class ProductRepositoryFake:
         )
         self.deleted = False
         self.revoked_devices: list[int] = []
+        self.extra_devices: list[Device] = []
+        self.suspended_accounts: list[int] = []
+        self.revoked_account_sessions: list[int] = []
 
     def get_account(self, account_id: int):
         return self.account if account_id == self.account.id else None
@@ -61,13 +64,38 @@ class ProductRepositoryFake:
     def get_device(self, account_id: int, device_id: int):
         if account_id == self.account.id and device_id == self.device.id:
             return self.device
+        for device in self.extra_devices:
+            if account_id == device.account_id and device_id == device.id:
+                return device
         return None
 
     def get_session(self, session_id: UUID):
         return self.session if session_id == self.session.id else None
 
     def list_devices(self, account_id: int):
-        return (self.device,) if account_id == self.account.id else ()
+        if account_id != self.account.id:
+            return ()
+        return tuple(
+            sorted(
+                (self.device, *self.extra_devices),
+                key=lambda item: (item.first_seen_at, item.id),
+            )
+        )
+
+    def list_accounts(self, *, limit: int = 100, cursor: int | None = None):
+        return (self.account,)
+
+    def suspend_account(self, account_id: int, now: datetime):
+        self.suspended_accounts.append(account_id)
+        self.account = replace(
+            self.account, status=AccountStatus.SUSPENDED, updated_at=now
+        )
+        self.session = replace(self.session, revoked_at=now)
+        return self.account
+
+    def revoke_account_sessions(self, account_id: int, now: datetime):
+        self.revoked_account_sessions.append(account_id)
+        self.session = replace(self.session, revoked_at=now)
 
     def revoke_device(self, account_id: int, device_id: int, now: datetime):
         self.revoked_devices.append(device_id)

@@ -111,6 +111,52 @@ class PostgresAccountRepository:
             row = cursor.fetchone()
         return None if row is None else self._account(row)
 
+    def list_accounts(
+        self, *, limit: int = 100, cursor: int | None = None
+    ) -> tuple[Account, ...]:
+        if not 1 <= limit <= 101:
+            raise ValueError("account list limit must be from 1 to 101")
+        if cursor is not None and cursor <= 0:
+            raise ValueError("account cursor must be positive")
+        cursor_id = cursor
+        with self._connect() as database_cursor:
+            database_cursor.execute(
+                f"""
+                SELECT {_ACCOUNT_COLUMNS}
+                FROM accounts
+                WHERE (%s IS NULL OR id < %s)
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (cursor_id, cursor_id, limit),
+            )
+            rows = database_cursor.fetchall()
+        return tuple(self._account(row) for row in rows)
+
+    def suspend_account(self, account_id: int, now: datetime) -> Account:
+        with self._connect() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE accounts
+                SET status = 'suspended', updated_at = %s
+                WHERE id = %s AND status NOT IN ('deleted', 'suspended')
+                RETURNING {_ACCOUNT_COLUMNS}
+                """,
+                (now, account_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise AccountNotFound("Account was not found.")
+            cursor.execute(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = COALESCE(revoked_at, %s)
+                WHERE account_id = %s
+                """,
+                (now, account_id),
+            )
+        return self._account(row)
+
     def create_account_token(
         self,
         account_id: int,

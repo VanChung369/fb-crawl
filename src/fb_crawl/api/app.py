@@ -110,6 +110,7 @@ def create_app(
             product_services.account_repository,
             product_services.token_service,
             allowed_origins=settings.cors_origins,
+            entitlement_service=product_services.entitlement_service,
             clock=clock,
         )
         app.include_router(
@@ -120,6 +121,29 @@ def create_app(
                 clock=clock,
             )
         )
+        if (
+            product_services.license_service is not None
+            and product_services.entitlement_service is not None
+        ):
+            from fb_crawl.api.routes.licenses import create_license_router
+            from fb_crawl.api.routes.product_admin import create_product_admin_router
+
+            app.include_router(
+                create_license_router(
+                    product_services.license_service,
+                    product_services.entitlement_service,
+                    product_auth,
+                    clock=clock,
+                )
+            )
+            app.include_router(
+                create_product_admin_router(
+                    product_services.account_repository,
+                    product_services.license_service,
+                    product_auth,
+                    clock=clock,
+                )
+            )
         app.include_router(
             create_product_account_router(
                 product_services.account_repository,
@@ -237,6 +261,8 @@ def _requires_internal_api_key(path: str) -> bool:
         "/api/v1/auth",
         "/api/v1/account",
         "/api/v1/devices",
+        "/api/v1/licenses",
+        "/api/v1/admin",
     )
     if any(path == prefix or path.startswith(f"{prefix}/") for prefix in product_prefixes):
         return False

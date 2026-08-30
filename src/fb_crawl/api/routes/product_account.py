@@ -34,6 +34,7 @@ def create_product_account_router(
             role=current.account.role,
             status=current.account.status,
             email_verified_at=current.account.email_verified_at,
+            device_allowed=current.device_allowed,
         )
 
     @router.delete("/api/v1/account", response_model=AccountDeletionResponse)

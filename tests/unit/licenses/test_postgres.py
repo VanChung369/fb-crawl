@@ -129,10 +129,15 @@ def test_create_key_persists_digest_and_mask_but_never_plaintext() -> None:
 
     assert key.id == 11
     assert key.status is LicenseKeyStatus.AVAILABLE
-    sql, params = cursor.commands[-1]
+    sql, params = next(
+        command
+        for command in cursor.commands
+        if "INSERT INTO license_keys" in command[0]
+    )
     assert "INSERT INTO license_keys" in sql
     assert "LF-REAL-PLAINTEXT" not in repr(cursor.commands)
     assert params is not None and params[0] == "digest-one"
+    assert any("INSERT INTO admin_audit_events" in sql for sql, _ in cursor.commands)
 
 
 def test_second_key_starts_after_existing_valid_end() -> None:
