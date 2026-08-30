@@ -216,7 +216,7 @@ git commit -m "feat: persist accounts devices and sessions"
 - Produces: `AccountAuthService.register`, `verify_email`, `resend_verification`, `login`, `refresh`, `forgot_password`, `reset_password`, and `logout`.
 - Returns `AuthTokens(access_token, refresh_token, access_expires_at)` only from login/refresh.
 
-- [ ] **Step 1: Write service behavior tests with fake repository/email**
+- [x] **Step 1: Write service behavior tests with fake repository/email**
 
 ```python
 def test_login_requires_verified_email(service, repo) -> None:
@@ -235,13 +235,13 @@ def test_login_rate_limit_is_shared_by_ip_and_email(service, limiter) -> None:
         service.login(EMAIL, VALID_PASSWORD, INSTALLATION_ID, "Chrome", NOW, ip_address="203.0.113.4")
 ```
 
-- [ ] **Step 2: Verify failures**
+- [x] **Step 2: Verify failures**
 
 Run: `python -m pytest tests/unit/auth/test_service.py tests/unit/auth/test_email.py -q`
 
 Expected: FAIL on missing service.
 
-- [ ] **Step 3: Implement service orchestration**
+- [x] **Step 3: Implement service orchestration**
 
 Normalize email before repository calls, enforce PostgreSQL-backed action/email/device/HMACed-IP buckets before expensive password/email work, use generic external responses for unknown emails, enforce password length 12–128, create single-use verification/reset tokens, bind sessions to installation UUID devices, rotate refresh tokens, and sanitize SMTP failures as `email_delivery_failed` without leaking credentials.
 
@@ -252,13 +252,13 @@ class AccountAuthService:
     def refresh(self, refresh_token: str, installation_id: UUID, now: datetime) -> AuthTokens: ...
 ```
 
-- [ ] **Step 4: Verify service tests**
+- [x] **Step 4: Verify service tests**
 
 Run: `python -m pytest tests/unit/auth/test_service.py tests/unit/auth/test_email.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/auth tests/unit/auth

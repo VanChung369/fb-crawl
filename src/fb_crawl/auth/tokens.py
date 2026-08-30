@@ -53,6 +53,10 @@ class TokenService:
         self._issuer = issuer
         self._audience = audience
 
+    @property
+    def access_ttl_seconds(self) -> int:
+        return int(self._access_ttl.total_seconds())
+
     def issue_access(
         self,
         account_id: int,

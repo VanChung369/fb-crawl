@@ -45,6 +45,8 @@ class AccountRepository(Protocol):
 
     def find_account_by_email(self, normalized_email: str) -> Account | None: ...
 
+    def get_account(self, account_id: int) -> Account | None: ...
+
     def create_account_token(
         self,
         account_id: int,
