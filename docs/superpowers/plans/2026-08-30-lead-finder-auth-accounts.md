@@ -35,7 +35,7 @@
 - Produces: `AuthSettings(jwt_secret, token_hmac_secret, public_base_url, product_timezone, access_ttl_seconds=900)` and `load_auth_settings(env: Mapping[str, str]) -> AuthSettings`.
 - Produces database tables `accounts`, `account_tokens`, `devices`, `auth_sessions`, and `rate_limit_buckets`.
 
-- [ ] **Step 1: Write migration and configuration tests**
+- [x] **Step 1: Write migration and configuration tests**
 
 ```python
 def test_product_account_migration_is_fourth() -> None:
@@ -49,13 +49,13 @@ def test_auth_settings_reject_short_secrets() -> None:
         load_auth_settings({"LEAD_FINDER_JWT_SECRET": "short"})
 ```
 
-- [ ] **Step 2: Run the focused tests and verify failure**
+- [x] **Step 2: Run the focused tests and verify failure**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_migrations.py tests/unit/auth/test_config.py -q`
 
 Expected: FAIL because migration `004` and `fb_crawl.auth.config` do not exist.
 
-- [ ] **Step 3: Add exact runtime dependencies and settings**
+- [x] **Step 3: Add exact runtime dependencies and settings**
 
 Add `argon2-cffi>=23.1,<26`, `PyJWT>=2.9,<3`, and `email-validator>=2.2,<3` to both the `api` and `dev` extras. Implement frozen settings that require 32+ nonblank characters for both secrets, an `https://` public base URL outside dev, and a valid `ZoneInfo` timezone defaulting to `Asia/Ho_Chi_Minh`.
 
@@ -71,13 +71,13 @@ class AuthSettings:
     access_ttl_seconds: int = 900
 ```
 
-- [ ] **Step 4: Re-run focused tests**
+- [x] **Step 4: Re-run focused tests**
 
 Run: `python -m pytest tests/unit/data_pipeline/test_migrations.py tests/unit/auth/test_config.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pyproject.toml src/fb_crawl/auth src/fb_data_pipeline/migrations/004_product_accounts.sql tests/unit/auth tests/unit/data_pipeline/test_migrations.py
