@@ -27,7 +27,7 @@
 ### Task 1: Contact cache, lookup history, and export schema
 
 **Files:**
-- Create: `src/fb_data_pipeline/migrations/006_product_contact_lookup.sql`
+- Create: `src/fb_data_pipeline/migrations/007_product_contact_lookup.sql`
 - Modify: `tests/unit/data_pipeline/test_migrations.py`
 - Create: `tests/integration/data_pipeline/test_contact_lookup_schema.py`
 
@@ -40,7 +40,7 @@
 ```python
 def test_contact_lookup_migration_adds_single_flight_and_history() -> None:
     migration = load_migrations()[-1]
-    assert migration.version == 6
+    assert migration.version == "007_product_contact_lookup"
     assert "CREATE TABLE enrichment_leases" in migration.sql
     assert "CREATE TABLE lookup_events" in migration.sql
     assert "ON DELETE SET NULL" in migration.sql
@@ -50,7 +50,7 @@ def test_contact_lookup_migration_adds_single_flight_and_history() -> None:
 
 Run: `python -m pytest tests/unit/data_pipeline/test_migrations.py tests/integration/data_pipeline/test_contact_lookup_schema.py -q`
 
-Expected: FAIL because migration `006` is absent.
+Expected: FAIL because migration `007` is absent.
 
 - [ ] **Step 3: Implement indexed, closed-status schema**
 
@@ -71,7 +71,7 @@ Expected: PASS or configured database skip.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/fb_data_pipeline/migrations/006_product_contact_lookup.sql tests/unit/data_pipeline/test_migrations.py tests/integration/data_pipeline/test_contact_lookup_schema.py
+git add src/fb_data_pipeline/migrations/007_product_contact_lookup.sql tests/unit/data_pipeline/test_migrations.py tests/integration/data_pipeline/test_contact_lookup_schema.py
 git commit -m "feat: add contact lookup and export schema"
 ```
 
@@ -449,7 +449,7 @@ Expected: PASS or configured database skips.
 
 Run: `python -m build`
 
-Expected: package contains migrations `004`–`006` and all product modules.
+Expected: package contains migrations `004`–`007` and all product modules.
 
 - [ ] **Step 5: Commit**
 

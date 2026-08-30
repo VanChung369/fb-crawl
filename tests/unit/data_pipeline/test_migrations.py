@@ -11,6 +11,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "004_product_accounts",
         "005_product_licenses",
         "006_auth_session_reauthentication",
+        "007_product_contact_lookup",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql
@@ -94,6 +95,33 @@ def test_reauthentication_migration_backfills_refresh_chains_from_root_login() -
 
     assert "WITH RECURSIVE session_roots" in migration.sql
     assert "root_session.created_at" in migration.sql
+
+
+def test_contact_lookup_migration_adds_single_flight_history_and_exports() -> None:
+    migration = next(
+        item
+        for item in load_migrations()
+        if item.version == "007_product_contact_lookup"
+    )
+
+    for table in (
+        "provider_lookup_state",
+        "enrichment_leases",
+        "lookup_events",
+        "export_jobs",
+    ):
+        assert f"CREATE TABLE {table}" in migration.sql
+    assert "PRIMARY KEY (facebook_user_id, provider, field)" in migration.sql
+    assert "account_contact_reveals_lookup_event_fk" in migration.sql
+    assert "REFERENCES lookup_events (id) ON DELETE SET NULL" in migration.sql
+    assert "lookup_events_account_time_idx" in migration.sql
+    assert "lookup_events_device_idx" in migration.sql
+    assert "lookup_events_facebook_user_idx" in migration.sql
+    assert "provider_lookup_state_attempt_idx" in migration.sql
+    assert "account_contact_reveals_lookup_event_idx" in migration.sql
+    assert "export_jobs_account_status_created_idx" in migration.sql
+    assert "found', 'not_found', 'processing', 'quota_exceeded', 'failed" in migration.sql
+    assert "queued', 'running', 'completed', 'failed', 'expired" in migration.sql
 
 
 def test_migrations_are_sorted_by_version() -> None:
