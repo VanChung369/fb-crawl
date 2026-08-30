@@ -348,7 +348,7 @@ git commit -m "feat: expose product account authentication API"
 - Produces CLI `fb-crawl admin bootstrap --email admin@example.com`; password is read twice with `getpass.getpass` and never accepted as an option.
 - Produces CLI `fb-crawl admin purge-deleted-accounts` for scheduled hard deletion after the configured recovery window.
 
-- [ ] **Step 1: Write parser and command safety tests**
+- [x] **Step 1: Write parser and command safety tests**
 
 ```python
 def test_admin_bootstrap_has_no_password_argument() -> None:
@@ -366,13 +366,13 @@ def test_purge_deletes_only_accounts_past_recovery_window(command, repository) -
     assert repository.active_account(RECENTLY_DELETED_ID) is not None
 ```
 
-- [ ] **Step 2: Verify failures**
+- [x] **Step 2: Verify failures**
 
 Run: `python -m pytest tests/unit/cli/test_admin_parser.py tests/integration/test_admin_cli.py -q`
 
 Expected: FAIL because admin mode is absent.
 
-- [ ] **Step 3: Implement bootstrap and operator documentation**
+- [x] **Step 3: Implement bootstrap and operator documentation**
 
 Add `admin` dispatch to `cli/app.py`, require `DATABASE_URL`, apply migrations, refuse when any admin exists, securely prompt/confirm the password, create a verified active admin, and print only the new account ID/email. Add the idempotent purge command using `LEAD_FINDER_ACCOUNT_RECOVERY_DAYS`; it revokes access immediately at delete request and later removes only account-owned rows, never shared Facebook identity/evidence. Document required JWT/HMAC/base URL/SMTP/product-timezone variables without sample production secrets.
 
@@ -384,7 +384,7 @@ if password != confirmation:
 admin = repository.bootstrap_admin(email, hasher.hash(password), now)
 ```
 
-- [ ] **Step 4: Run the complete backend verification**
+- [x] **Step 4: Run the complete backend verification**
 
 Run: `python -m pytest -q`
 
@@ -394,7 +394,7 @@ Run: `python -m build`
 
 Expected: wheel and sdist build successfully and contain migration `004`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/cli .env.example README.md tests/unit/cli/test_admin_parser.py tests/integration/test_admin_cli.py

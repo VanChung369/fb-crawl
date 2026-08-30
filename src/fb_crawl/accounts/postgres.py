@@ -17,6 +17,7 @@ from fb_crawl.accounts.models import (
     DeviceStatus,
 )
 from fb_crawl.accounts.repository import (
+    AdminAlreadyExists,
     AccountNotFound,
     DeviceNotFound,
     InvalidAccountToken,
@@ -494,6 +495,45 @@ class PostgresAccountRepository:
         if row is None:
             raise DatabaseError("Database rate-limit write failed.")
         return int(row[0])
+
+    def bootstrap_admin(
+        self,
+        normalized_email: str,
+        display_email: str,
+        password_hash: str,
+        now: datetime,
+    ) -> Account:
+        with self._connect() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('lead_finder_admin_bootstrap'))"
+            )
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM accounts WHERE role = 'admin')"
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise DatabaseError("Database administrator check failed.")
+            if bool(row[0]):
+                raise AdminAlreadyExists("An administrator already exists.")
+            cursor.execute(
+                f"""
+                INSERT INTO accounts (
+                    normalized_email, display_email, password_hash,
+                    role, status, email_verified_at, created_at, updated_at
+                ) VALUES (%s, %s, %s, 'admin', 'active', %s, %s, %s)
+                RETURNING {_ACCOUNT_COLUMNS}
+                """,
+                (
+                    normalized_email,
+                    display_email,
+                    password_hash,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            created = cursor.fetchone()
+        return self._required_account(created)
 
     @staticmethod
     def _lock_account_token(

@@ -16,6 +16,7 @@ from fb_crawl.cli.data import add_data_parser, execute_data
 from fb_crawl.cli.api import add_api_parser, execute_api
 from fb_crawl.cli.pipeline import add_pipeline_parser, execute_pipeline
 from fb_crawl.cli.worker import add_worker_parser, execute_worker
+from fb_crawl.cli.admin import add_admin_parser, execute_admin
 from fb_crawl.core.env import load_dotenv
 from fb_crawl.core.exceptions import FbCrawlError
 
@@ -39,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_api_parser(modes)
 
     add_worker_parser(modes)
+
+    add_admin_parser(modes)
 
     return parser
 
@@ -69,6 +72,9 @@ def main(
 
         if args.mode == "worker":
             return execute_worker(args)
+
+        if args.mode == "admin":
+            return execute_admin(args)
 
         parser.error(f"Unsupported mode: {args.mode}")
 

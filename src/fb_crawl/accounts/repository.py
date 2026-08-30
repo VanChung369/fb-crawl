@@ -35,6 +35,10 @@ class SessionReuseDetected(SessionUnavailable):
     code = "refresh_token_reuse_detected"
 
 
+class AdminAlreadyExists(AccountRepositoryError):
+    code = "admin_already_exists"
+
+
 class AccountRepository(Protocol):
     def create_account(
         self,
@@ -104,3 +108,11 @@ class AccountRepository(Protocol):
         window_start: datetime,
         expires_at: datetime,
     ) -> int: ...
+
+    def bootstrap_admin(
+        self,
+        normalized_email: str,
+        display_email: str,
+        password_hash: str,
+        now: datetime,
+    ) -> Account: ...

@@ -6,7 +6,7 @@ from uuid import UUID
 import pytest
 
 from fb_crawl.accounts.models import AccountRole, AccountStatus, DeviceStatus
-from fb_crawl.accounts.repository import SessionReuseDetected
+from fb_crawl.accounts.repository import AdminAlreadyExists, SessionReuseDetected
 from fb_crawl.accounts.postgres import PostgresAccountRepository
 from fb_data_pipeline.repositories.errors import DatabaseError
 
@@ -218,3 +218,50 @@ def test_database_driver_failures_are_mapped_without_dsn() -> None:
     with pytest.raises(DatabaseError) as captured:
         repository.find_account_by_email("person@example.com")
     assert "secret" not in str(captured.value)
+
+
+def test_bootstrap_admin_serializes_first_admin_creation() -> None:
+    admin_row = (
+        1,
+        "admin@example.com",
+        "Admin@example.com",
+        "$argon2id$private",
+        "admin",
+        "active",
+        NOW,
+        NOW,
+        NOW,
+        None,
+    )
+    cursor = ScriptedCursor([(False,), admin_row])
+    repository = PostgresAccountRepository(
+        "postgresql://hidden",
+        connect_factory=ConnectionSequence(cursor),
+    )
+
+    admin = repository.bootstrap_admin(
+        "admin@example.com",
+        "Admin@example.com",
+        "$argon2id$private",
+        NOW,
+    )
+
+    assert admin.role is AccountRole.ADMIN
+    assert "pg_advisory_xact_lock" in cursor.commands[1][0]
+    assert "WHERE role = 'admin'" in cursor.commands[2][0]
+
+
+def test_bootstrap_admin_rejects_when_any_admin_exists() -> None:
+    cursor = ScriptedCursor([(True,)])
+    repository = PostgresAccountRepository(
+        "postgresql://hidden",
+        connect_factory=ConnectionSequence(cursor),
+    )
+
+    with pytest.raises(AdminAlreadyExists):
+        repository.bootstrap_admin(
+            "other@example.com",
+            "other@example.com",
+            "$argon2id$private",
+            NOW,
+        )

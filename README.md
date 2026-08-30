@@ -39,6 +39,29 @@ python -m fb_crawl worker run
 python -m fb_crawl worker run --concurrency 3
 ```
 
+### Lead Finder account setup
+
+Production product routes require independent JWT and token-HMAC secrets of at
+least 32 characters, an HTTPS `LEAD_FINDER_PUBLIC_BASE_URL`, SMTP settings, and
+`LEAD_FINDER_TIMEZONE` (default `Asia/Ho_Chi_Minh`). See `.env.example` for the
+complete variable names. Never reuse `FB_CRAWL_API_KEY` as either product
+secret and never place passwords or license keys in command arguments.
+
+After PostgreSQL is available, create the first administrator once. The
+password is prompted twice without echo and is never accepted as a CLI option:
+
+```powershell
+fb-crawl admin bootstrap --email admin@example.com
+```
+
+Account deletion revokes access immediately. Run the idempotent purge command
+from a scheduler after the configured recovery window; it deletes only
+account-owned rows and does not cascade into shared Facebook identity/evidence:
+
+```powershell
+fb-crawl admin purge-deleted-accounts
+```
+
 ### Web Dashboard Features:
 - 📊 **Dashboard Overview**: Realtime analytics with 6 metric cards, recent jobs, and latest discovered leads.
 - ⚡ **Jobs Manager**: Create crawl jobs with full advanced controls (max users, scroll depth, deep profile enrichment, post phone scanning), live event streaming logs, cancel, and retry.
