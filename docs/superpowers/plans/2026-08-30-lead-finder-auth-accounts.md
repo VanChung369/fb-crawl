@@ -101,7 +101,7 @@ git commit -m "feat: add product account foundation"
 - Produces: `PasswordHasher.hash(password: str) -> str` and `.verify(encoded: str, password: str) -> bool`.
 - Produces: `TokenService.issue_access(account_id: int, session_id: UUID, device_id: int, now: datetime) -> str`, `.decode_access(token: str, now: datetime) -> AccessClaims`, `.new_opaque_token() -> str`, and `.digest_opaque(token: str) -> str`.
 
-- [ ] **Step 1: Write failing security primitive tests**
+- [x] **Step 1: Write failing security primitive tests**
 
 ```python
 def test_access_claims_contain_identity_not_entitlements() -> None:
@@ -117,13 +117,13 @@ def test_password_hash_never_contains_plaintext() -> None:
     assert hasher.verify(encoded, "correct horse battery staple") is True
 ```
 
-- [ ] **Step 2: Verify red state**
+- [x] **Step 2: Verify red state**
 
 Run: `python -m pytest tests/unit/auth/test_passwords.py tests/unit/auth/test_tokens.py tests/unit/accounts/test_models.py -q`
 
 Expected: FAIL on missing modules.
 
-- [ ] **Step 3: Implement minimal primitives**
+- [x] **Step 3: Implement minimal primitives**
 
 Use `argon2.PasswordHasher` with explicit time/memory/parallelism configuration. JWT includes `sub`, `sid`, `did`, `iat`, `exp`, and a fixed issuer/audience. Opaque tokens use `secrets.token_urlsafe(32)` and HMAC-SHA-256 with the configured token secret; compare digests with `hmac.compare_digest`.
 
@@ -134,13 +134,13 @@ class TokenService:
     def new_opaque_token(self) -> str: return secrets.token_urlsafe(32)
 ```
 
-- [ ] **Step 4: Verify green state**
+- [x] **Step 4: Verify green state**
 
 Run: `python -m pytest tests/unit/auth/test_passwords.py tests/unit/auth/test_tokens.py tests/unit/accounts/test_models.py -q`
 
 Expected: PASS, including expired/wrong-audience JWT and malformed-token cases.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/accounts src/fb_crawl/auth tests/unit/accounts tests/unit/auth
