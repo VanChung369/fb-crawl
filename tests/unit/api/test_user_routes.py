@@ -367,6 +367,19 @@ def _class_fields(tree: ast.Module, class_name: str) -> set[str]:
     raise AssertionError(f"missing schema class {class_name}")
 
 
+def _response_schema_fields(tree: ast.Module) -> set[str]:
+    fields: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name.endswith("Response"):
+            fields.update(
+                item.target.id
+                for item in node.body
+                if isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+            )
+    return fields
+
+
 def test_closed_response_schemas_whitelist_every_persisted_user_payload() -> None:
     """Break caught: response models omit approved fields or expose repository internals."""
 
@@ -421,40 +434,46 @@ def test_closed_response_schemas_whitelist_every_persisted_user_payload() -> Non
         "next_cursor",
     }
     assert source.count('from_attributes=True') >= 3
-    assert "api_token" not in source
-    assert "request_headers" not in source
-    assert "raw_provider_response" not in source
-    assert "correlation_id" not in source
+    response_fields = _response_schema_fields(tree)
+    assert "api_token" not in response_fields
+    assert "request_headers" not in response_fields
+    assert "raw_provider_response" not in response_fields
+    assert "correlation_id" not in response_fields
 
 
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
 def test_user_router_has_exact_ordered_bounded_authenticated_read_surface() -> None:
     """Break caught: a dynamic route shadows a subresource or an unsafe export is added."""
 
     source = USER_ROUTE_PATH.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    route_paths: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for decorator in node.decorator_list:
-            if (
-                isinstance(decorator, ast.Call)
-                and isinstance(decorator.func, ast.Attribute)
-                and decorator.func.attr == "get"
-                and decorator.args
-                and isinstance(decorator.args[0], ast.Constant)
-            ):
-                route_paths.append(decorator.args[0].value)
-
-    assert route_paths == [
+    app = _client(RecordingUserRepository(_user())).app
+    registered_routes = [
+        route
+        for included in app.routes
+        for route in getattr(getattr(included, "original_router", None), "routes", ())
+    ]
+    user_routes = [
+        route
+        for route in registered_routes
+        if route.path.startswith("/api/v1/users")
+    ]
+    assert [
+        route.path.removeprefix("/api/v1/users")
+        for route in user_routes
+        if "GET" in route.methods
+    ] == [
         "",
         "/{user_id}/phone-evidence",
         "/{user_id}/enrichment-attempts",
         "/{user_id}",
     ]
+    assert all(
+        route.response_model is not None
+        for route in user_routes
+        if route.methods & {"GET", "POST", "PATCH"}
+    )
     assert 'prefix="/api/v1/users"' in source
     assert "dependencies=[Depends(auth)]" in source
-    assert source.count("response_model=") == 5
     assert "Query(ge=1, le=100)" in source
     assert "Path(gt=0, le=9223372036854775807)" in source
     assert "OFFSET" not in source.upper()

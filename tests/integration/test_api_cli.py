@@ -349,13 +349,17 @@ else:
 
 
 @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
-def test_real_api_composition_uses_postgres_repositories_without_browser_imports() -> None:
+def test_real_api_composition_uses_postgres_repositories_without_browser_imports(
+    monkeypatch,
+) -> None:
     """Break caught: production API composition owns a browser or fake repository."""
     from fb_crawl.cli.api import _compose_api
     from fb_crawl.services.jobs import JobService
     from fb_data_pipeline.repositories.jobs import JobRepository
+    from fb_data_pipeline.repositories.migrations import MigrationRunner
     from fb_data_pipeline.repositories.users import UserQueryRepository
 
+    monkeypatch.setattr(MigrationRunner, "apply", lambda _runner: ())
     built = _compose_api(
         PipelineSettings(database_url="postgresql://not-connected"),
         ApiSettings(api_key=API_KEY),
@@ -369,7 +373,10 @@ def test_real_api_composition_uses_postgres_repositories_without_browser_imports
         "from fb_crawl.cli.api import _compose_api\n"
         "from fb_crawl.api.config import ApiSettings\n"
         "from fb_data_pipeline.config import PipelineSettings\n"
-        "_compose_api(PipelineSettings(database_url='postgresql://not-connected'), ApiSettings(api_key='x'*32))\n"
+        "from fb_data_pipeline.repositories.migrations import MigrationRunner\n"
+        "from unittest.mock import patch\n"
+        "with patch.object(MigrationRunner, 'apply', return_value=()):\n"
+        "    _compose_api(PipelineSettings(database_url='postgresql://not-connected'), ApiSettings(api_key='x'*32))\n"
         "assert 'selenium' not in sys.modules\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
