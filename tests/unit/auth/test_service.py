@@ -149,6 +149,7 @@ class FakeRepository:
             revoked_at=None,
             created_at=now,
             last_used_at=now,
+            authenticated_at=now,
         )
         self.sessions[session.id] = (session, refresh_digest)
         return session
@@ -171,6 +172,7 @@ class FakeRepository:
             revoked_at=None,
             created_at=now,
             last_used_at=now,
+            authenticated_at=old_session.authenticated_at,
         )
         self.sessions[session.id] = (session, new_digest)
         return session
@@ -178,6 +180,12 @@ class FakeRepository:
     def revoke_session(self, session_id: UUID, now: datetime) -> None:
         session, digest = self.sessions[session_id]
         self.sessions[session_id] = (replace(session, revoked_at=now), digest)
+
+    def mark_session_reauthenticated(self, session_id: UUID, now: datetime) -> AuthSession:
+        session, digest = self.sessions[session_id]
+        updated = replace(session, authenticated_at=now, last_used_at=now)
+        self.sessions[session_id] = (updated, digest)
+        return updated
 
     def revoke_account_sessions(self, account_id: int, now: datetime) -> None:
         self.revoked_accounts.append(account_id)
@@ -296,6 +304,41 @@ def test_login_and_refresh_are_device_bound(service_parts) -> None:
             NOW + timedelta(minutes=6),
             ip_address="203.0.113.4",
         )
+
+
+def test_refresh_preserves_password_auth_time_until_explicit_reauthentication(service_parts) -> None:
+    service, repository, _email, _limiter, _tokens = service_parts
+    repository.add_account(verified=True)
+    authenticated = service.login(
+        EMAIL,
+        PASSWORD,
+        INSTALLATION_ID,
+        "Chrome",
+        NOW,
+        ip_address="203.0.113.4",
+    )
+
+    service.refresh(
+        authenticated.refresh_token,
+        INSTALLATION_ID,
+        NOW + timedelta(minutes=20),
+        ip_address="203.0.113.4",
+    )
+    active_session = next(
+        session for session, _digest in repository.sessions.values()
+        if session.revoked_at is None
+    )
+    assert active_session.authenticated_at == NOW
+
+    service.reauthenticate(
+        7,
+        active_session.id,
+        PASSWORD,
+        NOW + timedelta(minutes=21),
+        ip_address="203.0.113.4",
+    )
+    updated_session, _digest = repository.sessions[active_session.id]
+    assert updated_session.authenticated_at == NOW + timedelta(minutes=21)
 
 
 def test_password_reset_revokes_all_sessions(service_parts) -> None:

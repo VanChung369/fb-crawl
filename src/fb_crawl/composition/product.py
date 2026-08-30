@@ -25,6 +25,7 @@ class ProductServices:
     auth_service: AccountAuthService
     account_repository: AccountRepository
     token_service: TokenService
+    rate_limiter: RateLimitService | None = None
     license_service: LicenseService | None = None
     entitlement_service: EntitlementService | None = None
     quota_service: ContactQuotaService | None = None
@@ -94,10 +95,11 @@ def compose_product_services(
         auth_settings.product_timezone,
     )
     return ProductServices(
-        auth_service,
-        repository,
-        token_service,
-        license_service,
-        entitlement_service,
-        quota_service,
+        auth_service=auth_service,
+        account_repository=repository,
+        token_service=token_service,
+        rate_limiter=rate_limiter,
+        license_service=license_service,
+        entitlement_service=entitlement_service,
+        quota_service=quota_service,
     )

@@ -48,6 +48,19 @@ class RefreshRequest(BaseModel):
     transport: Literal["extension", "web"] = "extension"
 
 
+class LogoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str | None = Field(default=None, min_length=16, max_length=2048)
+    transport: Literal["extension", "web"] = "extension"
+
+
+class ReauthenticateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(min_length=1, max_length=128)
+
+
 class RegistrationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -223,3 +236,22 @@ class SessionsRevokedResponse(BaseModel):
 
     status: Literal["revoked"] = "revoked"
     account_id: int
+
+
+class AdminAuditEventResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    actor_account_id: int | None
+    action: str
+    target_type: str
+    target_id: str
+    details: dict[str, object]
+    created_at: datetime
+
+
+class AdminAuditEventListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AdminAuditEventResponse]
+    next_cursor: int | None = None

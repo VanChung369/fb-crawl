@@ -60,6 +60,7 @@ def test_device_and_session_models_keep_only_server_identity_state() -> None:
         revoked_at=None,
         created_at=NOW,
         last_used_at=NOW,
+        authenticated_at=NOW,
     )
 
     assert device.installation_id == installation_id

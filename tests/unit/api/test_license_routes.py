@@ -113,3 +113,23 @@ def test_account_me_marks_devices_outside_oldest_entitlement_slots() -> None:
 
     assert response.status_code == 200
     assert response.json()["device_allowed"] is False
+
+
+def test_license_redemption_is_rate_limited_per_account_and_device() -> None:
+    licenses = LicenseServiceFake()
+    client, _repository, _auth, access = product_client(
+        license_service=licenses,
+        entitlement_service=EntitlementServiceFake(Entitlements(500, 2, True, False)),
+    )
+
+    responses = [
+        client.post(
+            "/api/v1/licenses/redeem",
+            headers=_headers(access),
+            json={"key": "LF-REAL-PLAINTEXT-ABCD"},
+        )
+        for _ in range(11)
+    ]
+
+    assert [response.status_code for response in responses[:10]] == [200] * 10
+    assert responses[10].status_code == 429

@@ -39,6 +39,10 @@ class AdminAlreadyExists(AccountRepositoryError):
     code = "admin_already_exists"
 
 
+class AdminAccountProtected(AccountRepositoryError):
+    code = "admin_account_protected"
+
+
 class AccountRepository(Protocol):
     def create_account(
         self,
@@ -56,6 +60,10 @@ class AccountRepository(Protocol):
     ) -> tuple[Account, ...]: ...
 
     def suspend_account(self, account_id: int, now: datetime) -> Account: ...
+
+    def suspend_account_as_admin(
+        self, account_id: int, actor_account_id: int, now: datetime
+    ) -> Account: ...
 
     def create_account_token(
         self,
@@ -82,6 +90,10 @@ class AccountRepository(Protocol):
         self, account_id: int, device_id: int, now: datetime
     ) -> Device: ...
 
+    def revoke_device_as_admin(
+        self, account_id: int, device_id: int, actor_account_id: int, now: datetime
+    ) -> Device: ...
+
     def create_session(
         self,
         account_id: int,
@@ -101,7 +113,19 @@ class AccountRepository(Protocol):
 
     def revoke_session(self, session_id: UUID, now: datetime) -> None: ...
 
+    def revoke_session_by_refresh_digest(
+        self, refresh_digest: str, now: datetime
+    ) -> None: ...
+
+    def mark_session_reauthenticated(
+        self, session_id: UUID, now: datetime
+    ) -> AuthSession: ...
+
     def revoke_account_sessions(self, account_id: int, now: datetime) -> None: ...
+
+    def revoke_account_sessions_as_admin(
+        self, account_id: int, actor_account_id: int, now: datetime
+    ) -> None: ...
 
     def request_account_deletion(self, account_id: int, now: datetime) -> Account: ...
 

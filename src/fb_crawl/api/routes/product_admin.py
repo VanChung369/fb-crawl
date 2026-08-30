@@ -3,16 +3,20 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 
 from fb_crawl.accounts.models import Account, AccountRole
-from fb_crawl.accounts.repository import AccountRepository
+from fb_crawl.accounts.repository import AccountNotFound, AccountRepository
 from fb_crawl.api.dependencies import CurrentAccount, ProductAccountAuth
 from fb_crawl.api.product_schemas import (
     AccountAdminListResponse,
     AccountAdminResponse,
+    AdminAuditEventListResponse,
+    AdminAuditEventResponse,
     CreatedLicenseKeyResponse,
     DeviceRevokedResponse,
+    DeviceListResponse,
+    DeviceResponse,
     LicenseDurationRequest,
     LicenseGrantRequest,
     LicenseKeyListResponse,
@@ -23,12 +27,14 @@ from fb_crawl.api.product_schemas import (
 from fb_crawl.api.routes.licenses import _subscription_response
 from fb_crawl.licenses.models import LicenseDuration, LicenseGrant, LicenseKey
 from fb_crawl.licenses.service import LicenseService
+from fb_crawl.auth.rate_limit import RateLimitService
 
 
 def create_product_admin_router(
     accounts: AccountRepository,
     licenses: LicenseService,
     current_auth: ProductAccountAuth,
+    rate_limiter: RateLimitService,
     *,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> APIRouter:
@@ -44,15 +50,19 @@ def create_product_admin_router(
     def require_recent_admin(
         current: CurrentAccount = Depends(require_admin),
     ) -> CurrentAccount:
-        if clock() - current.claims.issued_at > timedelta(minutes=15):
+        if clock() - current.session.authenticated_at > timedelta(minutes=15):
             raise HTTPException(status_code=403, detail="Recent authentication required.")
         return current
 
     @router.post("/license-keys", response_model=CreatedLicenseKeyResponse)
     def create_license_key(
         payload: LicenseGrantRequest,
+        request: Request,
+        response: Response,
         current: CurrentAccount = Depends(require_admin),
     ) -> CreatedLicenseKeyResponse:
+        now = clock()
+        _limit_admin(rate_limiter, "admin_license_create", current, request, now)
         grant = LicenseGrant(
             LicenseDuration(payload.duration.unit, payload.duration.value),
             payload.monthly_contact_limit,
@@ -60,7 +70,8 @@ def create_product_admin_router(
             payload.allow_group_crawl,
             payload.allow_comment_crawl,
         )
-        key, plaintext = licenses.create_key(grant, current.account.id, clock())
+        key, plaintext = licenses.create_key(grant, current.account.id, now)
+        response.headers["Cache-Control"] = "no-store"
         return CreatedLicenseKeyResponse(
             **_license_response(key).model_dump(), key=plaintext
         )
@@ -83,11 +94,14 @@ def create_product_admin_router(
         "/license-keys/{key_id}", response_model=LicenseKeyResponse
     )
     def revoke_license_key(
+        request: Request,
         key_id: int = Path(gt=0),
         current: CurrentAccount = Depends(require_admin),
     ) -> LicenseKeyResponse:
+        now = clock()
+        _limit_admin(rate_limiter, "admin_license_revoke", current, request, now)
         return _license_response(
-            licenses.revoke_key(key_id, current.account.id, clock())
+            licenses.revoke_key(key_id, current.account.id, now)
         )
 
     @router.get("/accounts", response_model=AccountAdminListResponse)
@@ -104,22 +118,72 @@ def create_product_admin_router(
             next_cursor=visible[-1].id if has_more else None,
         )
 
+    @router.get(
+        "/accounts/{account_id}/devices", response_model=DeviceListResponse
+    )
+    def list_account_devices(
+        account_id: int = Path(gt=0),
+        current: CurrentAccount = Depends(require_admin),
+    ) -> DeviceListResponse:
+        if accounts.get_account(account_id) is None:
+            raise AccountNotFound("Account was not found.")
+        return DeviceListResponse(
+            items=[
+                DeviceResponse(
+                    id=device.id,
+                    installation_id=device.installation_id,
+                    display_name=device.display_name,
+                    status=device.status,
+                    first_seen_at=device.first_seen_at,
+                    last_seen_at=device.last_seen_at,
+                    current=(
+                        account_id == current.account.id
+                        and device.id == current.device.id
+                    ),
+                )
+                for device in accounts.list_devices(account_id)
+            ]
+        )
+
+    @router.get("/audit-events", response_model=AdminAuditEventListResponse)
+    def list_audit_events(
+        limit: int = Query(default=100, ge=1, le=100),
+        cursor: int | None = Query(default=None, gt=0),
+        _current: CurrentAccount = Depends(require_admin),
+    ) -> AdminAuditEventListResponse:
+        rows = licenses.list_audit_events(limit=limit + 1, cursor=cursor)
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        return AdminAuditEventListResponse(
+            items=[
+                AdminAuditEventResponse(
+                    id=event.id,
+                    actor_account_id=event.actor_account_id,
+                    action=event.action,
+                    target_type=event.target_type,
+                    target_id=event.target_id,
+                    details=event.details,
+                    created_at=event.created_at,
+                )
+                for event in visible
+            ],
+            next_cursor=visible[-1].id if has_more else None,
+        )
+
     @router.post(
         "/accounts/{account_id}/suspend", response_model=AccountAdminResponse
     )
     def suspend_account(
+        request: Request,
         account_id: int = Path(gt=0),
-        _current: CurrentAccount = Depends(require_recent_admin),
+        current: CurrentAccount = Depends(require_recent_admin),
     ) -> AccountAdminResponse:
         now = clock()
-        account = accounts.suspend_account(account_id, now)
-        licenses.write_audit(
-            actor_account_id=_current.account.id,
-            action="account_suspended",
-            target_type="account",
-            target_id=str(account_id),
-            details={},
-            now=now,
+        _limit_admin(rate_limiter, "admin_account_suspend", current, request, now)
+        if account_id == current.account.id:
+            raise HTTPException(status_code=403, detail="Administrator accounts cannot be suspended here.")
+        account = accounts.suspend_account_as_admin(
+            account_id, current.account.id, now
         )
         return _account_response(account)
 
@@ -128,19 +192,15 @@ def create_product_admin_router(
         response_model=DeviceRevokedResponse,
     )
     def revoke_account_device(
+        request: Request,
         account_id: int = Path(gt=0),
         device_id: int = Path(gt=0),
-        _current: CurrentAccount = Depends(require_recent_admin),
+        current: CurrentAccount = Depends(require_recent_admin),
     ) -> DeviceRevokedResponse:
         now = clock()
-        accounts.revoke_device(account_id, device_id, now)
-        licenses.write_audit(
-            actor_account_id=_current.account.id,
-            action="account_device_revoked",
-            target_type="device",
-            target_id=str(device_id),
-            details={"account_id": account_id},
-            now=now,
+        _limit_admin(rate_limiter, "admin_device_revoke", current, request, now)
+        accounts.revoke_device_as_admin(
+            account_id, device_id, current.account.id, now
         )
         return DeviceRevokedResponse(device_id=device_id)
 
@@ -149,18 +209,14 @@ def create_product_admin_router(
         response_model=SessionsRevokedResponse,
     )
     def revoke_account_sessions(
+        request: Request,
         account_id: int = Path(gt=0),
-        _current: CurrentAccount = Depends(require_recent_admin),
+        current: CurrentAccount = Depends(require_recent_admin),
     ) -> SessionsRevokedResponse:
         now = clock()
-        accounts.revoke_account_sessions(account_id, now)
-        licenses.write_audit(
-            actor_account_id=_current.account.id,
-            action="account_sessions_revoked",
-            target_type="account",
-            target_id=str(account_id),
-            details={},
-            now=now,
+        _limit_admin(rate_limiter, "admin_sessions_revoke", current, request, now)
+        accounts.revoke_account_sessions_as_admin(
+            account_id, current.account.id, now
         )
         return SessionsRevokedResponse(account_id=account_id)
 
@@ -184,18 +240,40 @@ def create_product_admin_router(
         response_model=SubscriptionListResponse,
     )
     def start_subscription_now(
+        request: Request,
         account_id: int = Path(gt=0),
         subscription_id: int = Path(gt=0),
         current: CurrentAccount = Depends(require_admin),
     ) -> SubscriptionListResponse:
+        now = clock()
+        _limit_admin(
+            rate_limiter, "admin_subscription_start_now", current, request, now
+        )
         shifted = licenses.start_subscription_now(
-            account_id, subscription_id, current.account.id, clock()
+            account_id, subscription_id, current.account.id, now
         )
         return SubscriptionListResponse(
             items=[_subscription_response(subscription) for subscription in shifted]
         )
 
     return router
+
+
+def _limit_admin(
+    rate_limiter: RateLimitService,
+    action: str,
+    current: CurrentAccount,
+    request: Request,
+    now: datetime,
+) -> None:
+    ip_address = request.client.host if request.client is not None else "unknown"
+    rate_limiter.check(
+        action,
+        str(current.account.id),
+        str(current.device.id),
+        ip_address,
+        now,
+    )
 
 
 def _license_response(value: LicenseKey) -> LicenseKeyResponse:

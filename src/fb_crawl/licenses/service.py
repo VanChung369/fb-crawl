@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fb_crawl.licenses.keys import LicenseKeyService
-from fb_crawl.licenses.models import LicenseGrant, LicenseKey, Subscription
+from fb_crawl.licenses.models import AdminAuditEvent, LicenseGrant, LicenseKey, Subscription
 from fb_crawl.licenses.postgres import PostgresLicenseRepository
 from fb_crawl.licenses.repository import InvalidLicenseKey, LicenseError
 
@@ -90,3 +90,8 @@ class LicenseService:
             details=details,
             now=now,
         )
+
+    def list_audit_events(
+        self, *, limit: int = 100, cursor: int | None = None
+    ) -> tuple[AdminAuditEvent, ...]:
+        return self.repository.list_audit_events(limit=limit, cursor=cursor)

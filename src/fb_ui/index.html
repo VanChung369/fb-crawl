@@ -1196,6 +1196,11 @@
                     <tbody id="table-admin-license-keys-body"></tbody>
                   </table>
                 </div>
+                <div class="admin-pagination">
+                  <button class="btn btn-secondary btn-sm" id="btn-admin-licenses-previous" type="button">Trang trước</button>
+                  <span id="admin-licenses-page-status">Trang 1</span>
+                  <button class="btn btn-secondary btn-sm" id="btn-admin-licenses-next" type="button">Trang sau</button>
+                </div>
               </div>
             </div>
 
@@ -1212,6 +1217,32 @@
                   <thead><tr><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Xác minh</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead>
                   <tbody id="table-admin-accounts-body"></tbody>
                 </table>
+              </div>
+              <div class="admin-pagination">
+                <button class="btn btn-secondary btn-sm" id="btn-admin-accounts-previous" type="button">Trang trước</button>
+                <span id="admin-accounts-page-status">Trang 1</span>
+                <button class="btn btn-secondary btn-sm" id="btn-admin-accounts-next" type="button">Trang sau</button>
+              </div>
+            </div>
+
+            <div class="panel admin-audit-panel">
+              <div class="panel-header admin-panel-header">
+                <div>
+                  <h4>Nhật ký quản trị</h4>
+                  <p>Theo dõi các thao tác nhạy cảm trên tài khoản và license.</p>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-admin-audit" type="button">Làm mới</button>
+              </div>
+              <div class="table-container">
+                <table class="custom-table">
+                  <thead><tr><th>Thao tác</th><th>Đối tượng</th><th>Actor</th><th>Chi tiết</th><th>Thời gian</th></tr></thead>
+                  <tbody id="table-admin-audit-events-body"></tbody>
+                </table>
+              </div>
+              <div class="admin-pagination">
+                <button class="btn btn-secondary btn-sm" id="btn-admin-audit-previous" type="button">Trang trước</button>
+                <span id="admin-audit-page-status">Trang 1</span>
+                <button class="btn btn-secondary btn-sm" id="btn-admin-audit-next" type="button">Trang sau</button>
               </div>
             </div>
           </div>
@@ -1249,6 +1280,44 @@
           </table>
         </div>
         <div class="modal-actions"><button class="btn btn-secondary" data-close type="button">Đóng</button></div>
+      </div>
+    </div>
+
+    <!-- MODAL: ACCOUNT DEVICES -->
+    <div class="modal-backdrop" id="modal-admin-devices">
+      <div class="modal admin-subscriptions-modal">
+        <div class="modal-header">
+          <h3 id="admin-devices-title">Thiết bị tài khoản</h3>
+          <button class="modal-close" data-close>&times;</button>
+        </div>
+        <div class="table-container">
+          <table class="custom-table">
+            <thead><tr><th>Tên thiết bị</th><th>Installation ID</th><th>Trạng thái</th><th>Lần cuối</th><th></th></tr></thead>
+            <tbody id="table-admin-devices-body"></tbody>
+          </table>
+        </div>
+        <div class="modal-actions"><button class="btn btn-secondary" data-close type="button">Đóng</button></div>
+      </div>
+    </div>
+
+    <!-- MODAL: ADMIN PASSWORD REAUTHENTICATION -->
+    <div class="modal-backdrop" id="modal-admin-reauth">
+      <div class="modal" style="max-width: 440px">
+        <div class="modal-header">
+          <h3>Xác nhận lại mật khẩu</h3>
+          <button class="modal-close" data-close>&times;</button>
+        </div>
+        <p class="generated-key-warning">Thao tác nhạy cảm yêu cầu bạn nhập lại mật khẩu quản trị.</p>
+        <form id="form-admin-reauth">
+          <div class="form-group">
+            <label for="admin-reauth-password">Mật khẩu</label>
+            <input class="form-control" id="admin-reauth-password" type="password" autocomplete="current-password" required />
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" data-close type="button">Hủy</button>
+            <button class="btn btn-primary" id="btn-admin-reauth-submit" type="submit">Xác nhận &amp; tiếp tục</button>
+          </div>
+        </form>
       </div>
     </div>
 

@@ -100,3 +100,14 @@ class Subscription:
             raise ValueError("subscription times must be timezone-aware")
         if self.ends_at <= self.starts_at:
             raise ValueError("subscription end must be after start")
+
+
+@dataclass(frozen=True, slots=True)
+class AdminAuditEvent:
+    id: int
+    actor_account_id: int | None
+    action: str
+    target_type: str
+    target_id: str
+    details: dict[str, object]
+    created_at: datetime

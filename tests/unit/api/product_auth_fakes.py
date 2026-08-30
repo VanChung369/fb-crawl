@@ -51,15 +51,20 @@ class ProductRepositoryFake:
             revoked_at=None,
             created_at=NOW,
             last_used_at=NOW,
+            authenticated_at=NOW,
         )
         self.deleted = False
         self.revoked_devices: list[int] = []
         self.extra_devices: list[Device] = []
+        self.extra_accounts: dict[int, Account] = {}
         self.suspended_accounts: list[int] = []
         self.revoked_account_sessions: list[int] = []
+        self.admin_audits: list[str] = []
+        self.fail_admin_audit = False
+        self.rate_limit_counts: dict[tuple[str, str], int] = {}
 
     def get_account(self, account_id: int):
-        return self.account if account_id == self.account.id else None
+        return self.account if account_id == self.account.id else self.extra_accounts.get(account_id)
 
     def get_device(self, account_id: int, device_id: int):
         if account_id == self.account.id and device_id == self.device.id:
@@ -83,25 +88,63 @@ class ProductRepositoryFake:
         )
 
     def list_accounts(self, *, limit: int = 100, cursor: int | None = None):
-        return (self.account,)
+        return (self.account, *self.extra_accounts.values())
+
+    def add_user_account(self, account_id: int) -> None:
+        self.extra_accounts[account_id] = replace(
+            self.account,
+            id=account_id,
+            role=AccountRole.USER,
+            normalized_email=f"user{account_id}@example.com",
+            display_email=f"user{account_id}@example.com",
+        )
 
     def suspend_account(self, account_id: int, now: datetime):
         self.suspended_accounts.append(account_id)
-        self.account = replace(
-            self.account, status=AccountStatus.SUSPENDED, updated_at=now
+        if account_id == self.account.id:
+            self.account = replace(
+                self.account, status=AccountStatus.SUSPENDED, updated_at=now
+            )
+            self.session = replace(self.session, revoked_at=now)
+            return self.account
+        target = replace(
+            self.extra_accounts[account_id], status=AccountStatus.SUSPENDED, updated_at=now
         )
-        self.session = replace(self.session, revoked_at=now)
-        return self.account
+        self.extra_accounts[account_id] = target
+        return target
+
+    def suspend_account_as_admin(self, account_id: int, actor_account_id: int, now: datetime):
+        if account_id == actor_account_id or self.extra_accounts.get(account_id, self.account).role is AccountRole.ADMIN:
+            from fb_crawl.accounts.repository import AdminAccountProtected
+            raise AdminAccountProtected("Administrator accounts cannot be suspended here.")
+        if self.fail_admin_audit:
+            raise RuntimeError("audit unavailable")
+        account = self.suspend_account(account_id, now)
+        self.admin_audits.append("account_suspended")
+        return account
 
     def revoke_account_sessions(self, account_id: int, now: datetime):
         self.revoked_account_sessions.append(account_id)
         self.session = replace(self.session, revoked_at=now)
+
+    def revoke_account_sessions_as_admin(self, account_id: int, actor_account_id: int, now: datetime):
+        if self.fail_admin_audit:
+            raise RuntimeError("audit unavailable")
+        self.revoke_account_sessions(account_id, now)
+        self.admin_audits.append("account_sessions_revoked")
 
     def revoke_device(self, account_id: int, device_id: int, now: datetime):
         self.revoked_devices.append(device_id)
         self.device = replace(self.device, status=DeviceStatus.REVOKED, last_seen_at=now)
         self.session = replace(self.session, revoked_at=now)
         return self.device
+
+    def revoke_device_as_admin(self, account_id: int, device_id: int, actor_account_id: int, now: datetime):
+        if self.fail_admin_audit:
+            raise RuntimeError("audit unavailable")
+        device = self.revoke_device(account_id, device_id, now)
+        self.admin_audits.append("account_device_revoked")
+        return device
 
     def request_account_deletion(self, account_id: int, now: datetime):
         self.deleted = True
@@ -114,10 +157,16 @@ class ProductRepositoryFake:
         self.session = replace(self.session, revoked_at=now)
         return self.account
 
+    def record_rate_limit_hit(self, bucket_hash, action, window_start, expires_at):
+        key = (bucket_hash, action)
+        self.rate_limit_counts[key] = self.rate_limit_counts.get(key, 0) + 1
+        return self.rate_limit_counts[key]
+
 
 class ProductAuthServiceFake:
-    def __init__(self, access_token: str) -> None:
+    def __init__(self, access_token: str, repository=None) -> None:
         self.access_token = access_token
+        self.repository = repository
         self.calls: list[tuple[str, object]] = []
 
     def register(self, email, password, now, *, ip_address):
@@ -158,3 +207,16 @@ class ProductAuthServiceFake:
 
     def logout(self, session_id, now):
         self.calls.append(("logout", session_id))
+
+    def logout_refresh(self, refresh_token, now):
+        self.calls.append(("logout_refresh", refresh_token))
+
+    def reauthenticate(self, account_id, session_id, password, now, *, ip_address):
+        self.calls.append(("reauthenticate", account_id))
+        if self.repository is not None:
+            self.repository.session = replace(
+                self.repository.session,
+                authenticated_at=now,
+                last_used_at=now,
+            )
+        return GenericRequestResult()

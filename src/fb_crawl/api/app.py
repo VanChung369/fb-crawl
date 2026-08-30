@@ -36,7 +36,7 @@ from fb_crawl.api.safe_logging import log_unexpected_api_error
 from fb_crawl.core.jobs import IdempotencyConflict, JobConflict, JobNotFound
 from pathlib import Path
 from fb_crawl.composition.product import ProductServices
-from fb_crawl.accounts.repository import AccountNotFound, DeviceNotFound
+from fb_crawl.accounts.repository import AccountNotFound, AdminAccountProtected, DeviceNotFound
 from fb_crawl.auth.rate_limit import AuthRateLimited
 from fb_crawl.auth.service import (
     AccountAlreadyRegistered,
@@ -124,6 +124,7 @@ def create_app(
         if (
             product_services.license_service is not None
             and product_services.entitlement_service is not None
+            and product_services.rate_limiter is not None
         ):
             from fb_crawl.api.routes.licenses import create_license_router
             from fb_crawl.api.routes.product_admin import create_product_admin_router
@@ -133,6 +134,7 @@ def create_app(
                     product_services.license_service,
                     product_services.entitlement_service,
                     product_auth,
+                    product_services.rate_limiter,
                     clock=clock,
                 )
             )
@@ -141,6 +143,7 @@ def create_app(
                     product_services.account_repository,
                     product_services.license_service,
                     product_auth,
+                    product_services.rate_limiter,
                     clock=clock,
                 )
             )
@@ -352,6 +355,8 @@ def _install_exception_handlers(app: FastAPI) -> None:
             status_code = 401
         elif isinstance(error, AuthRateLimited):
             status_code = 429
+        elif isinstance(error, AdminAccountProtected):
+            status_code = 403
         elif isinstance(
             error,
             (EmailVerificationRequired, AccountUnavailable, DeviceBindingMismatch),

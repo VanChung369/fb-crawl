@@ -27,6 +27,14 @@ DEFAULT_AUTH_POLICIES = {
     "refresh": RateLimitPolicy(30, 5 * 60),
     "forgot_password": RateLimitPolicy(5, 60 * 60),
     "reset_password": RateLimitPolicy(5, 60 * 60),
+    "reauthenticate": RateLimitPolicy(5, 15 * 60),
+    "license_redeem": RateLimitPolicy(10, 15 * 60),
+    "admin_license_create": RateLimitPolicy(10, 60 * 60),
+    "admin_license_revoke": RateLimitPolicy(30, 60 * 60),
+    "admin_account_suspend": RateLimitPolicy(20, 60 * 60),
+    "admin_device_revoke": RateLimitPolicy(30, 60 * 60),
+    "admin_sessions_revoke": RateLimitPolicy(30, 60 * 60),
+    "admin_subscription_start_now": RateLimitPolicy(20, 60 * 60),
 }
 
 

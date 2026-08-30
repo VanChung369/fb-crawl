@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Callable
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from fb_crawl.api.dependencies import CurrentAccount, ProductAccountAuth
 from fb_crawl.api.product_schemas import (
@@ -16,12 +16,14 @@ from fb_crawl.entitlements.models import Entitlements
 from fb_crawl.entitlements.service import EntitlementService
 from fb_crawl.licenses.models import Subscription
 from fb_crawl.licenses.service import LicenseService
+from fb_crawl.auth.rate_limit import RateLimitService
 
 
 def create_license_router(
     licenses: LicenseService,
     entitlements: EntitlementService,
     current_auth: ProductAccountAuth,
+    rate_limiter: RateLimitService,
     *,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> APIRouter:
@@ -32,10 +34,19 @@ def create_license_router(
     )
     def redeem_license(
         payload: RedeemLicenseRequest,
+        request: Request,
         current: CurrentAccount = Depends(current_auth),
     ) -> SubscriptionResponse:
+        now = clock()
+        rate_limiter.check(
+            "license_redeem",
+            str(current.account.id),
+            str(current.device.id),
+            _client_ip(request),
+            now,
+        )
         return _subscription_response(
-            licenses.redeem(current.account.id, payload.key, clock())
+            licenses.redeem(current.account.id, payload.key, now)
         )
 
     @router.get(
@@ -49,6 +60,10 @@ def create_license_router(
         )
 
     return router
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"
 
 
 def _entitlements_response(value: Entitlements) -> EntitlementsResponse:

@@ -75,3 +75,29 @@ def test_admin_workspace_wires_license_account_and_subscription_actions() -> Non
 def test_product_login_panel_respects_hidden_authenticated_state() -> None:
     assert ".product-login-panel[hidden]" in STYLES
     assert "display: none !important" in STYLES
+
+
+def test_sensitive_admin_actions_reauthenticate_with_password_then_retry_once() -> None:
+    assert 'id="modal-admin-reauth"' in INDEX
+    assert 'id="form-admin-reauth"' in INDEX
+    assert 'id="admin-reauth-password"' in INDEX
+    assert "/api/v1/auth/reauthenticate" in SCRIPT
+    assert "pendingAdminAction" in SCRIPT
+    assert "passwordInput.value = ''" in SCRIPT
+
+
+def test_admin_workspace_exposes_device_audit_and_cursor_navigation() -> None:
+    for element_id in (
+        "modal-admin-devices",
+        "table-admin-audit-events-body",
+        "btn-admin-licenses-next",
+        "btn-admin-licenses-previous",
+        "btn-admin-accounts-next",
+        "btn-admin-accounts-previous",
+        "btn-admin-audit-next",
+        "btn-admin-audit-previous",
+    ):
+        assert f'id="{element_id}"' in INDEX
+    assert "/devices" in SCRIPT
+    assert "/api/v1/admin/audit-events" in SCRIPT
+    assert "next_cursor" in SCRIPT

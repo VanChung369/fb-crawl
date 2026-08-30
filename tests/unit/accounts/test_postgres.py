@@ -4,9 +4,14 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+import psycopg
 
 from fb_crawl.accounts.models import AccountRole, AccountStatus, DeviceStatus
-from fb_crawl.accounts.repository import AdminAlreadyExists, SessionReuseDetected
+from fb_crawl.accounts.repository import (
+    AdminAccountProtected,
+    AdminAlreadyExists,
+    SessionReuseDetected,
+)
 from fb_crawl.accounts.postgres import PostgresAccountRepository
 from fb_data_pipeline.repositories.errors import DatabaseError
 
@@ -32,6 +37,12 @@ def account_row() -> tuple[object, ...]:
     )
 
 
+def replace_account_status(row: tuple[object, ...], status: str) -> tuple[object, ...]:
+    values = list(row)
+    values[5] = status
+    return tuple(values)
+
+
 def device_row() -> tuple[object, ...]:
     return (9, 7, INSTALLATION_ID, "Chrome", "active", NOW, NOW)
 
@@ -41,6 +52,7 @@ def session_row(
     *,
     rotated_from_id: UUID | None = None,
     revoked_at: datetime | None = None,
+    authenticated_at: datetime = NOW,
 ) -> tuple[object, ...]:
     return (
         session_id,
@@ -51,6 +63,7 @@ def session_row(
         revoked_at,
         NOW,
         NOW,
+        authenticated_at,
     )
 
 
@@ -74,6 +87,13 @@ class ScriptedCursor:
     def fetchall(self) -> list[tuple[object, ...]]:
         row = self.rows.pop(0) if self.rows else ()
         return list(row) if row else []  # type: ignore[arg-type]
+
+
+class AuditFailingCursor(ScriptedCursor):
+    def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
+        super().execute(sql, params)
+        if "INSERT INTO admin_audit_events" in sql:
+            raise psycopg.OperationalError("audit unavailable")
 
 
 class RecordingConnection:
@@ -128,10 +148,15 @@ def test_create_account_uses_parameterized_sql_and_maps_closed_model() -> None:
 
 
 def test_rotate_refresh_token_is_single_use_and_reuse_revokes_family() -> None:
+    original_authentication = NOW - timedelta(hours=1)
     first_cursor = ScriptedCursor(
         [
-            (*session_row(), None),
-            session_row(NEXT_SESSION_ID, rotated_from_id=SESSION_ID),
+            (*session_row(authenticated_at=original_authentication), None),
+            session_row(
+                NEXT_SESSION_ID,
+                rotated_from_id=SESSION_ID,
+                authenticated_at=original_authentication,
+            ),
         ]
     )
     reused_cursor = ScriptedCursor(
@@ -160,6 +185,7 @@ def test_rotate_refresh_token_is_single_use_and_reuse_revokes_family() -> None:
 
     assert rotated.id == NEXT_SESSION_ID
     assert rotated.rotated_from_id == SESSION_ID
+    assert rotated.authenticated_at == original_authentication
     assert "FOR UPDATE" in first_cursor.commands[1][0]
     assert any("WITH RECURSIVE" in sql for sql, _ in reused_cursor.commands)
     assert connections.connections[1].exit_errors == [None]
@@ -178,6 +204,34 @@ def test_revoke_device_locks_device_and_revokes_its_sessions() -> None:
     assert "FOR UPDATE" in cursor.commands[1][0]
     assert any("UPDATE auth_sessions" in sql for sql, _ in cursor.commands)
     assert all(params is None or "$argon" not in repr(params) for _, params in cursor.commands)
+
+
+def test_admin_suspend_rejects_admin_targets_before_mutation() -> None:
+    admin = (*account_row()[:4], "admin", "active", *account_row()[6:])
+    cursor = ScriptedCursor([admin])
+    repository = PostgresAccountRepository(
+        "postgresql://hidden", connect_factory=ConnectionSequence(cursor)
+    )
+
+    with pytest.raises(AdminAccountProtected):
+        repository.suspend_account_as_admin(7, 9, NOW)
+
+    assert not any("UPDATE accounts" in sql for sql, _ in cursor.commands)
+
+
+def test_admin_suspend_and_audit_share_transaction_and_roll_back_on_audit_error() -> None:
+    cursor = AuditFailingCursor([replace_account_status(account_row(), "active")])
+    connections = ConnectionSequence(cursor)
+    repository = PostgresAccountRepository(
+        "postgresql://hidden", connect_factory=connections
+    )
+
+    with pytest.raises(DatabaseError):
+        repository.suspend_account_as_admin(7, 9, NOW)
+
+    assert any("UPDATE accounts" in sql for sql, _ in cursor.commands)
+    assert any("INSERT INTO admin_audit_events" in sql for sql, _ in cursor.commands)
+    assert connections.connections[0].exit_errors == [psycopg.OperationalError]
 
 
 def test_rate_limit_hit_is_one_atomic_upsert() -> None:

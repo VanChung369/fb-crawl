@@ -5,7 +5,7 @@ from typing import Protocol
 
 from fb_crawl.core.exceptions import ValidationError
 from fb_crawl.entitlements.models import Entitlements
-from fb_crawl.licenses.models import LicenseGrant, LicenseKey, Subscription
+from fb_crawl.licenses.models import AdminAuditEvent, LicenseGrant, LicenseKey, Subscription
 
 
 class LicenseError(ValidationError):
@@ -49,3 +49,7 @@ class LicenseRepository(Protocol):
     def list_keys(
         self, *, limit: int = 100, cursor: int | None = None
     ) -> tuple[LicenseKey, ...]: ...
+
+    def list_audit_events(
+        self, *, limit: int = 100, cursor: int | None = None
+    ) -> tuple[AdminAuditEvent, ...]: ...

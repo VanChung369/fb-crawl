@@ -11,6 +11,7 @@ import psycopg
 from fb_crawl.entitlements.models import Entitlements
 from fb_crawl.entitlements.time import add_duration
 from fb_crawl.licenses.models import (
+    AdminAuditEvent,
     LicenseDuration,
     LicenseGrant,
     LicenseKey,
@@ -412,6 +413,39 @@ class PostgresLicenseRepository:
                 details=details,
                 now=now,
             )
+
+    def list_audit_events(
+        self, *, limit: int = 100, cursor: int | None = None
+    ) -> tuple[AdminAuditEvent, ...]:
+        if not 1 <= limit <= 101:
+            raise ValueError("audit event list limit must be from 1 to 101")
+        if cursor is not None and cursor <= 0:
+            raise ValueError("audit event cursor must be positive")
+        with self._connect() as database_cursor:
+            database_cursor.execute(
+                """
+                SELECT id, actor_account_id, action, target_type,
+                       target_id, details, created_at
+                FROM admin_audit_events
+                WHERE (%s IS NULL OR id < %s)
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (cursor, cursor, limit),
+            )
+            rows = database_cursor.fetchall()
+        return tuple(
+            AdminAuditEvent(
+                id=row[0],
+                actor_account_id=row[1],
+                action=row[2],
+                target_type=row[3],
+                target_id=row[4],
+                details=dict(row[5]),
+                created_at=row[6],
+            )
+            for row in rows
+        )
 
     @staticmethod
     def _lock_account_schedule(cursor: Any, account_id: int) -> None:

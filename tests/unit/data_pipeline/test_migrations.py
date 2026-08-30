@@ -10,6 +10,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "003_job_orchestration",
         "004_product_accounts",
         "005_product_licenses",
+        "006_auth_session_reauthentication",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql
@@ -56,7 +57,9 @@ def test_product_account_migration_is_fourth_and_isolated_from_shared_identity()
 
 
 def test_license_migration_seeds_default_plan_and_unique_reveal_ledger() -> None:
-    migration = load_migrations()[-1]
+    migration = next(
+        item for item in load_migrations() if item.version == "005_product_licenses"
+    )
 
     assert migration.version == "005_product_licenses"
     for table in (
@@ -80,6 +83,17 @@ def test_license_migration_seeds_default_plan_and_unique_reveal_ledger() -> None
     assert "REFERENCES lookup_events" not in migration.sql
     assert "monthly_contact_limit >= 0" in migration.sql
     assert "max_devices >= 1" in migration.sql
+
+
+def test_reauthentication_migration_backfills_refresh_chains_from_root_login() -> None:
+    migration = next(
+        item
+        for item in load_migrations()
+        if item.version == "006_auth_session_reauthentication"
+    )
+
+    assert "WITH RECURSIVE session_roots" in migration.sql
+    assert "root_session.created_at" in migration.sql
 
 
 def test_migrations_are_sorted_by_version() -> None:

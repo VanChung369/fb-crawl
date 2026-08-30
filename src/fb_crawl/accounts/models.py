@@ -58,3 +58,4 @@ class AuthSession:
     revoked_at: datetime | None
     created_at: datetime
     last_used_at: datetime
+    authenticated_at: datetime

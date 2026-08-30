@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import timedelta
+from datetime import timedelta
 
 from fb_crawl.accounts.models import AccountRole
 from tests.unit.api.product_auth_fakes import INSTALLATION_ID, NOW
@@ -10,6 +12,7 @@ from tests.unit.api.test_license_routes import (
 )
 from tests.unit.api.test_product_auth_routes import product_client
 from fb_crawl.entitlements.models import Entitlements
+from fb_crawl.licenses.models import AdminAuditEvent
 
 
 class AdminLicenseServiceFake(LicenseServiceFake):
@@ -38,6 +41,12 @@ class AdminLicenseServiceFake(LicenseServiceFake):
 
     def write_audit(self, **event):
         self.audits.append(event)
+
+    def list_audit_events(self, *, limit: int = 100, cursor: int | None = None):
+        return (
+            AdminAuditEvent(41, 7, "license_key_created", "license", "11", {}, NOW),
+            AdminAuditEvent(40, 7, "account_suspended", "account", "8", {}, NOW),
+        )
 
 
 def _headers(access: str) -> dict[str, str]:
@@ -99,17 +108,18 @@ def test_created_key_plaintext_is_not_returned_by_list() -> None:
 
 def test_admin_can_list_and_suspend_accounts() -> None:
     client, repository, licenses, access = _client(admin=True)
+    repository.add_user_account(8)
 
     listed = client.get("/api/v1/admin/accounts", headers=_headers(access))
     suspended = client.post(
-        "/api/v1/admin/accounts/7/suspend", headers=_headers(access)
+        "/api/v1/admin/accounts/8/suspend", headers=_headers(access)
     )
 
     assert listed.status_code == suspended.status_code == 200
     assert listed.json()["items"][0]["email"] == "Person@example.com"
     assert suspended.json()["status"] == "suspended"
-    assert repository.suspended_accounts == [7]
-    assert licenses.audits[0]["action"] == "account_suspended"
+    assert repository.suspended_accounts == [8]
+    assert repository.admin_audits == ["account_suspended"]
 
 
 def test_admin_routes_do_not_require_internal_crawler_api_key() -> None:
@@ -120,3 +130,105 @@ def test_admin_routes_do_not_require_internal_crawler_api_key() -> None:
     )
 
     assert response.status_code == 200
+
+
+def test_refreshing_access_token_does_not_satisfy_recent_password_authentication() -> None:
+    client, repository, _licenses, access = _client(admin=True)
+    repository.session = replace(
+        repository.session,
+        created_at=NOW - timedelta(hours=1),
+        last_used_at=NOW,
+        authenticated_at=NOW - timedelta(hours=1),
+    )
+
+    response = client.post(
+        "/api/v1/admin/accounts/7/suspend", headers=_headers(access)
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Recent authentication required."
+
+
+def test_admin_cannot_suspend_own_account() -> None:
+    client, repository, _licenses, access = _client(admin=True)
+
+    response = client.post(
+        "/api/v1/admin/accounts/7/suspend", headers=_headers(access)
+    )
+
+    assert response.status_code == 403
+    assert repository.suspended_accounts == []
+
+
+def test_audit_failure_rolls_back_account_suspension() -> None:
+    client, repository, licenses, access = _client(admin=True)
+    repository.add_user_account(8)
+
+    repository.fail_admin_audit = True
+    response = client.post(
+        "/api/v1/admin/accounts/8/suspend", headers=_headers(access)
+    )
+
+    assert response.status_code == 500
+    assert repository.suspended_accounts == []
+
+
+def test_admin_key_creation_is_rate_limited() -> None:
+    client, _repository, _licenses, access = _client(admin=True)
+
+    responses = [
+        client.post(
+            "/api/v1/admin/license-keys", headers=_headers(access), json=GRANT
+        )
+        for _ in range(11)
+    ]
+
+    assert [response.status_code for response in responses[:10]] == [200] * 10
+    assert responses[10].status_code == 429
+
+
+def test_admin_lists_account_devices_before_revoking_one() -> None:
+    client, repository, _licenses, access = _client(admin=True)
+
+    listed = client.get(
+        "/api/v1/admin/accounts/7/devices", headers=_headers(access)
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["id"] == repository.device.id
+    assert listed.json()["items"][0]["current"] is True
+
+
+def test_admin_reads_paginated_audit_events() -> None:
+    client, _repository, _licenses, access = _client(admin=True)
+
+    response = client.get(
+        "/api/v1/admin/audit-events?limit=1", headers=_headers(access)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["action"] == "license_key_created"
+    assert response.json()["next_cursor"] == 41
+
+
+def test_password_reauthentication_unlocks_recent_admin_operation() -> None:
+    client, repository, _licenses, access = _client(admin=True)
+    repository.add_user_account(8)
+    repository.session = replace(
+        repository.session,
+        created_at=NOW - timedelta(hours=1),
+        last_used_at=NOW,
+        authenticated_at=NOW - timedelta(hours=1),
+    )
+
+    reauthenticated = client.post(
+        "/api/v1/auth/reauthenticate",
+        headers=_headers(access),
+        json={"password": "correct horse battery staple"},
+    )
+    suspended = client.post(
+        "/api/v1/admin/accounts/8/suspend", headers=_headers(access)
+    )
+
+    assert reauthenticated.status_code == 200
+    assert suspended.status_code == 200

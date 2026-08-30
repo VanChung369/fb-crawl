@@ -8,6 +8,7 @@ from fb_crawl.api.app import create_app
 from fb_crawl.api.config import ApiSettings
 from fb_crawl.composition.product import ProductServices
 from fb_crawl.auth.tokens import TokenService
+from fb_crawl.auth.rate_limit import RateLimitService
 from tests.unit.api.product_auth_fakes import (
     INSTALLATION_ID,
     NOW,
@@ -30,11 +31,12 @@ def product_client(
     repository = ProductRepositoryFake()
     tokens = TokenService(jwt_secret="j" * 32, token_hmac_secret="h" * 32)
     access = tokens.issue_access(7, SESSION_ID, 9, NOW)
-    auth_service = ProductAuthServiceFake(access)
+    auth_service = ProductAuthServiceFake(access, repository)
     services = ProductServices(
         auth_service,
         repository,
         tokens,
+        rate_limiter=RateLimitService(repository, "r" * 32),
         license_service=license_service,
         entitlement_service=entitlement_service,
         quota_service=quota_service,
@@ -151,3 +153,24 @@ def test_extension_bearer_must_match_installation_header() -> None:
 
     assert missing.status_code == wrong.status_code == 401
     assert allowed.status_code == 200
+
+
+def test_web_logout_revokes_refresh_session_when_access_cookie_is_expired() -> None:
+    client, _repository, auth_service, _access = product_client()
+    client.cookies.set("lead_finder_refresh", "opaque-refresh-token", path="/api/v1/auth")
+    client.cookies.set("lead_finder_csrf", "csrf-value")
+
+    response = client.post(
+        "/api/v1/auth/logout",
+        headers={
+            "Origin": WEB_ORIGIN,
+            "X-CSRF-Token": "csrf-value",
+            "X-Installation-ID": str(INSTALLATION_ID),
+        },
+        json={"refresh_token": None, "transport": "web"},
+    )
+
+    assert response.status_code == 200
+    assert ("logout_refresh", "opaque-refresh-token") in auth_service.calls
+    cookies = response.headers.get_list("set-cookie")
+    assert any("lead_finder_refresh=" in item and "Max-Age=0" in item for item in cookies)

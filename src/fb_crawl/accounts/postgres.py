@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+import json
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,6 +20,7 @@ from fb_crawl.accounts.models import (
 from fb_crawl.accounts.repository import (
     AdminAlreadyExists,
     AccountNotFound,
+    AdminAccountProtected,
     DeviceNotFound,
     InvalidAccountToken,
     SessionReuseDetected,
@@ -38,7 +40,7 @@ _DEVICE_COLUMNS = """
 """
 _SESSION_COLUMNS = """
     id, account_id, device_id, expires_at, rotated_from_id, revoked_at,
-    created_at, last_used_at
+    created_at, last_used_at, authenticated_at
 """
 _TOKEN_PURPOSES = frozenset({"email_verify", "password_reset"})
 
@@ -156,6 +158,56 @@ class PostgresAccountRepository:
                 (now, account_id),
             )
         return self._account(row)
+
+    def suspend_account_as_admin(
+        self, account_id: int, actor_account_id: int, now: datetime
+    ) -> Account:
+        with self._connect() as cursor:
+            cursor.execute(
+                f"SELECT {_ACCOUNT_COLUMNS} FROM accounts WHERE id = %s FOR UPDATE",
+                (account_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise AccountNotFound("Account was not found.")
+            account = self._account(row)
+            if account.id == actor_account_id or account.role is AccountRole.ADMIN:
+                raise AdminAccountProtected("Administrator accounts cannot be suspended here.")
+            if account.status in {AccountStatus.DELETED, AccountStatus.SUSPENDED}:
+                raise AccountNotFound("Account was not found.")
+            cursor.execute(
+                "UPDATE accounts SET status = 'suspended', updated_at = %s WHERE id = %s",
+                (now, account_id),
+            )
+            cursor.execute(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = COALESCE(revoked_at, %s)
+                WHERE account_id = %s
+                """,
+                (now, account_id),
+            )
+            self._write_admin_audit(
+                cursor,
+                actor_account_id,
+                "account_suspended",
+                "account",
+                str(account_id),
+                {},
+                now,
+            )
+        return Account(
+            id=account.id,
+            normalized_email=account.normalized_email,
+            display_email=account.display_email,
+            password_hash=account.password_hash,
+            role=account.role,
+            status=AccountStatus.SUSPENDED,
+            email_verified_at=account.email_verified_at,
+            created_at=account.created_at,
+            updated_at=now,
+            deletion_requested_at=account.deletion_requested_at,
+        )
 
     def create_account_token(
         self,
@@ -344,6 +396,48 @@ class PostgresAccountRepository:
             last_seen_at=max(device.last_seen_at, now),
         )
 
+    def revoke_device_as_admin(
+        self, account_id: int, device_id: int, actor_account_id: int, now: datetime
+    ) -> Device:
+        with self._connect() as cursor:
+            cursor.execute(
+                f"""
+                SELECT {_DEVICE_COLUMNS} FROM devices
+                WHERE account_id = %s AND id = %s FOR UPDATE
+                """,
+                (account_id, device_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise DeviceNotFound("Device was not found.")
+            device = self._device(row)
+            cursor.execute(
+                "UPDATE devices SET status = 'revoked', last_seen_at = GREATEST(last_seen_at, %s) WHERE id = %s",
+                (now, device_id),
+            )
+            cursor.execute(
+                "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, %s) WHERE account_id = %s AND device_id = %s",
+                (now, account_id, device_id),
+            )
+            self._write_admin_audit(
+                cursor,
+                actor_account_id,
+                "account_device_revoked",
+                "device",
+                str(device_id),
+                {"account_id": account_id},
+                now,
+            )
+        return Device(
+            id=device.id,
+            account_id=device.account_id,
+            installation_id=device.installation_id,
+            display_name=device.display_name,
+            status=DeviceStatus.REVOKED,
+            first_seen_at=device.first_seen_at,
+            last_seen_at=max(device.last_seen_at, now),
+        )
+
     def create_session(
         self,
         account_id: int,
@@ -358,8 +452,8 @@ class PostgresAccountRepository:
                 f"""
                 INSERT INTO auth_sessions (
                     id, account_id, device_id, refresh_token_hash,
-                    expires_at, created_at, last_used_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    expires_at, created_at, last_used_at, authenticated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_SESSION_COLUMNS}
                 """,
                 (
@@ -368,6 +462,7 @@ class PostgresAccountRepository:
                     device_id,
                     refresh_digest,
                     expires_at,
+                    now,
                     now,
                     now,
                 ),
@@ -412,8 +507,8 @@ class PostgresAccountRepository:
             row = cursor.fetchone()
             if row is None:
                 raise SessionUnavailable("Refresh session is unavailable.")
-            old_session = self._session(row[:8])
-            replacement_id = row[8]
+            old_session = self._session(row[:9])
+            replacement_id = row[9]
             if replacement_id is not None:
                 self._revoke_session_family(cursor, old_session.id, now)
                 reuse_detected = True
@@ -433,8 +528,9 @@ class PostgresAccountRepository:
                     f"""
                     INSERT INTO auth_sessions (
                         id, account_id, device_id, refresh_token_hash,
-                        expires_at, rotated_from_id, created_at, last_used_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        expires_at, rotated_from_id, created_at, last_used_at,
+                        authenticated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING {_SESSION_COLUMNS}
                     """,
                     (
@@ -446,6 +542,7 @@ class PostgresAccountRepository:
                         old_session.id,
                         now,
                         now,
+                        old_session.authenticated_at,
                     ),
                 )
                 new_row = cursor.fetchone()
@@ -467,6 +564,37 @@ class PostgresAccountRepository:
                 (now, session_id),
             )
 
+    def revoke_session_by_refresh_digest(
+        self, refresh_digest: str, now: datetime
+    ) -> None:
+        with self._connect() as cursor:
+            cursor.execute(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = COALESCE(revoked_at, %s)
+                WHERE refresh_token_hash = %s
+                """,
+                (now, refresh_digest),
+            )
+
+    def mark_session_reauthenticated(
+        self, session_id: UUID, now: datetime
+    ) -> AuthSession:
+        with self._connect() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE auth_sessions
+                SET authenticated_at = %s, last_used_at = GREATEST(last_used_at, %s)
+                WHERE id = %s AND revoked_at IS NULL AND expires_at > %s
+                RETURNING {_SESSION_COLUMNS}
+                """,
+                (now, now, session_id, now),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise SessionUnavailable("Authentication session is unavailable.")
+        return self._session(row)
+
     def revoke_account_sessions(self, account_id: int, now: datetime) -> None:
         with self._connect() as cursor:
             cursor.execute(
@@ -476,6 +604,30 @@ class PostgresAccountRepository:
                 WHERE account_id = %s
                 """,
                 (now, account_id),
+            )
+
+    def revoke_account_sessions_as_admin(
+        self, account_id: int, actor_account_id: int, now: datetime
+    ) -> None:
+        with self._connect() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM accounts WHERE id = %s AND status <> 'deleted' FOR UPDATE",
+                (account_id,),
+            )
+            if cursor.fetchone() is None:
+                raise AccountNotFound("Account was not found.")
+            cursor.execute(
+                "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, %s) WHERE account_id = %s",
+                (now, account_id),
+            )
+            self._write_admin_audit(
+                cursor,
+                actor_account_id,
+                "account_sessions_revoked",
+                "account",
+                str(account_id),
+                {},
+                now,
             )
 
     def request_account_deletion(
@@ -582,6 +734,32 @@ class PostgresAccountRepository:
         return self._required_account(created)
 
     @staticmethod
+    def _write_admin_audit(
+        cursor: Any,
+        actor_account_id: int,
+        action: str,
+        target_type: str,
+        target_id: str,
+        details: dict[str, object],
+        now: datetime,
+    ) -> None:
+        cursor.execute(
+            """
+            INSERT INTO admin_audit_events (
+                actor_account_id, action, target_type, target_id, details, created_at
+            ) VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+            """,
+            (
+                actor_account_id,
+                action,
+                target_type,
+                target_id,
+                json.dumps(details, sort_keys=True),
+                now,
+            ),
+        )
+
+    @staticmethod
     def _lock_account_token(
         cursor: Any, token_digest: str, purpose: TokenPurpose
     ) -> tuple[Any, ...]:
@@ -673,4 +851,5 @@ class PostgresAccountRepository:
             revoked_at=row[5],
             created_at=row[6],
             last_used_at=row[7],
+            authenticated_at=row[8],
         )

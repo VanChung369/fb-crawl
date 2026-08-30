@@ -12,6 +12,7 @@ class DashboardApp {
     this.installationId = localStorage.getItem('lead_finder_installation_id') || crypto.randomUUID();
     localStorage.setItem('lead_finder_installation_id', this.installationId);
     this.productAccount = null;
+    this.pendingAdminAction = null;
 
     this.initElements();
     this.bindEvents();
@@ -52,6 +53,8 @@ class DashboardApp {
     this.tableAdminLicenseKeys = document.getElementById('table-admin-license-keys-body');
     this.tableAdminAccounts = document.getElementById('table-admin-accounts-body');
     this.tableAdminSubscriptions = document.getElementById('table-admin-subscriptions-body');
+    this.tableAdminDevices = document.getElementById('table-admin-devices-body');
+    this.tableAdminAuditEvents = document.getElementById('table-admin-audit-events-body');
 
     // Modals
     this.modalSettings = document.getElementById('modal-settings');
@@ -67,6 +70,8 @@ class DashboardApp {
     this.modalSyncScans = document.getElementById('modal-sync-fbnumber-scans');
     this.modalGeneratedLicense = document.getElementById('modal-generated-license');
     this.modalAdminSubscriptions = document.getElementById('modal-admin-subscriptions');
+    this.modalAdminDevices = document.getElementById('modal-admin-devices');
+    this.modalAdminReauth = document.getElementById('modal-admin-reauth');
 
     // Forms
     this.formCreateJob = document.getElementById('form-create-job');
@@ -80,6 +85,7 @@ class DashboardApp {
     this.formSyncScans = document.getElementById('form-sync-fbnumber-scans');
     this.formProductLogin = document.getElementById('form-product-login');
     this.formCreateLicense = document.getElementById('form-create-license');
+    this.formAdminReauth = document.getElementById('form-admin-reauth');
 
     // Lead Finder product admin
     this.productAdminLoginPanel = document.getElementById('product-admin-login-panel');
@@ -134,6 +140,10 @@ class DashboardApp {
       allItems: [],
     };
 
+    this.adminLicensesPagination = { pageIndex: 0, cursorHistory: [null], nextCursor: null };
+    this.adminAccountsPagination = { pageIndex: 0, cursorHistory: [null], nextCursor: null };
+    this.adminAuditPagination = { pageIndex: 0, cursorHistory: [null], nextCursor: null };
+
     // Force all modals to hidden state on init (prevents CSS conflicts)
     document.querySelectorAll('.modal-backdrop').forEach(m => {
       m.style.display = 'none';
@@ -169,14 +179,31 @@ class DashboardApp {
     if (this.formCreateLicense) {
       this.formCreateLicense.addEventListener('submit', (event) => this.handleCreateLicense(event));
     }
+    if (this.formAdminReauth) {
+      this.formAdminReauth.addEventListener('submit', (event) => this.handleAdminReauthentication(event));
+    }
     const durationPreset = document.getElementById('license-duration-preset');
     if (durationPreset) {
       durationPreset.addEventListener('change', () => this.applyLicenseDurationPreset());
     }
     const refreshLicenses = document.getElementById('btn-refresh-admin-licenses');
-    if (refreshLicenses) refreshLicenses.addEventListener('click', () => this.loadAdminLicenses());
+    if (refreshLicenses) refreshLicenses.addEventListener('click', () => this.loadAdminLicenses(true));
     const refreshAccounts = document.getElementById('btn-refresh-admin-accounts');
-    if (refreshAccounts) refreshAccounts.addEventListener('click', () => this.loadAdminAccounts());
+    if (refreshAccounts) refreshAccounts.addEventListener('click', () => this.loadAdminAccounts(true));
+    const refreshAudit = document.getElementById('btn-refresh-admin-audit');
+    if (refreshAudit) refreshAudit.addEventListener('click', () => this.loadAdminAuditEvents(true));
+    const adminLicensesPrevious = document.getElementById('btn-admin-licenses-previous');
+    if (adminLicensesPrevious) adminLicensesPrevious.addEventListener('click', () => this.changeAdminPage('licenses', -1));
+    const adminLicensesNext = document.getElementById('btn-admin-licenses-next');
+    if (adminLicensesNext) adminLicensesNext.addEventListener('click', () => this.changeAdminPage('licenses', 1));
+    const adminAccountsPrevious = document.getElementById('btn-admin-accounts-previous');
+    if (adminAccountsPrevious) adminAccountsPrevious.addEventListener('click', () => this.changeAdminPage('accounts', -1));
+    const adminAccountsNext = document.getElementById('btn-admin-accounts-next');
+    if (adminAccountsNext) adminAccountsNext.addEventListener('click', () => this.changeAdminPage('accounts', 1));
+    const adminAuditPrevious = document.getElementById('btn-admin-audit-previous');
+    if (adminAuditPrevious) adminAuditPrevious.addEventListener('click', () => this.changeAdminPage('audit', -1));
+    const adminAuditNext = document.getElementById('btn-admin-audit-next');
+    if (adminAuditNext) adminAuditNext.addEventListener('click', () => this.changeAdminPage('audit', 1));
     const copyGenerated = document.getElementById('btn-copy-generated-license');
     if (copyGenerated) copyGenerated.addEventListener('click', () => this.copyGeneratedLicenseKey());
 
@@ -1877,7 +1904,7 @@ class DashboardApp {
     return found ? decodeURIComponent(found.slice(prefix.length)) : '';
   }
 
-  async fetchProductApi(endpoint, options = {}, retry = true) {
+  async fetchProductApi(endpoint, options = {}, retry = true, allowReauth = true) {
     const method = (options.method || 'GET').toUpperCase();
     const headers = {
       'Content-Type': 'application/json',
@@ -1896,10 +1923,22 @@ class DashboardApp {
     });
     if (response.status === 401 && retry && !endpoint.startsWith('/api/v1/auth/')) {
       const refreshed = await this.refreshProductSession();
-      if (refreshed) return this.fetchProductApi(endpoint, options, false);
+      if (refreshed) return this.fetchProductApi(endpoint, options, false, allowReauth);
     }
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      const sensitiveAdminAction = endpoint.startsWith('/api/v1/admin/accounts/')
+        && ['/suspend', '/sessions', '/devices/'].some(fragment => endpoint.includes(fragment));
+      if (
+        response.status === 403
+        && allowReauth
+        && sensitiveAdminAction
+        && errorData.detail === 'Recent authentication required.'
+      ) {
+        return this.promptAdminReauthentication(
+          () => this.fetchProductApi(endpoint, options, false, false)
+        );
+      }
       throw new Error(errorData.message || errorData.detail || `Lỗi HTTP ${response.status}`);
     }
     return response.status === 204 ? null : response.json();
@@ -1958,7 +1997,10 @@ class DashboardApp {
 
   async handleProductLogout() {
     try {
-      await this.fetchProductApi('/api/v1/auth/logout', { method: 'POST' }, false);
+      await this.fetchProductApi('/api/v1/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: null, transport: 'web' })
+      }, false);
     } catch {
       // Local UI state still clears when the server session already expired.
     }
@@ -1988,7 +2030,11 @@ class DashboardApp {
     }
     this.setProductAdminAuthState();
     if (this.productAccount?.role !== 'admin') return;
-    await Promise.all([this.loadAdminLicenses(), this.loadAdminAccounts()]);
+    await Promise.all([
+      this.loadAdminLicenses(true),
+      this.loadAdminAccounts(true),
+      this.loadAdminAuditEvents(true)
+    ]);
   }
 
   applyLicenseDurationPreset() {
@@ -2028,7 +2074,7 @@ class DashboardApp {
         })
       });
       this.showGeneratedLicenseKey(created.key);
-      await this.loadAdminLicenses();
+      await this.loadAdminLicenses(true);
     } catch (error) {
       this.showToast(`Không thể tạo license: ${error.message}`, 'error');
     } finally {
@@ -2059,11 +2105,16 @@ class DashboardApp {
     }
   }
 
-  async loadAdminLicenses() {
+  async loadAdminLicenses(reset = true) {
     if (!this.tableAdminLicenseKeys) return;
+    if (reset) this.adminLicensesPagination = { pageIndex: 0, cursorHistory: [null], nextCursor: null };
     try {
-      const data = await this.fetchProductApi('/api/v1/admin/license-keys?limit=100');
+      const cursor = this.adminLicensesPagination.cursorHistory[this.adminLicensesPagination.pageIndex];
+      const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const data = await this.fetchProductApi(`/api/v1/admin/license-keys?limit=25${query}`);
+      this.adminLicensesPagination.nextCursor = data.next_cursor || null;
       this.renderAdminLicenseRows(data.items || []);
+      this.updateAdminPagination('licenses');
     } catch (error) {
       this.renderAdminEmptyRow(this.tableAdminLicenseKeys, 6, error.message);
     }
@@ -2098,17 +2149,22 @@ class DashboardApp {
     try {
       await this.fetchProductApi(`/api/v1/admin/license-keys/${item.id}`, { method: 'DELETE' });
       this.showToast('Đã thu hồi license.', 'success');
-      await this.loadAdminLicenses();
+      await this.loadAdminLicenses(true);
     } catch (error) {
       this.showToast(`Không thể thu hồi license: ${error.message}`, 'error');
     }
   }
 
-  async loadAdminAccounts() {
+  async loadAdminAccounts(reset = true) {
     if (!this.tableAdminAccounts) return;
+    if (reset) this.adminAccountsPagination = { pageIndex: 0, cursorHistory: [null], nextCursor: null };
     try {
-      const data = await this.fetchProductApi('/api/v1/admin/accounts?limit=100');
+      const cursor = this.adminAccountsPagination.cursorHistory[this.adminAccountsPagination.pageIndex];
+      const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const data = await this.fetchProductApi(`/api/v1/admin/accounts?limit=25${query}`);
+      this.adminAccountsPagination.nextCursor = data.next_cursor || null;
       this.renderAdminAccountRows(data.items || []);
+      this.updateAdminPagination('accounts');
     } catch (error) {
       this.renderAdminEmptyRow(this.tableAdminAccounts, 6, error.message);
     }
@@ -2132,6 +2188,9 @@ class DashboardApp {
       const subscriptionsButton = this.createAdminButton('License', 'btn-secondary');
       subscriptionsButton.addEventListener('click', () => this.openAdminSubscriptions(account));
       actions.appendChild(subscriptionsButton);
+      const devicesButton = this.createAdminButton('Thiết bị', 'btn-secondary');
+      devicesButton.addEventListener('click', () => this.openAdminDevices(account));
+      actions.appendChild(devicesButton);
       if (account.role === 'user' && account.status !== 'deleted') {
         const sessionsButton = this.createAdminButton('Đăng xuất hết', 'btn-secondary');
         sessionsButton.addEventListener('click', () => this.revokeAdminSessions(account));
@@ -2152,7 +2211,7 @@ class DashboardApp {
     try {
       await this.fetchProductApi(`/api/v1/admin/accounts/${account.id}/suspend`, { method: 'POST' });
       this.showToast('Đã tạm khóa tài khoản.', 'success');
-      await this.loadAdminAccounts();
+      await this.loadAdminAccounts(true);
     } catch (error) {
       this.showToast(`Không thể tạm khóa: ${error.message}`, 'error');
     }
@@ -2217,6 +2276,167 @@ class DashboardApp {
     } catch (error) {
       this.showToast(`Không thể bắt đầu gói: ${error.message}`, 'error');
     }
+  }
+
+  async changeAdminPage(kind, direction) {
+    const state = this.adminPaginationState(kind);
+    if (direction > 0) {
+      if (!state.nextCursor) return;
+      state.cursorHistory[state.pageIndex + 1] = state.nextCursor;
+      state.pageIndex += 1;
+    } else {
+      if (state.pageIndex === 0) return;
+      state.pageIndex -= 1;
+      state.nextCursor = null;
+    }
+    if (kind === 'licenses') await this.loadAdminLicenses(false);
+    else if (kind === 'accounts') await this.loadAdminAccounts(false);
+    else await this.loadAdminAuditEvents(false);
+  }
+
+  updateAdminPagination(kind) {
+    const state = this.adminPaginationState(kind);
+    const prefix = kind === 'licenses'
+      ? 'admin-licenses'
+      : (kind === 'accounts' ? 'admin-accounts' : 'admin-audit');
+    const previous = document.getElementById(`btn-${prefix}-previous`);
+    const next = document.getElementById(`btn-${prefix}-next`);
+    const status = document.getElementById(`${prefix}-page-status`);
+    if (previous) previous.disabled = state.pageIndex === 0;
+    if (next) next.disabled = !state.nextCursor;
+    if (status) status.textContent = `Trang ${state.pageIndex + 1}`;
+  }
+
+  adminPaginationState(kind) {
+    if (kind === 'licenses') return this.adminLicensesPagination;
+    if (kind === 'accounts') return this.adminAccountsPagination;
+    return this.adminAuditPagination;
+  }
+
+  async openAdminDevices(account) {
+    const title = document.getElementById('admin-devices-title');
+    if (title) title.textContent = `Thiết bị · ${account.email}`;
+    this.renderAdminEmptyRow(this.tableAdminDevices, 5, 'Đang tải...');
+    this.openModal(this.modalAdminDevices);
+    try {
+      const data = await this.fetchProductApi(`/api/v1/admin/accounts/${account.id}/devices`);
+      this.renderAdminDeviceRows(account, data.items || []);
+    } catch (error) {
+      this.renderAdminEmptyRow(this.tableAdminDevices, 5, error.message);
+    }
+  }
+
+  renderAdminDeviceRows(account, items) {
+    this.tableAdminDevices.replaceChildren();
+    if (!items.length) {
+      this.renderAdminEmptyRow(this.tableAdminDevices, 5, 'Tài khoản chưa có thiết bị.');
+      return;
+    }
+    items.forEach(device => {
+      const row = document.createElement('tr');
+      this.appendAdminTextCell(row, device.display_name);
+      this.appendAdminTextCell(row, device.installation_id);
+      this.appendAdminStatusCell(row, device.status);
+      this.appendAdminTextCell(row, this.formatAdminDate(device.last_seen_at));
+      const actions = document.createElement('td');
+      if (device.status === 'active' && !device.current) {
+        const revokeButton = this.createAdminButton('Thu hồi', 'btn-danger');
+        revokeButton.addEventListener('click', () => this.revokeAdminDevice(account, device));
+        actions.appendChild(revokeButton);
+      }
+      row.appendChild(actions);
+      this.tableAdminDevices.appendChild(row);
+    });
+  }
+
+  async revokeAdminDevice(account, device) {
+    if (!window.confirm(`Thu hồi thiết bị ${device.display_name} của ${account.email}?`)) return;
+    try {
+      await this.fetchProductApi(
+        `/api/v1/admin/accounts/${account.id}/devices/${device.id}`,
+        { method: 'DELETE' }
+      );
+      this.showToast('Đã thu hồi thiết bị và các phiên liên quan.', 'success');
+      await this.openAdminDevices(account);
+    } catch (error) {
+      this.showToast(`Không thể thu hồi thiết bị: ${error.message}`, 'error');
+    }
+  }
+
+  promptAdminReauthentication(retryAction) {
+    if (this.pendingAdminAction) {
+      return Promise.reject(new Error('Password reauthentication is already pending.'));
+    }
+    const passwordInput = document.getElementById('admin-reauth-password');
+    if (passwordInput) passwordInput.value = '';
+    this.openModal(this.modalAdminReauth);
+    if (passwordInput) passwordInput.focus();
+    return new Promise((resolve, reject) => {
+      this.pendingAdminAction = { retryAction, resolve, reject };
+    });
+  }
+
+  async handleAdminReauthentication(event) {
+    event.preventDefault();
+    const passwordInput = document.getElementById('admin-reauth-password');
+    const submitButton = document.getElementById('btn-admin-reauth-submit');
+    const pending = this.pendingAdminAction;
+    if (!passwordInput || !submitButton || !pending) return;
+    submitButton.disabled = true;
+    try {
+      await this.fetchProductApi('/api/v1/auth/reauthenticate', {
+        method: 'POST',
+        body: JSON.stringify({ password: passwordInput.value })
+      }, false);
+    } catch (error) {
+      this.showToast(`Không thể xác nhận lại: ${error.message}`, 'error');
+      passwordInput.value = '';
+      submitButton.disabled = false;
+      passwordInput.focus();
+      return;
+    }
+    this.pendingAdminAction = null;
+    passwordInput.value = '';
+    this.closeModal(this.modalAdminReauth);
+    try {
+      pending.resolve(await pending.retryAction());
+    } catch (error) {
+      pending.reject(error);
+    } finally {
+      submitButton.disabled = false;
+    }
+  }
+
+  async loadAdminAuditEvents(reset = true) {
+    if (!this.tableAdminAuditEvents) return;
+    if (reset) this.adminAuditPagination = { pageIndex: 0, cursorHistory: [null], nextCursor: null };
+    try {
+      const cursor = this.adminAuditPagination.cursorHistory[this.adminAuditPagination.pageIndex];
+      const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+      const data = await this.fetchProductApi(`/api/v1/admin/audit-events?limit=50${query}`);
+      this.adminAuditPagination.nextCursor = data.next_cursor || null;
+      this.renderAdminAuditRows(data.items || []);
+      this.updateAdminPagination('audit');
+    } catch (error) {
+      this.renderAdminEmptyRow(this.tableAdminAuditEvents, 5, error.message);
+    }
+  }
+
+  renderAdminAuditRows(items) {
+    this.tableAdminAuditEvents.replaceChildren();
+    if (!items.length) {
+      this.renderAdminEmptyRow(this.tableAdminAuditEvents, 5, 'Chưa có sự kiện quản trị.');
+      return;
+    }
+    items.forEach(event => {
+      const row = document.createElement('tr');
+      this.appendAdminTextCell(row, event.action);
+      this.appendAdminTextCell(row, `${event.target_type} · ${event.target_id}`);
+      this.appendAdminTextCell(row, event.actor_account_id ?? 'system');
+      this.appendAdminTextCell(row, JSON.stringify(event.details || {}));
+      this.appendAdminTextCell(row, this.formatAdminDate(event.created_at));
+      this.tableAdminAuditEvents.appendChild(row);
+    });
   }
 
   renderAdminEmptyRow(tableBody, colspan, message) {
@@ -2285,6 +2505,14 @@ class DashboardApp {
     el.style.opacity = '0';
     el.style.pointerEvents = 'none';
     if (el === this.modalGeneratedLicense) this.clearGeneratedLicenseKey();
+    if (el === this.modalAdminReauth) {
+      const passwordInput = document.getElementById('admin-reauth-password');
+      if (passwordInput) passwordInput.value = '';
+      if (this.pendingAdminAction) {
+        this.pendingAdminAction.reject(new Error('Password reauthentication was cancelled.'));
+        this.pendingAdminAction = null;
+      }
+    }
   }
 
   saveSettings() {

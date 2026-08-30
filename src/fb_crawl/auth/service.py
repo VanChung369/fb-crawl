@@ -246,6 +246,31 @@ class AccountAuthService:
     def logout(self, session_id: UUID, now: datetime) -> None:
         self._repository.revoke_session(session_id, now)
 
+    def logout_refresh(self, refresh_token: str, now: datetime) -> None:
+        self._repository.revoke_session_by_refresh_digest(
+            self._token_service.digest_opaque(refresh_token), now
+        )
+
+    def reauthenticate(
+        self,
+        account_id: int,
+        session_id: UUID,
+        password: str,
+        now: datetime,
+        *,
+        ip_address: str,
+    ) -> GenericRequestResult:
+        self._rate_limiter.check(
+            "reauthenticate", str(account_id), None, ip_address, now
+        )
+        account = self._repository.get_account(account_id)
+        if account is None or not self._password_hasher.verify(
+            account.password_hash, password
+        ):
+            raise InvalidCredentials("Password is invalid.")
+        self._repository.mark_session_reauthenticated(session_id, now)
+        return GenericRequestResult()
+
     def _send_verification(self, account: Account, now: datetime) -> None:
         raw_token = self._token_service.new_opaque_token()
         self._repository.create_account_token(

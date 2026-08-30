@@ -12,6 +12,8 @@ from fb_crawl.api.product_schemas import (
     EmailRequest,
     GenericAcceptedResponse,
     LoginRequest,
+    LogoutRequest,
+    ReauthenticateRequest,
     RefreshRequest,
     RegisterRequest,
     RegistrationResponse,
@@ -133,17 +135,37 @@ def create_product_auth_router(
 
     @router.post("/logout", response_model=GenericAcceptedResponse)
     def logout(
+        request: Request,
         response: Response,
+        payload: LogoutRequest | None = None,
+    ) -> GenericAcceptedResponse:
+        transport = payload.transport if payload is not None else (
+            "web" if request.cookies.get("lead_finder_refresh") else "extension"
+        )
+        raw_refresh = payload.refresh_token if payload is not None else None
+        if transport == "web":
+            validate_cookie_csrf(request, frozenset(allowed_origins))
+            raw_refresh = request.cookies.get("lead_finder_refresh")
+        if raw_refresh:
+            auth_service.logout_refresh(raw_refresh, clock())
+        response.delete_cookie("lead_finder_access", path="/")
+        response.delete_cookie("lead_finder_refresh", path="/api/v1/auth")
+        response.delete_cookie("lead_finder_csrf", path="/")
+        return GenericAcceptedResponse()
+
+    @router.post("/reauthenticate", response_model=GenericAcceptedResponse)
+    def reauthenticate(
+        payload: ReauthenticateRequest,
+        request: Request,
         current: CurrentAccount = Depends(current_auth),
     ) -> GenericAcceptedResponse:
-        auth_service.logout(current.session.id, clock())
-        for cookie in (
-            "lead_finder_access",
-            "lead_finder_refresh",
-            "lead_finder_csrf",
-        ):
-            response.delete_cookie(cookie, path="/")
-        return GenericAcceptedResponse()
+        return auth_service.reauthenticate(
+            current.account.id,
+            current.session.id,
+            payload.password,
+            clock(),
+            ip_address=_client_ip(request),
+        )
 
     return router
 
