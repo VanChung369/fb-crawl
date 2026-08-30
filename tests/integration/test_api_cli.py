@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import builtins
 import os
 from pathlib import Path
@@ -399,6 +400,11 @@ def test_real_api_composition_uses_postgres_repositories_without_browser_imports
     from fb_data_pipeline.repositories.users import UserQueryRepository
 
     monkeypatch.setattr(MigrationRunner, "apply", lambda _runner: ())
+    monkeypatch.setenv(
+        "LEAD_FINDER_LICENSE_HMAC_KEYS",
+        f"1:{base64.b64encode(b'l' * 32).decode('ascii')}",
+    )
+    monkeypatch.setenv("LEAD_FINDER_LICENSE_HMAC_ACTIVE_VERSION", "1")
     built = _compose_api(
         PipelineSettings(database_url="postgresql://not-connected"),
         ApiSettings(api_key=API_KEY),

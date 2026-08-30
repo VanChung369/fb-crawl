@@ -9,9 +9,13 @@ class DashboardApp {
     this.baseUrl = window.location.origin;
     this.currentView = 'dashboard';
     this.refreshInterval = null;
+    this.installationId = localStorage.getItem('lead_finder_installation_id') || crypto.randomUUID();
+    localStorage.setItem('lead_finder_installation_id', this.installationId);
+    this.productAccount = null;
 
     this.initElements();
     this.bindEvents();
+    this.applyLicenseDurationPreset();
     this.handleRouting();
     this.checkHealth();
     this.loadCurrentViewData();
@@ -45,6 +49,9 @@ class DashboardApp {
     this.tableAllLeads = document.getElementById('table-all-leads-body');
     this.tableAllSessions = document.getElementById('table-all-sessions-body');
     this.tableAllProxies = document.getElementById('table-all-proxies-body');
+    this.tableAdminLicenseKeys = document.getElementById('table-admin-license-keys-body');
+    this.tableAdminAccounts = document.getElementById('table-admin-accounts-body');
+    this.tableAdminSubscriptions = document.getElementById('table-admin-subscriptions-body');
 
     // Modals
     this.modalSettings = document.getElementById('modal-settings');
@@ -58,6 +65,8 @@ class DashboardApp {
     this.modalEditSession = document.getElementById('modal-edit-session');
     this.modalEditProxy = document.getElementById('modal-edit-proxy');
     this.modalSyncScans = document.getElementById('modal-sync-fbnumber-scans');
+    this.modalGeneratedLicense = document.getElementById('modal-generated-license');
+    this.modalAdminSubscriptions = document.getElementById('modal-admin-subscriptions');
 
     // Forms
     this.formCreateJob = document.getElementById('form-create-job');
@@ -69,6 +78,14 @@ class DashboardApp {
     this.formEditSession = document.getElementById('form-edit-session');
     this.formEditProxy = document.getElementById('form-edit-proxy');
     this.formSyncScans = document.getElementById('form-sync-fbnumber-scans');
+    this.formProductLogin = document.getElementById('form-product-login');
+    this.formCreateLicense = document.getElementById('form-create-license');
+
+    // Lead Finder product admin
+    this.productAdminLoginPanel = document.getElementById('product-admin-login-panel');
+    this.productAdminWorkspace = document.getElementById('product-admin-workspace');
+    this.productAdminSessionStatus = document.getElementById('product-admin-session-status');
+    this.btnProductLogout = document.getElementById('btn-product-logout');
 
     // Settings Input
     this.inputApiKey = document.getElementById('input-api-key');
@@ -142,6 +159,26 @@ class DashboardApp {
     if (this.btnSettings) this.btnSettings.addEventListener('click', () => this.openModal(this.modalSettings));
     const btnSaveSettings = document.getElementById('btn-save-api-key-settings');
     if (btnSaveSettings) btnSaveSettings.addEventListener('click', () => this.saveSettings());
+
+    if (this.formProductLogin) {
+      this.formProductLogin.addEventListener('submit', (event) => this.handleProductLogin(event));
+    }
+    if (this.btnProductLogout) {
+      this.btnProductLogout.addEventListener('click', () => this.handleProductLogout());
+    }
+    if (this.formCreateLicense) {
+      this.formCreateLicense.addEventListener('submit', (event) => this.handleCreateLicense(event));
+    }
+    const durationPreset = document.getElementById('license-duration-preset');
+    if (durationPreset) {
+      durationPreset.addEventListener('change', () => this.applyLicenseDurationPreset());
+    }
+    const refreshLicenses = document.getElementById('btn-refresh-admin-licenses');
+    if (refreshLicenses) refreshLicenses.addEventListener('click', () => this.loadAdminLicenses());
+    const refreshAccounts = document.getElementById('btn-refresh-admin-accounts');
+    if (refreshAccounts) refreshAccounts.addEventListener('click', () => this.loadAdminAccounts());
+    const copyGenerated = document.getElementById('btn-copy-generated-license');
+    if (copyGenerated) copyGenerated.addEventListener('click', () => this.copyGeneratedLicenseKey());
 
     // Refresh
     if (this.btnRefresh) {
@@ -419,6 +456,7 @@ class DashboardApp {
   }
 
   switchView(viewName) {
+    if (viewName !== 'product-admin') this.clearGeneratedLicenseKey();
     this.currentView = viewName;
     window.location.hash = viewName;
 
@@ -447,7 +485,8 @@ class DashboardApp {
       leads: 'Khám Phá Khách Hàng & Số Điện Thoại',
       sessions: 'Quản Lý Quần Thể Nick Facebook',
       proxies: 'Quản Lý Quần Thể Proxy',
-      settings: 'Cấu Hình API Tra Cứu Số Điện Thoại (FBNumber)'
+      settings: 'Cấu Hình API Tra Cứu Số Điện Thoại (FBNumber)',
+      'product-admin': 'Quản Trị Lead Finder'
     };
     if (this.viewHeaderTitle) {
       this.viewHeaderTitle.textContent = titles[viewName] || 'Dashboard';
@@ -529,6 +568,7 @@ class DashboardApp {
     else if (this.currentView === 'sessions') this.loadSessionsData();
     else if (this.currentView === 'proxies') this.loadProxiesData();
     else if (this.currentView === 'settings') this.loadSettingsData();
+    else if (this.currentView === 'product-admin') this.loadProductAdminData();
   }
 
   // ==========================================
@@ -1831,6 +1871,397 @@ class DashboardApp {
     }
   }
 
+  getCookie(name) {
+    const prefix = `${encodeURIComponent(name)}=`;
+    const found = document.cookie.split(';').map(item => item.trim()).find(item => item.startsWith(prefix));
+    return found ? decodeURIComponent(found.slice(prefix.length)) : '';
+  }
+
+  async fetchProductApi(endpoint, options = {}, retry = true) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Installation-ID': this.installationId,
+      ...(options.headers || {})
+    };
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const csrfToken = this.getCookie('lead_finder_csrf');
+      if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+    }
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      ...options,
+      method,
+      headers,
+      credentials: 'include'
+    });
+    if (response.status === 401 && retry && !endpoint.startsWith('/api/v1/auth/')) {
+      const refreshed = await this.refreshProductSession();
+      if (refreshed) return this.fetchProductApi(endpoint, options, false);
+    }
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || errorData.detail || `Lỗi HTTP ${response.status}`);
+    }
+    return response.status === 204 ? null : response.json();
+  }
+
+  async refreshProductSession() {
+    const csrfToken = this.getCookie('lead_finder_csrf');
+    if (!csrfToken) return false;
+    try {
+      const response = await fetch(`${this.baseUrl}/api/v1/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify({
+          refresh_token: null,
+          installation_id: this.installationId,
+          transport: 'web'
+        })
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async handleProductLogin(event) {
+    event.preventDefault();
+    const emailInput = document.getElementById('product-login-email');
+    const passwordInput = document.getElementById('product-login-password');
+    const submitButton = document.getElementById('btn-product-login');
+    if (!emailInput || !passwordInput) return;
+    submitButton.disabled = true;
+    try {
+      await this.fetchProductApi('/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: emailInput.value.trim(),
+          password: passwordInput.value,
+          installation_id: this.installationId,
+          device_name: 'Lead Finder Admin Dashboard',
+          transport: 'web'
+        })
+      }, false);
+      passwordInput.value = '';
+      await this.loadProductAdminData();
+    } catch (error) {
+      this.showToast(`Đăng nhập thất bại: ${error.message}`, 'error');
+    } finally {
+      passwordInput.value = '';
+      submitButton.disabled = false;
+    }
+  }
+
+  async handleProductLogout() {
+    try {
+      await this.fetchProductApi('/api/v1/auth/logout', { method: 'POST' }, false);
+    } catch {
+      // Local UI state still clears when the server session already expired.
+    }
+    this.productAccount = null;
+    this.setProductAdminAuthState();
+    this.clearGeneratedLicenseKey();
+  }
+
+  setProductAdminAuthState() {
+    const isAdmin = this.productAccount?.role === 'admin';
+    if (this.productAdminLoginPanel) this.productAdminLoginPanel.hidden = isAdmin;
+    if (this.productAdminWorkspace) this.productAdminWorkspace.hidden = !isAdmin;
+    if (this.btnProductLogout) this.btnProductLogout.hidden = !this.productAccount;
+    if (this.productAdminSessionStatus) {
+      this.productAdminSessionStatus.textContent = isAdmin
+        ? this.productAccount.email
+        : (this.productAccount ? 'Tài khoản không có quyền admin' : 'Chưa đăng nhập');
+      this.productAdminSessionStatus.className = `pill ${isAdmin ? 'success' : 'info'}`;
+    }
+  }
+
+  async loadProductAdminData() {
+    try {
+      this.productAccount = await this.fetchProductApi('/api/v1/account/me');
+    } catch {
+      this.productAccount = null;
+    }
+    this.setProductAdminAuthState();
+    if (this.productAccount?.role !== 'admin') return;
+    await Promise.all([this.loadAdminLicenses(), this.loadAdminAccounts()]);
+  }
+
+  applyLicenseDurationPreset() {
+    const preset = document.getElementById('license-duration-preset');
+    const unit = document.getElementById('license-duration-unit');
+    const value = document.getElementById('license-duration-value');
+    if (!preset || !unit || !value) return;
+    const custom = preset.value === 'custom';
+    unit.disabled = !custom;
+    value.disabled = !custom;
+    if (!custom) {
+      const [durationUnit, durationValue] = preset.value.split(':');
+      unit.value = durationUnit;
+      value.value = durationValue;
+    }
+  }
+
+  async handleCreateLicense(event) {
+    event.preventDefault();
+    const durationUnit = document.getElementById('license-duration-unit');
+    const durationValue = document.getElementById('license-duration-value');
+    const monthlyLimit = document.getElementById('monthly-contact-limit');
+    const maxDevices = document.getElementById('max-devices');
+    const groupCrawl = document.getElementById('allow-group-crawl');
+    const commentCrawl = document.getElementById('allow-comment-crawl');
+    const submitButton = document.getElementById('btn-create-license');
+    submitButton.disabled = true;
+    try {
+      const created = await this.fetchProductApi('/api/v1/admin/license-keys', {
+        method: 'POST',
+        body: JSON.stringify({
+          duration: { unit: durationUnit.value, value: Number(durationValue.value) },
+          monthly_contact_limit: Number(monthlyLimit.value),
+          max_devices: Number(maxDevices.value),
+          allow_group_crawl: groupCrawl.checked,
+          allow_comment_crawl: commentCrawl.checked
+        })
+      });
+      this.showGeneratedLicenseKey(created.key);
+      await this.loadAdminLicenses();
+    } catch (error) {
+      this.showToast(`Không thể tạo license: ${error.message}`, 'error');
+    } finally {
+      submitButton.disabled = false;
+    }
+  }
+
+  showGeneratedLicenseKey(plaintext) {
+    const generatedKeyOutput = document.getElementById('generated-license-key');
+    if (!generatedKeyOutput) return;
+    generatedKeyOutput.textContent = plaintext;
+    this.openModal(this.modalGeneratedLicense);
+  }
+
+  clearGeneratedLicenseKey() {
+    const generatedKeyOutput = document.getElementById('generated-license-key');
+    if (generatedKeyOutput) generatedKeyOutput.textContent = '';
+  }
+
+  async copyGeneratedLicenseKey() {
+    const value = document.getElementById('generated-license-key')?.textContent || '';
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      this.showToast('Đã sao chép license key.', 'success');
+    } catch {
+      this.showToast('Không thể sao chép tự động. Hãy chọn và sao chép key.', 'error');
+    }
+  }
+
+  async loadAdminLicenses() {
+    if (!this.tableAdminLicenseKeys) return;
+    try {
+      const data = await this.fetchProductApi('/api/v1/admin/license-keys?limit=100');
+      this.renderAdminLicenseRows(data.items || []);
+    } catch (error) {
+      this.renderAdminEmptyRow(this.tableAdminLicenseKeys, 6, error.message);
+    }
+  }
+
+  renderAdminLicenseRows(items) {
+    this.tableAdminLicenseKeys.replaceChildren();
+    if (!items.length) {
+      this.renderAdminEmptyRow(this.tableAdminLicenseKeys, 6, 'Chưa có license key nào.');
+      return;
+    }
+    items.forEach(item => {
+      const row = document.createElement('tr');
+      this.appendAdminTextCell(row, item.masked_key);
+      this.appendAdminTextCell(row, `${item.duration.value} ${item.duration.unit === 'month' ? 'tháng' : 'ngày'}`);
+      this.appendAdminTextCell(row, Number(item.monthly_contact_limit).toLocaleString('vi-VN'));
+      this.appendAdminTextCell(row, item.max_devices);
+      this.appendAdminStatusCell(row, item.status);
+      const actions = document.createElement('td');
+      if (item.status !== 'revoked') {
+        const revokeButton = this.createAdminButton('Thu hồi', 'btn-danger');
+        revokeButton.addEventListener('click', () => this.revokeAdminLicense(item));
+        actions.appendChild(revokeButton);
+      }
+      row.appendChild(actions);
+      this.tableAdminLicenseKeys.appendChild(row);
+    });
+  }
+
+  async revokeAdminLicense(item) {
+    if (!window.confirm(`Thu hồi license ${item.masked_key}? Tài khoản đang dùng key này sẽ mất quyền gói trả phí.`)) return;
+    try {
+      await this.fetchProductApi(`/api/v1/admin/license-keys/${item.id}`, { method: 'DELETE' });
+      this.showToast('Đã thu hồi license.', 'success');
+      await this.loadAdminLicenses();
+    } catch (error) {
+      this.showToast(`Không thể thu hồi license: ${error.message}`, 'error');
+    }
+  }
+
+  async loadAdminAccounts() {
+    if (!this.tableAdminAccounts) return;
+    try {
+      const data = await this.fetchProductApi('/api/v1/admin/accounts?limit=100');
+      this.renderAdminAccountRows(data.items || []);
+    } catch (error) {
+      this.renderAdminEmptyRow(this.tableAdminAccounts, 6, error.message);
+    }
+  }
+
+  renderAdminAccountRows(items) {
+    this.tableAdminAccounts.replaceChildren();
+    if (!items.length) {
+      this.renderAdminEmptyRow(this.tableAdminAccounts, 6, 'Chưa có tài khoản nào.');
+      return;
+    }
+    items.forEach(account => {
+      const row = document.createElement('tr');
+      this.appendAdminTextCell(row, account.email);
+      this.appendAdminTextCell(row, account.role);
+      this.appendAdminStatusCell(row, account.status);
+      this.appendAdminTextCell(row, account.email_verified_at ? 'Đã xác minh' : 'Chưa xác minh');
+      this.appendAdminTextCell(row, this.formatAdminDate(account.created_at));
+      const actions = document.createElement('td');
+      actions.className = 'admin-row-actions';
+      const subscriptionsButton = this.createAdminButton('License', 'btn-secondary');
+      subscriptionsButton.addEventListener('click', () => this.openAdminSubscriptions(account));
+      actions.appendChild(subscriptionsButton);
+      if (account.role === 'user' && account.status !== 'deleted') {
+        const sessionsButton = this.createAdminButton('Đăng xuất hết', 'btn-secondary');
+        sessionsButton.addEventListener('click', () => this.revokeAdminSessions(account));
+        actions.appendChild(sessionsButton);
+      }
+      if (account.role === 'user' && !['suspended', 'deleted'].includes(account.status)) {
+        const suspendButton = this.createAdminButton('Tạm khóa', 'btn-danger');
+        suspendButton.addEventListener('click', () => this.suspendAdminAccount(account));
+        actions.appendChild(suspendButton);
+      }
+      row.appendChild(actions);
+      this.tableAdminAccounts.appendChild(row);
+    });
+  }
+
+  async suspendAdminAccount(account) {
+    if (!window.confirm(`Tạm khóa tài khoản ${account.email} và đăng xuất toàn bộ phiên?`)) return;
+    try {
+      await this.fetchProductApi(`/api/v1/admin/accounts/${account.id}/suspend`, { method: 'POST' });
+      this.showToast('Đã tạm khóa tài khoản.', 'success');
+      await this.loadAdminAccounts();
+    } catch (error) {
+      this.showToast(`Không thể tạm khóa: ${error.message}`, 'error');
+    }
+  }
+
+  async revokeAdminSessions(account) {
+    if (!window.confirm(`Đăng xuất toàn bộ thiết bị của ${account.email}?`)) return;
+    try {
+      await this.fetchProductApi(`/api/v1/admin/accounts/${account.id}/sessions`, { method: 'DELETE' });
+      this.showToast('Đã thu hồi toàn bộ phiên đăng nhập.', 'success');
+    } catch (error) {
+      this.showToast(`Không thể thu hồi phiên: ${error.message}`, 'error');
+    }
+  }
+
+  async openAdminSubscriptions(account) {
+    const title = document.getElementById('admin-subscriptions-title');
+    if (title) title.textContent = `Lịch sử license · ${account.email}`;
+    this.renderAdminEmptyRow(this.tableAdminSubscriptions, 5, 'Đang tải...');
+    this.openModal(this.modalAdminSubscriptions);
+    try {
+      const data = await this.fetchProductApi(`/api/v1/admin/accounts/${account.id}/subscriptions`);
+      this.renderAdminSubscriptionRows(account, data.items || []);
+    } catch (error) {
+      this.renderAdminEmptyRow(this.tableAdminSubscriptions, 5, error.message);
+    }
+  }
+
+  renderAdminSubscriptionRows(account, items) {
+    this.tableAdminSubscriptions.replaceChildren();
+    if (!items.length) {
+      this.renderAdminEmptyRow(this.tableAdminSubscriptions, 5, 'Tài khoản chưa gắn license.');
+      return;
+    }
+    items.forEach(item => {
+      const row = document.createElement('tr');
+      this.appendAdminTextCell(row, `${item.duration.value} ${item.duration.unit === 'month' ? 'tháng' : 'ngày'}`);
+      this.appendAdminTextCell(row, this.formatAdminDate(item.starts_at));
+      this.appendAdminTextCell(row, this.formatAdminDate(item.ends_at));
+      this.appendAdminStatusCell(row, item.status);
+      const actions = document.createElement('td');
+      if (item.status === 'valid' && new Date(item.starts_at) > new Date()) {
+        const startButton = this.createAdminButton('Bắt đầu ngay', 'btn-danger');
+        startButton.addEventListener('click', () => this.startAdminSubscriptionNow(account, item));
+        actions.appendChild(startButton);
+      }
+      row.appendChild(actions);
+      this.tableAdminSubscriptions.appendChild(row);
+    });
+  }
+
+  async startAdminSubscriptionNow(account, subscription) {
+    const warning = 'Thời gian còn lại của gói hiện tại sẽ bị mất. Bắt đầu gói đã chọn ngay bây giờ?';
+    if (!window.confirm(warning)) return;
+    try {
+      await this.fetchProductApi(
+        `/api/v1/admin/accounts/${account.id}/subscriptions/${subscription.subscription_id}/start-now`,
+        { method: 'POST' }
+      );
+      this.showToast('Đã bắt đầu gói license mới.', 'success');
+      await this.openAdminSubscriptions(account);
+    } catch (error) {
+      this.showToast(`Không thể bắt đầu gói: ${error.message}`, 'error');
+    }
+  }
+
+  renderAdminEmptyRow(tableBody, colspan, message) {
+    if (!tableBody) return;
+    tableBody.replaceChildren();
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = colspan;
+    cell.className = 'admin-empty-cell';
+    cell.textContent = message;
+    row.appendChild(cell);
+    tableBody.appendChild(row);
+  }
+
+  appendAdminTextCell(row, value) {
+    const cell = document.createElement('td');
+    cell.textContent = String(value ?? '—');
+    row.appendChild(cell);
+    return cell;
+  }
+
+  appendAdminStatusCell(row, status) {
+    const cell = document.createElement('td');
+    const pill = document.createElement('span');
+    const positive = ['active', 'available', 'valid'].includes(status);
+    const warning = ['pending', 'redeemed'].includes(status);
+    pill.className = `pill ${positive ? 'success' : (warning ? 'warning' : 'danger')}`;
+    pill.textContent = status;
+    cell.appendChild(pill);
+    row.appendChild(cell);
+  }
+
+  createAdminButton(label, variant) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `btn ${variant} btn-sm`;
+    button.textContent = label;
+    return button;
+  }
+
+  formatAdminDate(value) {
+    if (!value) return '—';
+    return new Date(value).toLocaleString('vi-VN');
+  }
+
   openModal(modal) {
     // Close any other open modals first to prevent stacking
     document.querySelectorAll('.modal-backdrop.open').forEach(m => {
@@ -1853,6 +2284,7 @@ class DashboardApp {
     el.style.display = 'none';
     el.style.opacity = '0';
     el.style.pointerEvents = 'none';
+    if (el === this.modalGeneratedLicense) this.clearGeneratedLicenseKey();
   }
 
   saveSettings() {

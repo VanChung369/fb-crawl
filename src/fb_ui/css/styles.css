@@ -659,6 +659,146 @@ body {
   to { transform: translateX(0); opacity: 1; }
 }
 
+/* Lead Finder product administration */
+.admin-section-header {
+  align-items: flex-start;
+}
+
+.admin-section-copy,
+.admin-panel-header p,
+.product-login-copy p {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.admin-session-actions,
+.admin-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.product-login-panel {
+  max-width: 760px;
+  margin: 6vh auto 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(300px, 1.2fr);
+  align-items: center;
+  gap: 32px;
+  padding: 30px;
+  border-color: var(--border-glow);
+  box-shadow: var(--shadow-glow);
+}
+
+.product-login-panel[hidden],
+#product-admin-workspace[hidden],
+#btn-product-logout[hidden] {
+  display: none !important;
+}
+
+.product-login-copy h4,
+.admin-panel-header h4 {
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.product-login-form .form-group:last-of-type {
+  margin-bottom: 14px;
+}
+
+.product-login-form .btn {
+  width: 100%;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: minmax(310px, 0.8fr) minmax(560px, 1.7fr);
+  gap: 20px;
+}
+
+.admin-license-builder,
+.admin-license-list,
+.admin-accounts-panel {
+  min-width: 0;
+}
+
+.admin-accounts-panel {
+  margin-top: 20px;
+}
+
+.admin-panel-header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.admin-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-permission-list {
+  display: grid;
+  gap: 10px;
+  margin: 2px 0 20px;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
+.admin-permission-list label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.admin-permission-list input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+}
+
+.admin-license-form > .btn {
+  width: 100%;
+}
+
+.admin-empty-cell {
+  padding: 28px !important;
+  text-align: center;
+  color: var(--text-muted) !important;
+}
+
+.generated-license-modal {
+  max-width: 620px;
+}
+
+.generated-key-warning {
+  margin-bottom: 14px;
+  color: var(--accent-warning);
+  font-size: 0.86rem;
+}
+
+.generated-key-output {
+  padding: 16px;
+  border: 1px solid var(--border-glow);
+  border-radius: var(--radius-md);
+  background: var(--bg-glass-input);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.92rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.admin-subscriptions-modal {
+  max-width: 920px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
 @media (max-width: 768px) {
   .app-container {
     display: block;
@@ -721,6 +861,9 @@ body {
 
   .metrics-grid,
   .dashboard-columns,
+  .admin-grid,
+  .admin-form-row,
+  .product-login-panel,
   #row-users-steps,
   #row-safety-params {
     grid-template-columns: 1fr !important;

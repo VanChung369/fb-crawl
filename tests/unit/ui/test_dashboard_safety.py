@@ -32,7 +32,8 @@ def test_dashboard_login_flow_does_not_collect_facebook_password() -> None:
     assert "extract-email" not in html
     assert "extract-2fa" not in html
     assert "/api/v1/sessions/extract" not in script
-    assert "password:" not in script
+    assert "password: passwordInput.value" in script
+    assert "device_name: 'Lead Finder Admin Dashboard'" in script
     assert "two_factor_code" not in script
     assert "launch-login" in script
 
@@ -146,3 +147,12 @@ def test_dashboard_settings_controls_have_distinct_save_button_ids() -> None:
     assert 'document.getElementById(\'btn-save-fbnumber-settings\')' in APP_JS_PATH.read_text(
         encoding="utf-8"
     )
+
+
+def test_dashboard_never_persists_plaintext_license_or_product_password() -> None:
+    script = APP_JS_PATH.read_text(encoding="utf-8")
+
+    assert "localStorage.setItem('license" not in script
+    assert 'localStorage.setItem("license' not in script
+    assert "sessionStorage.setItem('license" not in script
+    assert "localStorage.setItem('lead_finder_password" not in script

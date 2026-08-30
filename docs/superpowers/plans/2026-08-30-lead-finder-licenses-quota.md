@@ -343,7 +343,7 @@ git commit -m "feat: expose license and entitlement APIs"
 **Interfaces:**
 - Consumes product admin APIs from Task 5 using the secure admin web session; existing crawler dashboard actions continue using the internal API key boundary.
 
-- [ ] **Step 1: Add DOM/safety tests**
+- [x] **Step 1: Add DOM/safety tests**
 
 ```python
 def test_admin_license_form_has_explicit_duration_and_entitlements() -> None:
@@ -356,13 +356,13 @@ def test_dashboard_never_persists_plaintext_license() -> None:
     assert "localStorage.setItem('license" not in js
 ```
 
-- [ ] **Step 2: Run UI tests**
+- [x] **Step 2: Run UI tests**
 
 Run: `python -m pytest tests/unit/ui -q`
 
 Expected: FAIL because product admin workspace is absent.
 
-- [ ] **Step 3: Implement admin workspace**
+- [x] **Step 3: Implement admin workspace**
 
 Add login/session state, account/license/subscription tables, create-key modal with preset/custom duration, one-time key copy panel that clears on close/navigation, revoke confirmations, immediate-start forfeiture warning, and safe text-only rendering. Do not place credentials in URL/query/local storage or use `innerHTML` for API data.
 
@@ -375,13 +375,13 @@ function renderGeneratedKey(key) {
 }
 ```
 
-- [ ] **Step 4: Run backend verification**
+- [x] **Step 4: Run backend verification**
 
 Run: `python -m pytest -q`
 
 Expected: PASS or configured integration skips.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_ui README.md tests/unit/ui

@@ -61,6 +61,12 @@
               <span>Cấu hình API SĐT</span>
             </a>
           </li>
+          <li class="nav-item" data-view="product-admin">
+            <a href="#product-admin" id="nav-product-admin">
+              <span class="nav-icon">◆</span>
+              <span>Lead Finder Admin</span>
+            </a>
+          </li>
         </ul>
 
         <div class="sidebar-footer">
@@ -1087,7 +1093,163 @@
             </div>
           </div>
         </section>
+
+        <!-- VIEW 7: LEAD FINDER PRODUCT ADMIN -->
+        <section class="content-body view-section" id="view-product-admin">
+          <div class="section-header admin-section-header">
+            <div>
+              <h3>Quản trị tài khoản &amp; license Lead Finder</h3>
+              <p class="admin-section-copy">
+                Tạo license, quản lý quyền sử dụng và kiểm tra lịch kích hoạt của khách hàng.
+              </p>
+            </div>
+            <div class="admin-session-actions">
+              <span class="pill info" id="product-admin-session-status">Chưa đăng nhập</span>
+              <button class="btn btn-secondary btn-sm" id="btn-product-logout" type="button" hidden>
+                Đăng xuất
+              </button>
+            </div>
+          </div>
+
+          <div class="panel product-login-panel" id="product-admin-login-panel">
+            <div class="product-login-copy">
+              <h4>Đăng nhập quản trị</h4>
+              <p>Dùng tài khoản admin Lead Finder. Phiên đăng nhập được bảo vệ bằng cookie và CSRF.</p>
+            </div>
+            <form id="form-product-login" class="product-login-form">
+              <div class="form-group">
+                <label for="product-login-email">Email</label>
+                <input class="form-control" id="product-login-email" type="email" autocomplete="username" required />
+              </div>
+              <div class="form-group">
+                <label for="product-login-password">Mật khẩu</label>
+                <input class="form-control" id="product-login-password" type="password" autocomplete="current-password" required />
+              </div>
+              <button class="btn btn-primary" id="btn-product-login" type="submit">Đăng nhập</button>
+            </form>
+          </div>
+
+          <div id="product-admin-workspace" hidden>
+            <div class="admin-grid">
+              <div class="panel admin-license-builder">
+                <div class="panel-header admin-panel-header">
+                  <div>
+                    <h4>Tạo license key</h4>
+                    <p>Key chỉ hiển thị một lần ngay sau khi tạo.</p>
+                  </div>
+                </div>
+                <form id="form-create-license" class="admin-license-form">
+                  <div class="form-group">
+                    <label for="license-duration-preset">Thời hạn nhanh</label>
+                    <select class="form-control" id="license-duration-preset">
+                      <option value="day:1">1 ngày</option>
+                      <option value="day:7">7 ngày</option>
+                      <option value="month:1" selected>1 tháng</option>
+                      <option value="month:3">3 tháng</option>
+                      <option value="month:6">6 tháng</option>
+                      <option value="month:12">12 tháng</option>
+                      <option value="custom">Tùy chỉnh</option>
+                    </select>
+                  </div>
+                  <div class="admin-form-row">
+                    <div class="form-group">
+                      <label for="license-duration-unit">Đơn vị</label>
+                      <select class="form-control" id="license-duration-unit">
+                        <option value="day">Ngày</option>
+                        <option value="month" selected>Tháng</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="license-duration-value">Số lượng</label>
+                      <input class="form-control" id="license-duration-value" type="number" min="1" max="3650" value="1" required />
+                    </div>
+                  </div>
+                  <div class="admin-form-row">
+                    <div class="form-group">
+                      <label for="monthly-contact-limit">Số liên hệ / tháng</label>
+                      <input class="form-control" id="monthly-contact-limit" type="number" min="0" max="10000000" value="1000" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="max-devices">Số thiết bị tối đa</label>
+                      <input class="form-control" id="max-devices" type="number" min="1" max="100" value="1" required />
+                    </div>
+                  </div>
+                  <div class="admin-permission-list">
+                    <label><input id="allow-group-crawl" type="checkbox" /> Tự động crawl group</label>
+                    <label><input id="allow-comment-crawl" type="checkbox" /> Tự động crawl comment</label>
+                  </div>
+                  <button class="btn btn-primary" id="btn-create-license" type="submit">Tạo license key</button>
+                </form>
+              </div>
+
+              <div class="panel admin-license-list">
+                <div class="panel-header admin-panel-header">
+                  <div>
+                    <h4>License gần đây</h4>
+                    <p>Danh sách chỉ hiển thị key đã che.</p>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" id="btn-refresh-admin-licenses" type="button">Làm mới</button>
+                </div>
+                <div class="table-container">
+                  <table class="custom-table">
+                    <thead><tr><th>Key</th><th>Thời hạn</th><th>Quota</th><th>Thiết bị</th><th>Trạng thái</th><th></th></tr></thead>
+                    <tbody id="table-admin-license-keys-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel admin-accounts-panel">
+              <div class="panel-header admin-panel-header">
+                <div>
+                  <h4>Tài khoản khách hàng</h4>
+                  <p>Xem trạng thái, gói đã gắn và khóa quyền truy cập khi cần.</p>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-admin-accounts" type="button">Làm mới</button>
+              </div>
+              <div class="table-container">
+                <table class="custom-table">
+                  <thead><tr><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Xác minh</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead>
+                  <tbody id="table-admin-accounts-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
+    </div>
+
+    <!-- MODAL: GENERATED LICENSE KEY -->
+    <div class="modal-backdrop" id="modal-generated-license">
+      <div class="modal generated-license-modal">
+        <div class="modal-header">
+          <h3>License key vừa tạo</h3>
+          <button class="modal-close" data-close>&times;</button>
+        </div>
+        <p class="generated-key-warning">Sao chép ngay. Key đầy đủ sẽ không được hiển thị lại.</p>
+        <div class="generated-key-output" id="generated-license-key" aria-live="polite"></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="btn-copy-generated-license" type="button">Sao chép</button>
+          <button class="btn btn-primary" data-close type="button">Đã lưu key</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: ACCOUNT SUBSCRIPTIONS -->
+    <div class="modal-backdrop" id="modal-admin-subscriptions">
+      <div class="modal admin-subscriptions-modal">
+        <div class="modal-header">
+          <h3 id="admin-subscriptions-title">Lịch sử license</h3>
+          <button class="modal-close" data-close>&times;</button>
+        </div>
+        <div class="table-container">
+          <table class="custom-table">
+            <thead><tr><th>Thời hạn</th><th>Bắt đầu</th><th>Kết thúc</th><th>Trạng thái</th><th></th></tr></thead>
+            <tbody id="table-admin-subscriptions-body"></tbody>
+          </table>
+        </div>
+        <div class="modal-actions"><button class="btn btn-secondary" data-close type="button">Đóng</button></div>
+      </div>
     </div>
 
     <!-- MODAL: CREATE JOB WITH ADVANCED CONFIG OPTIONS -->

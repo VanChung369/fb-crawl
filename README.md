@@ -41,11 +41,14 @@ python -m fb_crawl worker run --concurrency 3
 
 ### Lead Finder account setup
 
-Production product routes require independent JWT and token-HMAC secrets of at
-least 32 characters, an HTTPS `LEAD_FINDER_PUBLIC_BASE_URL`, SMTP settings, and
-`LEAD_FINDER_TIMEZONE` (default `Asia/Ho_Chi_Minh`). See `.env.example` for the
-complete variable names. Never reuse `FB_CRAWL_API_KEY` as either product
-secret and never place passwords or license keys in command arguments.
+Production product routes require independent JWT, token-HMAC, and license-HMAC
+secrets, an HTTPS `LEAD_FINDER_PUBLIC_BASE_URL`, SMTP settings, and
+`LEAD_FINDER_TIMEZONE` (default `Asia/Ho_Chi_Minh`). Configure the versioned
+license keyring as `LEAD_FINDER_LICENSE_HMAC_KEYS=1:<base64-32-byte-secret>` and
+set `LEAD_FINDER_LICENSE_HMAC_ACTIVE_VERSION=1`. Keep older versions in the
+comma-separated keyring while their licenses may still be redeemed. See
+`.env.example` for all variable names. Never reuse `FB_CRAWL_API_KEY` as a
+product secret and never place passwords or license keys in command arguments.
 
 After PostgreSQL is available, create the first administrator once. The
 password is prompted twice without echo and is never accepted as a CLI option:
@@ -68,6 +71,7 @@ fb-crawl admin purge-deleted-accounts
 - 👥 **Leads Explorer**: Search and filter by Name, UID, Phone; inspect phone provenance and confidence evidence; download CSV/JSON exports.
 - 🛡️ **Session Pool Manager**: Automated browser login and cookie extraction via Account/Password/2FA/Proxy, or manual JSON cookie import.
 - 🌐 **Proxy Pool Manager**: Automated proxy rotation, health monitoring (Active/Cooldown/Dead), and bulk proxy imports.
+- **Lead Finder Admin**: Secure product-account login, one-time license creation, masked key inventory, account suspension, session revocation, and subscription scheduling.
 
 
 ## Public commands
