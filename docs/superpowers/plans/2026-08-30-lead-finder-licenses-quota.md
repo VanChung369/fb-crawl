@@ -94,7 +94,7 @@ git commit -m "feat: add license and quota schema"
 - Produces `LicenseKeyService.generate() -> GeneratedLicense(plaintext, digest, masked, key_version)` and `.digest(plaintext) -> str`.
 - Produces `add_duration(start: datetime, duration: LicenseDuration) -> datetime` and `quota_period(now: datetime, timezone: ZoneInfo) -> date`.
 
-- [ ] **Step 1: Write duration/key tests**
+- [x] **Step 1: Write duration/key tests**
 
 ```python
 def test_calendar_month_clamps_end_of_month() -> None:
@@ -112,13 +112,13 @@ def test_license_keyring_requires_active_version() -> None:
         load_license_keyring({"LEAD_FINDER_LICENSE_HMAC_KEYS": "1:c2VjcmV0"})
 ```
 
-- [ ] **Step 2: Verify red state**
+- [x] **Step 2: Verify red state**
 
 Run: `python -m pytest tests/unit/licenses tests/unit/entitlements -q`
 
 Expected: FAIL on missing packages.
 
-- [ ] **Step 3: Implement immutable validated models**
+- [x] **Step 3: Implement immutable validated models**
 
 Generate at least 192 bits of randomness, format only for human transcription, normalize hyphens/case before HMAC, validate duration > 0/device limit >= 1/quota >= 0, and implement calendar-month addition with `calendar.monthrange` without introducing a date library.
 
@@ -132,13 +132,13 @@ def add_duration(start: datetime, duration: LicenseDuration) -> datetime:
     return start.replace(year=start.year + year, month=month0 + 1, day=day)
 ```
 
-- [ ] **Step 4: Verify green state**
+- [x] **Step 4: Verify green state**
 
 Run: `python -m pytest tests/unit/licenses tests/unit/entitlements -q`
 
 Expected: PASS, including leap year and `Asia/Ho_Chi_Minh` month-boundary cases.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/fb_crawl/licenses src/fb_crawl/entitlements tests/unit/licenses tests/unit/entitlements
