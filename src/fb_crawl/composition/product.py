@@ -14,10 +14,15 @@ from fb_crawl.auth.tokens import TokenService
 from fb_crawl.core.exceptions import ConfigurationError
 from fb_crawl.entitlements.quota import ContactQuotaService, PostgresContactQuotaRepository
 from fb_crawl.entitlements.service import EntitlementService
+from fb_crawl.contacts.postgres import PostgresContactRepository
+from fb_crawl.contacts.service import ContactLookupService
 from fb_crawl.licenses.config import load_license_keyring
 from fb_crawl.licenses.keys import LicenseKeyService
 from fb_crawl.licenses.postgres import PostgresLicenseRepository
 from fb_crawl.licenses.service import LicenseService
+from fb_data_pipeline.config import PipelineSettings, load_pipeline_settings
+from fb_data_pipeline.providers.fbnumber import FBNumberProvider
+from fb_data_pipeline.services.pipeline import EnrichmentPipeline
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +34,7 @@ class ProductServices:
     license_service: LicenseService | None = None
     entitlement_service: EntitlementService | None = None
     quota_service: ContactQuotaService | None = None
+    contact_lookup_service: ContactLookupService | None = None
 
 
 def compose_product_services(
@@ -37,6 +43,7 @@ def compose_product_services(
     env: Mapping[str, str],
     *,
     statement_timeout_seconds: float = 5.0,
+    pipeline_settings: PipelineSettings | None = None,
 ) -> ProductServices:
     """Compose product-only services without importing browser code."""
 
@@ -94,6 +101,19 @@ def compose_product_services(
         ),
         auth_settings.product_timezone,
     )
+    resolved_pipeline_settings = pipeline_settings or load_pipeline_settings(env)
+    contact_lookup_service = None
+    if resolved_pipeline_settings.fb_number_api_token:
+        provider = FBNumberProvider.from_settings(resolved_pipeline_settings)
+        contact_lookup_service = ContactLookupService(
+            entitlement_service,
+            quota_service,
+            PostgresContactRepository(
+                database_url,
+                statement_timeout_seconds=statement_timeout_seconds,
+            ),
+            EnrichmentPipeline(provider),
+        )
     return ProductServices(
         auth_service=auth_service,
         account_repository=repository,
@@ -102,4 +122,5 @@ def compose_product_services(
         license_service=license_service,
         entitlement_service=entitlement_service,
         quota_service=quota_service,
+        contact_lookup_service=contact_lookup_service,
     )

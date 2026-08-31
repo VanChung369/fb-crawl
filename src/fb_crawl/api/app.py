@@ -33,6 +33,7 @@ from fb_crawl.core.session_pool import SessionPool
 from fb_crawl.core.proxy_pool import ProxyPool
 from fb_crawl.core.exceptions import FbCrawlError, ValidationError
 from fb_crawl.api.safe_logging import log_unexpected_api_error
+from fb_crawl.api.correlation import correlate_request
 from fb_crawl.core.jobs import IdempotencyConflict, JobConflict, JobNotFound
 from pathlib import Path
 from fb_crawl.composition.product import ProductServices
@@ -154,8 +155,23 @@ def create_app(
                 clock=clock,
             )
         )
+        if (
+            product_services.contact_lookup_service is not None
+            and product_services.rate_limiter is not None
+        ):
+            from fb_crawl.api.routes.contacts import create_contact_router
+
+            app.include_router(
+                create_contact_router(
+                    product_services.contact_lookup_service,
+                    product_auth,
+                    product_services.rate_limiter,
+                    clock=clock,
+                )
+            )
 
     _install_api_authentication(app, auth)
+    app.middleware("http")(correlate_request)
 
     if settings.docs_enabled:
         _install_protected_docs(app, auth)
@@ -173,7 +189,9 @@ def create_app(
                 "X-API-Key",
                 "Idempotency-Key",
                 "Content-Type",
+                "X-Request-ID",
             ],
+            expose_headers=["X-Request-ID"],
         )
 
     ui_dir = Path(__file__).parents[2] / "fb_ui"
@@ -266,6 +284,7 @@ def _requires_internal_api_key(path: str) -> bool:
         "/api/v1/devices",
         "/api/v1/licenses",
         "/api/v1/admin",
+        "/api/v1/contacts",
     )
     if any(path == prefix or path.startswith(f"{prefix}/") for prefix in product_prefixes):
         return False

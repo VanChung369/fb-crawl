@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Callable
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
+
+from fb_crawl.api.dependencies import (
+    CurrentAccount,
+    ProductAccountAuth,
+    ProductAuthenticationError,
+)
+from fb_crawl.api.product_schemas import (
+    ContactDataResponse,
+    ContactLookupMetaResponse,
+    ContactLookupRequest,
+    ContactLookupResponse,
+    ContactUserResponse,
+)
+from fb_crawl.contacts.models import LookupOutcome
+from fb_crawl.contacts.service import ContactLookupResult, ContactLookupService
+from fb_crawl.auth.rate_limit import RateLimitService
+from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
+
+
+def create_contact_router(
+    service: ContactLookupService,
+    current_auth: ProductAccountAuth,
+    rate_limiter: RateLimitService,
+    *,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> APIRouter:
+    router = APIRouter(tags=["product-contacts"])
+
+    async def require_bearer_account(
+        current: CurrentAccount = Depends(current_auth),
+    ) -> CurrentAccount:
+        if current.cookie_authenticated:
+            raise ProductAuthenticationError()
+        return current
+
+    @router.post("/api/v1/contacts/lookup")
+    def lookup_contact(
+        payload: ContactLookupRequest,
+        request: Request,
+        current: CurrentAccount = Depends(require_bearer_account),
+    ) -> JSONResponse:
+        if not current.device_allowed:
+            return _safe_error(403, "contact_device_not_allowed")
+        try:
+            now = clock()
+            rate_limiter.check(
+                "contact_lookup",
+                str(current.account.id),
+                str(current.device.id),
+                _client_ip(request),
+                now,
+            )
+            result = service.lookup(
+                current.account,
+                current.device,
+                payload.to_domain(),
+                now,
+                force_refresh=payload.force_refresh,
+            )
+        except DatabaseIdentityConflict:
+            return _safe_error(409, "provider_identity_conflict")
+        except PermissionError:
+            return _safe_error(403, "contact_access_denied")
+        return _lookup_response(result)
+
+    @router.get("/api/v1/contacts/lookups/{event_id}")
+    def poll_contact_lookup(
+        event_id: int,
+        request: Request,
+        current: CurrentAccount = Depends(require_bearer_account),
+    ) -> JSONResponse:
+        if event_id <= 0:
+            return _safe_error(404, "contact_lookup_not_found")
+        if not current.device_allowed:
+            return _safe_error(403, "contact_device_not_allowed")
+        rate_limiter.check(
+            "contact_poll",
+            str(current.account.id),
+            str(current.device.id),
+            _client_ip(request),
+            clock(),
+        )
+        result = service.get_event(current.account.id, event_id)
+        if result is None:
+            return _safe_error(404, "contact_lookup_not_found")
+        return _lookup_response(result)
+
+    return router
+
+
+def _lookup_response(result: ContactLookupResult) -> JSONResponse:
+    response = ContactLookupResponse(
+        user=ContactUserResponse(
+            facebook_uid=result.user.uid,
+            username=result.user.username,
+            name=result.user.name,
+            profile_url=result.user.profile_url,
+        ),
+        contact=ContactDataResponse(phone=result.phone),
+        meta=ContactLookupMetaResponse(
+            event_id=result.event_id,
+            state=result.state,
+            source=result.source,
+            observed_at=result.observed_at,
+            provider_called=result.provider_called,
+            quota_charged=result.quota_charged,
+            monthly_used=result.monthly_used,
+            monthly_limit=result.monthly_limit,
+            poll_url=(
+                f"/api/v1/contacts/lookups/{result.event_id}"
+                if result.state is LookupOutcome.PROCESSING
+                else None
+            ),
+            safe_error_code=result.safe_error_code,
+        ),
+    )
+    return JSONResponse(
+        status_code=_status_code(result),
+        content=response.model_dump(mode="json"),
+    )
+
+
+def _status_code(result: ContactLookupResult) -> int:
+    if result.state is LookupOutcome.PROCESSING:
+        return 202
+    if result.state is LookupOutcome.QUOTA_EXCEEDED:
+        return 429
+    if result.state is LookupOutcome.FAILED:
+        if result.safe_error_code == "provider_identity_conflict":
+            return 409
+        if result.safe_error_code == "provider_rate_limited":
+            return 429
+        if result.safe_error_code == "provider_authentication_failed":
+            return 503
+        return 502
+    return 200
+
+
+def _safe_error(status_code: int, code: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": code, "message": "Contact lookup failed."},
+    )
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"

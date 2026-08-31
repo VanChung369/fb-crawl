@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Literal
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from fb_crawl.contacts.service import ContactLookupRequest as DomainContactLookupRequest
 
 
 class RegisterRequest(BaseModel):
@@ -255,3 +259,115 @@ class AdminAuditEventListResponse(BaseModel):
 
     items: list[AdminAuditEventResponse]
     next_cursor: int | None = None
+
+
+class ContactLookupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    facebook_uid: str = Field(default="", max_length=32)
+    username: str = Field(default="", max_length=100)
+    name: str = Field(default="", max_length=256)
+    profile_url: str = Field(default="", max_length=2048)
+    force_refresh: bool = False
+
+    @field_validator("facebook_uid", "username", "name", "profile_url")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def validate_facebook_identity(self) -> ContactLookupRequest:
+        if self.facebook_uid and re.fullmatch(
+            r"[0-9]+", self.facebook_uid
+        ) is None:
+            raise ValueError("facebook_uid must contain digits only")
+        if self.username and re.fullmatch(
+            r"[A-Za-z0-9.]+", self.username
+        ) is None:
+            raise ValueError("username has invalid characters")
+
+        url_uid = ""
+        url_username = ""
+        if self.profile_url:
+            parsed = urlsplit(self.profile_url)
+            host = (parsed.hostname or "").casefold()
+            if parsed.scheme != "https" or host not in {
+                "facebook.com",
+                "www.facebook.com",
+                "m.facebook.com",
+            }:
+                raise ValueError("profile_url must be an HTTPS Facebook URL")
+            path = parsed.path.strip("/")
+            if path.casefold() == "profile.php":
+                values = parse_qs(parsed.query).get("id", ())
+                url_uid = values[0].strip() if values else ""
+                if re.fullmatch(r"[0-9]+", url_uid) is None:
+                    raise ValueError("Facebook profile id is invalid")
+            elif path and "/" not in path:
+                url_username = path
+                if re.fullmatch(
+                    r"[A-Za-z0-9.]+", url_username
+                ) is None:
+                    raise ValueError("Facebook profile username is invalid")
+            else:
+                raise ValueError("Facebook profile URL is invalid")
+
+        if self.facebook_uid and url_uid and self.facebook_uid != url_uid:
+            raise ValueError("Facebook UID aliases conflict")
+        if (
+            self.username
+            and url_username
+            and self.username.casefold() != url_username.casefold()
+        ):
+            raise ValueError("Facebook username aliases conflict")
+        if not (self.facebook_uid or self.username or url_uid or url_username):
+            raise ValueError("a Facebook UID or username is required")
+        return self
+
+    def to_domain(self) -> DomainContactLookupRequest:
+        return DomainContactLookupRequest(
+            facebook_uid=self.facebook_uid,
+            username=self.username,
+            name=self.name,
+            profile_url=self.profile_url,
+        )
+
+
+class ContactUserResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    facebook_uid: str
+    username: str
+    name: str
+    profile_url: str
+
+
+class ContactDataResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str
+
+
+class ContactLookupMetaResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: int
+    state: Literal[
+        "found", "not_found", "processing", "quota_exceeded", "failed"
+    ]
+    source: Literal["cache", "provider", "negative_cache", "none"]
+    observed_at: datetime | None
+    provider_called: bool
+    quota_charged: bool
+    monthly_used: int
+    monthly_limit: int
+    poll_url: str | None
+    safe_error_code: str
+
+
+class ContactLookupResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user: ContactUserResponse
+    contact: ContactDataResponse
+    meta: ContactLookupMetaResponse

@@ -113,6 +113,7 @@ def _compose_api(
         auth_settings,
         os.environ,
         statement_timeout_seconds=statement_timeout,
+        pipeline_settings=pipeline_settings,
     )
     return create_app(
         api_settings,

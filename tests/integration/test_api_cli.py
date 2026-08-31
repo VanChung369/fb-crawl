@@ -423,6 +423,7 @@ def test_real_api_composition_uses_postgres_repositories_without_browser_imports
         built.state.product_services.account_repository,
         PostgresAccountRepository,
     )
+    assert built.state.product_services.contact_lookup_service is None
     code = (
         "import sys\n"
         "from fb_crawl.cli.api import _compose_api\n"
@@ -438,3 +439,42 @@ def test_real_api_composition_uses_postgres_repositories_without_browser_imports
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, f"Selenium imported in fresh API process: {result.stderr}"
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI/Pydantic extra unavailable")
+def test_real_api_composes_contact_router_when_provider_is_configured(
+    monkeypatch,
+) -> None:
+    from fb_crawl.cli.api import _compose_api
+    from fb_data_pipeline.repositories.migrations import MigrationRunner
+
+    monkeypatch.setattr(MigrationRunner, "apply", lambda _runner: ())
+    monkeypatch.setenv(
+        "LEAD_FINDER_LICENSE_HMAC_KEYS",
+        f"1:{base64.b64encode(b'l' * 32).decode('ascii')}",
+    )
+    monkeypatch.setenv("LEAD_FINDER_LICENSE_HMAC_ACTIVE_VERSION", "1")
+
+    built = _compose_api(
+        PipelineSettings(
+            database_url="postgresql://not-connected",
+            fb_number_api_url="https://provider.example.test/search",
+            fb_number_api_token="test-provider-placeholder",
+        ),
+        ApiSettings(api_key=API_KEY),
+        _valid_auth_settings(),
+    )
+
+    assert built.state.product_services.contact_lookup_service is not None
+    paths = {
+        nested.path
+        for included in built.routes
+        for nested in getattr(
+            getattr(included, "original_router", None),
+            "routes",
+            (),
+        )
+        if hasattr(nested, "path")
+    }
+    assert "/api/v1/contacts/lookup" in paths
+    assert "/api/v1/contacts/lookups/{event_id}" in paths

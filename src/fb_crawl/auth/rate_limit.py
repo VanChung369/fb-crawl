@@ -29,6 +29,8 @@ DEFAULT_AUTH_POLICIES = {
     "reset_password": RateLimitPolicy(5, 60 * 60),
     "reauthenticate": RateLimitPolicy(5, 15 * 60),
     "license_redeem": RateLimitPolicy(10, 15 * 60),
+    "contact_lookup": RateLimitPolicy(60, 60),
+    "contact_poll": RateLimitPolicy(300, 60),
     "admin_license_create": RateLimitPolicy(10, 60 * 60),
     "admin_license_revoke": RateLimitPolicy(30, 60 * 60),
     "admin_account_suspend": RateLimitPolicy(20, 60 * 60),
@@ -102,4 +104,4 @@ class RateLimitService:
             )
             limited = limited or count > policy.requests
         if limited:
-            raise AuthRateLimited("Too many authentication requests. Try again later.")
+            raise AuthRateLimited("Too many requests. Try again later.")
