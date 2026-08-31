@@ -149,6 +149,33 @@ def create_app(
                 )
             )
         if (
+            product_services.export_service is not None
+            and product_services.rate_limiter is not None
+        ):
+            from fb_crawl.api.routes.product_exports import (
+                create_product_export_router,
+            )
+
+            app.include_router(
+                create_product_export_router(
+                    product_services.export_service,
+                    product_auth,
+                    product_services.rate_limiter,
+                    clock=clock,
+                )
+            )
+        if product_services.metrics_repository is not None:
+            from fb_crawl.api.routes.product_metrics import (
+                create_product_metrics_router,
+            )
+
+            app.include_router(
+                create_product_metrics_router(
+                    product_services.metrics_repository,
+                    product_auth,
+                )
+            )
+        if (
             product_services.history_repository is not None
             and product_services.quota_service is not None
         ):
@@ -300,6 +327,7 @@ def _requires_internal_api_key(path: str) -> bool:
         "/api/v1/admin",
         "/api/v1/contacts",
         "/api/v1/history",
+        "/api/v1/exports",
     )
     if any(path == prefix or path.startswith(f"{prefix}/") for prefix in product_prefixes):
         return False

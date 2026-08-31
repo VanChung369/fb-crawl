@@ -12,6 +12,7 @@ import time
 from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fb_crawl.config import BrowserSettings, load_browser_settings
 from fb_crawl.core.exceptions import ConfigurationError
@@ -53,6 +54,17 @@ def add_worker_parser(
         type=int,
         default=1,
         help="Number of concurrent worker processes to run (default: 1)",
+    )
+    run_parser.add_argument(
+        "--kind",
+        choices=("crawl", "export"),
+        default="crawl",
+        help="Queue to process (default: crawl)",
+    )
+    run_parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Perform one queue poll and exit",
     )
     return parser
 
@@ -167,6 +179,63 @@ def _compose_worker(
     return repository, worker
 
 
+def _compose_export_worker(
+    pipeline_settings: PipelineSettings,
+    *,
+    worker_id: str,
+) -> _CrawlWorker:
+    from fb_crawl.entitlements.quota import (
+        ContactQuotaService,
+        PostgresContactQuotaRepository,
+    )
+    from fb_crawl.exports.artifacts import ExportArtifactStore
+    from fb_crawl.exports.postgres import PostgresExportRepository
+    from fb_crawl.exports.service import ExportWorker, HistoryExportSource
+    from fb_crawl.history.postgres import PostgresHistoryRepository
+    from fb_crawl.history.service import HistoryService
+    from fb_data_pipeline.repositories.migrations import MigrationRunner
+
+    MigrationRunner(pipeline_settings.database_url).apply()
+    timeout = pipeline_settings.database_statement_timeout_seconds
+    try:
+        product_timezone = ZoneInfo(
+            os.environ.get(
+                "LEAD_FINDER_TIMEZONE", "Asia/Ho_Chi_Minh"
+            ).strip()
+        )
+    except ZoneInfoNotFoundError as error:
+        raise ConfigurationError(
+            "LEAD_FINDER_TIMEZONE must name a valid IANA timezone."
+        ) from error
+    repository = PostgresExportRepository(
+        pipeline_settings.database_url,
+        statement_timeout_seconds=timeout,
+    )
+    history_repository = PostgresHistoryRepository(
+        pipeline_settings.database_url,
+        statement_timeout_seconds=timeout,
+    )
+    quota = ContactQuotaService(
+        PostgresContactQuotaRepository(
+            pipeline_settings.database_url,
+            statement_timeout_seconds=timeout,
+        ),
+        product_timezone,
+    )
+    history = HistoryService(history_repository, quota)
+    artifacts = ExportArtifactStore(
+        os.environ.get(
+            "LEAD_FINDER_EXPORT_DIR", "runtime/lead-finder-exports"
+        )
+    )
+    return ExportWorker(
+        repository,
+        HistoryExportSource(history),
+        artifacts,
+        worker_id=worker_id,
+    )
+
+
 def execute_worker(
     args: argparse.Namespace,
     *,
@@ -178,11 +247,15 @@ def execute_worker(
         )
 
     concurrency = getattr(args, "concurrency", 1) or 1
+    kind = getattr(args, "kind", "crawl") or "crawl"
+    once = bool(getattr(args, "once", False))
     if concurrency > 1:
-        return _execute_multiprocess_workers(concurrency, sleep=sleep)
+        return _execute_multiprocess_workers(
+            concurrency, kind=kind, once=once, sleep=sleep
+        )
 
     try:
-        return _execute_worker_process(sleep=sleep)
+        return _execute_worker_process(sleep=sleep, kind=kind, once=once)
     except KeyboardInterrupt:
         return 130
 
@@ -190,6 +263,8 @@ def execute_worker(
 def _execute_multiprocess_workers(
     concurrency: int,
     *,
+    kind: str = "crawl",
+    once: bool = False,
     sleep: Callable[[float], None] | None = None,
 ) -> int:
     import multiprocessing
@@ -199,7 +274,7 @@ def _execute_multiprocess_workers(
     for i in range(concurrency):
         p = multiprocessing.Process(
             target=_execute_worker_process,
-            kwargs={"sleep": sleep},
+            kwargs={"sleep": sleep, "kind": kind, "once": once},
             name=f"WorkerProcess-{i+1}",
         )
         p.start()
@@ -220,18 +295,28 @@ def _execute_multiprocess_workers(
 def _execute_worker_process(
     *,
     sleep: Callable[[float], None] | None,
+    kind: str = "crawl",
+    once: bool = False,
 ) -> int:
     pipeline_settings = load_pipeline_settings()
     pipeline_settings.require_database()
-    pipeline_settings.require_fb_number()
-    browser_settings = load_browser_settings()
-    _require_saved_session(browser_settings)
-
-    repository, worker = _compose_worker(
-        pipeline_settings,
-        browser_settings,
-        worker_id=build_worker_id(),
-    )
+    if kind == "export":
+        repository = None
+        worker = _compose_export_worker(
+            pipeline_settings,
+            worker_id=build_worker_id(),
+        )
+    elif kind == "crawl":
+        pipeline_settings.require_fb_number()
+        browser_settings = load_browser_settings()
+        _require_saved_session(browser_settings)
+        repository, worker = _compose_worker(
+            pipeline_settings,
+            browser_settings,
+            worker_id=build_worker_id(),
+        )
+    else:
+        raise ValueError(f"Unsupported worker kind: {kind}")
     wait = time.sleep if sleep is None else sleep
 
     interrupt_requested = False
@@ -251,17 +336,27 @@ def _execute_worker_process(
         previous_handler = None
 
     try:
-        print("[INFO] Background Crawl Worker started successfully.", flush=True)
+        print(
+            f"[INFO] Background {kind.title()} Worker started successfully.",
+            flush=True,
+        )
         print(
             f"[INFO] Connected to Database: {_safe_database_label(pipeline_settings.database_url)}",
             flush=True,
         )
-        print("[INFO] Polling for crawl jobs in the background (Press Ctrl+C to stop)...", flush=True)
-        repository.recover_stale_jobs()
+        print(
+            f"[INFO] Polling for {kind} jobs in the background "
+            "(Press Ctrl+C to stop)...",
+            flush=True,
+        )
+        if repository is not None:
+            repository.recover_stale_jobs()
         while True:
             processed = worker.run_once()
             if interrupt_requested:
                 return 130
+            if once:
+                return 0
             if not processed:
                 wait(EMPTY_QUEUE_POLL_SECONDS)
     finally:

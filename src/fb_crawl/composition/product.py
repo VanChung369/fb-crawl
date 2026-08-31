@@ -18,6 +18,13 @@ from fb_crawl.contacts.postgres import PostgresContactRepository
 from fb_crawl.contacts.service import ContactLookupService
 from fb_crawl.history.postgres import PostgresHistoryRepository
 from fb_crawl.history.repository import HistoryRepository
+from fb_crawl.exports.artifacts import ExportArtifactStore
+from fb_crawl.exports.postgres import PostgresExportRepository
+from fb_crawl.exports.service import ExportService
+from fb_crawl.exports.metrics import (
+    PostgresProductMetricsRepository,
+    ProductMetricsRepository,
+)
 from fb_crawl.licenses.config import load_license_keyring
 from fb_crawl.licenses.keys import LicenseKeyService
 from fb_crawl.licenses.postgres import PostgresLicenseRepository
@@ -38,6 +45,8 @@ class ProductServices:
     quota_service: ContactQuotaService | None = None
     contact_lookup_service: ContactLookupService | None = None
     history_repository: HistoryRepository | None = None
+    export_service: ExportService | None = None
+    metrics_repository: ProductMetricsRepository | None = None
 
 
 def compose_product_services(
@@ -117,6 +126,13 @@ def compose_product_services(
             ),
             EnrichmentPipeline(provider),
         )
+    export_repository = PostgresExportRepository(
+        database_url,
+        statement_timeout_seconds=statement_timeout_seconds,
+    )
+    export_artifacts = ExportArtifactStore(
+        env.get("LEAD_FINDER_EXPORT_DIR", "runtime/lead-finder-exports")
+    )
     return ProductServices(
         auth_service=auth_service,
         account_repository=repository,
@@ -127,6 +143,11 @@ def compose_product_services(
         quota_service=quota_service,
         contact_lookup_service=contact_lookup_service,
         history_repository=PostgresHistoryRepository(
+            database_url,
+            statement_timeout_seconds=statement_timeout_seconds,
+        ),
+        export_service=ExportService(export_repository, export_artifacts),
+        metrics_repository=PostgresProductMetricsRepository(
             database_url,
             statement_timeout_seconds=statement_timeout_seconds,
         ),

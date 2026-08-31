@@ -31,6 +31,7 @@ DEFAULT_AUTH_POLICIES = {
     "license_redeem": RateLimitPolicy(10, 15 * 60),
     "contact_lookup": RateLimitPolicy(60, 60),
     "contact_poll": RateLimitPolicy(300, 60),
+    "export_create": RateLimitPolicy(10, 60),
     "admin_license_create": RateLimitPolicy(10, 60 * 60),
     "admin_license_revoke": RateLimitPolicy(30, 60 * 60),
     "admin_account_suspend": RateLimitPolicy(20, 60 * 60),

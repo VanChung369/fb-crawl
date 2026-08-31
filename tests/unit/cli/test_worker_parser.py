@@ -19,6 +19,17 @@ def test_worker_run_parser_builds_only_the_run_command() -> None:
 
     assert args.mode == "worker"
     assert args.worker_command == "run"
+    assert args.kind == "crawl"
+    assert args.once is False
+
+
+def test_worker_parser_supports_single_poll_export_mode() -> None:
+    args = app.build_parser().parse_args(
+        ["worker", "run", "--kind", "export", "--once"]
+    )
+
+    assert args.kind == "export"
+    assert args.once is True
 
 
 def test_worker_run_help_exposes_no_safety_or_process_bypass(capsys) -> None:

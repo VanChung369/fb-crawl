@@ -18,6 +18,7 @@ def test_api_extra_explicitly_declares_every_direct_framework_dependency() -> No
         "argon2-cffi>=23.1,<26",
         "email-validator>=2.2,<3",
         "fastapi>=0.115,<1",
+        "openpyxl>=3.1,<4",
         "PyJWT>=2.9,<3",
         "pydantic>=2,<3",
         "uvicorn>=0.34,<1",

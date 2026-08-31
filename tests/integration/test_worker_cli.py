@@ -387,3 +387,47 @@ def test_worker_rejects_unknown_command_before_configuration(monkeypatch) -> Non
             argparse.Namespace(worker_command="other"),
             sleep=lambda _seconds: None,
         )
+
+
+def test_export_worker_mode_requires_no_provider_browser_or_saved_session(
+    monkeypatch,
+) -> None:
+    from fb_crawl.cli import worker as worker_cli
+
+    events: list[str] = []
+    pipeline = PipelineSettingsDouble(events)
+    worker = WorkerDouble(events, [False])
+    monkeypatch.setattr(worker_cli, "load_pipeline_settings", lambda: pipeline)
+    monkeypatch.setattr(
+        worker_cli,
+        "load_browser_settings",
+        lambda: (_ for _ in ()).throw(AssertionError("browser loaded")),
+    )
+    monkeypatch.setattr(
+        worker_cli,
+        "_compose_worker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("crawl composition loaded")
+        ),
+    )
+
+    def compose(settings, *, worker_id):
+        events.append("compose_export")
+        assert settings is pipeline
+        assert worker_id
+        return worker
+
+    monkeypatch.setattr(worker_cli, "_compose_export_worker", compose)
+
+    result = worker_cli.execute_worker(
+        argparse.Namespace(
+            worker_command="run",
+            concurrency=1,
+            kind="export",
+            once=True,
+        ),
+        sleep=lambda _seconds: None,
+    )
+
+    assert result == 0
+    assert events == ["require_database", "compose_export", "run_once"]

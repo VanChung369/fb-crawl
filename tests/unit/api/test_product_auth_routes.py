@@ -30,6 +30,8 @@ def product_client(
     contact_lookup_service=None,
     rate_limit_policies=None,
     history_repository=None,
+    export_service=None,
+    metrics_repository=None,
 ) -> tuple[TestClient, ProductRepositoryFake, ProductAuthServiceFake, str]:
     repository = ProductRepositoryFake()
     tokens = TokenService(jwt_secret="j" * 32, token_hmac_secret="h" * 32)
@@ -49,6 +51,8 @@ def product_client(
         quota_service=quota_service,
         contact_lookup_service=contact_lookup_service,
         history_repository=history_repository,
+        export_service=export_service,
+        metrics_repository=metrics_repository,
     )
     app = create_app(
         ApiSettings(api_key=API_KEY, cors_origins=(WEB_ORIGIN,)),

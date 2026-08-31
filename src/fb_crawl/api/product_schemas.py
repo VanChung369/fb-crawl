@@ -413,3 +413,77 @@ class HistoryDeleteResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deleted_count: int
+
+
+class ExportFilterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal[
+        "found", "not_found", "processing", "quota_exceeded", "failed"
+    ] | None = None
+    name: str | None = Field(default=None, max_length=256)
+    uid: str | None = Field(default=None, max_length=32)
+    username: str | None = Field(default=None, max_length=100)
+    phone: str | None = Field(default=None, max_length=64)
+    created_from: datetime | None = None
+    created_to: datetime | None = None
+
+
+class ExportCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["csv", "xlsx"]
+    filters: ExportFilterRequest = Field(default_factory=ExportFilterRequest)
+
+
+class ExportJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    format: Literal["csv", "xlsx"]
+    filters: dict[str, str]
+    status: Literal["queued", "running", "completed", "failed", "expired"]
+    attempt_count: int
+    safe_error_code: str
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+    expires_at: datetime | None
+    download_url: str | None
+
+
+class ExportDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deleted: Literal[True]
+
+
+class ProductMetricsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    accounts_total: int
+    accounts_active: int
+    subscriptions_valid: int
+    devices_active: int
+    license_keys_total: int
+    license_keys_available: int
+    lookups_total: int
+    lookups_found: int
+    lookups_not_found: int
+    lookups_failed: int
+    lookups_processing: int
+    quota_rejections: int
+    cache_hits: int
+    negative_cache_hits: int
+    provider_calls: int
+    provider_found: int
+    provider_not_found: int
+    provider_failed: int
+    provider_latency_average_ms: int
+    unique_contact_reveals: int
+    exports_total: int
+    exports_queued: int
+    exports_running: int
+    exports_completed: int
+    exports_failed: int
+    exports_expired: int
