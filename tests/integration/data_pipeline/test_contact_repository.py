@@ -15,10 +15,16 @@ from fb_crawl.contacts.models import (
     LookupOutcome,
     LookupSource,
 )
-from fb_data_pipeline.core.models import FacebookIdentity
-from fb_data_pipeline.core.models import ProviderStatus
+from fb_data_pipeline.core.models import (
+    FacebookIdentity,
+    PhoneEvidence,
+    ProviderResult,
+    ProviderStatus,
+    UserBundle,
+)
 from fb_data_pipeline.repositories.migrations import MigrationRunner
 from fb_data_pipeline.repositories.postgres import PostgresRepository
+from fb_data_pipeline.services.pipeline import EnrichedUser
 
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
@@ -68,6 +74,7 @@ def test_live_lease_has_one_winner_and_expired_lease_can_be_reclaimed() -> None:
     user_id = PostgresRepository(TEST_DATABASE_URL).upsert_identity(
         FacebookIdentity(uid="100123", username="sample.user")
     )
+    claim_now = datetime.now(UTC)
     barrier = Barrier(2)
 
     def claim(owner: str):
@@ -77,8 +84,8 @@ def test_live_lease_has_one_winner_and_expired_lease_can_be_reclaimed() -> None:
             "fbnumber",
             "phone",
             owner,
-            NOW,
-            NOW + timedelta(seconds=30),
+            claim_now,
+            claim_now + timedelta(seconds=30),
         )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -97,8 +104,8 @@ def test_live_lease_has_one_winner_and_expired_lease_can_be_reclaimed() -> None:
         "fbnumber",
         "phone",
         "owner-next",
-        NOW + timedelta(seconds=31),
-        NOW + timedelta(seconds=61),
+        claim_now + timedelta(seconds=31),
+        claim_now + timedelta(seconds=61),
     )
     assert reclaimed.acquired is True
 
@@ -177,15 +184,16 @@ def test_reclaimed_lease_fences_the_expired_owner_state_update() -> None:
         FacebookIdentity(uid="100123")
     )
     repository = PostgresContactRepository(TEST_DATABASE_URL)
+    claim_now = datetime.now(UTC)
     assert repository.claim_lease(
         user_id,
         "fbnumber",
         "phone",
         "owner-old",
-        NOW,
-        NOW + timedelta(seconds=1),
+        claim_now,
+        claim_now + timedelta(seconds=1),
     ).acquired
-    next_now = NOW + timedelta(seconds=2)
+    next_now = claim_now + timedelta(seconds=2)
     assert repository.claim_lease(
         user_id,
         "fbnumber",
@@ -195,25 +203,42 @@ def test_reclaimed_lease_fences_the_expired_owner_state_update() -> None:
         next_now + timedelta(seconds=30),
     ).acquired
 
-    current = repository.update_provider_state(
+    def enriched(phone: str, checked_at: datetime) -> EnrichedUser:
+        evidence = PhoneEvidence(
+            phone_number=phone,
+            normalized_phone=phone,
+            source="external:fbnumber",
+            captured_at=checked_at,
+            provider="fbnumber",
+        )
+        return EnrichedUser(
+            bundle=UserBundle(
+                identity=FacebookIdentity(uid="100123"),
+                evidence=(evidence,),
+            ),
+            provider_result=ProviderResult(
+                provider="fbnumber",
+                status=ProviderStatus.FOUND,
+                evidence=(evidence,),
+                checked_at=checked_at,
+            ),
+        )
+
+    current = repository.finalize_enrichment(
         user_id,
         "fbnumber",
         "phone",
-        ProviderStatus.FOUND,
-        next_now,
+        "owner-new",
+        enriched("+84981111111", next_now),
         next_now + timedelta(days=30),
-        owner_token="owner-new",
-        now=next_now,
     )
-    stale = repository.update_provider_state(
+    stale = repository.finalize_enrichment(
         user_id,
         "fbnumber",
         "phone",
-        ProviderStatus.NOT_FOUND,
-        NOW,
-        NOW + timedelta(days=7),
-        owner_token="owner-old",
-        now=next_now,
+        "owner-old",
+        enriched("+84982222222", claim_now),
+        claim_now + timedelta(days=7),
     )
 
     assert current is not None
@@ -222,3 +247,11 @@ def test_reclaimed_lease_fences_the_expired_owner_state_update() -> None:
     cached = repository.get_cached_contact(user_id)
     assert cached is not None
     assert cached.state == current
+    assert cached.phone == "+84981111111"
+    with psycopg.connect(TEST_DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM phone_numbers WHERE normalized_phone = %s",
+                ("+84982222222",),
+            )
+            assert cursor.fetchone() == (0,)

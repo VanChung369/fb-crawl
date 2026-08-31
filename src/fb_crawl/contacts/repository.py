@@ -13,6 +13,7 @@ from fb_crawl.contacts.models import (
     LookupState,
 )
 from fb_data_pipeline.core.models import FacebookIdentity, ProviderStatus
+from fb_data_pipeline.services.pipeline import EnrichedUser
 
 
 class ContactRepository(Protocol):
@@ -93,5 +94,14 @@ class ContactRepository(Protocol):
         latest_attempt_id: int | None = None,
         *,
         owner_token: str,
-        now: datetime,
+    ) -> LookupState | None: ...
+
+    def finalize_enrichment(
+        self,
+        facebook_user_id: int,
+        provider: str,
+        field: str,
+        owner_token: str,
+        enriched: EnrichedUser,
+        refresh_after: datetime,
     ) -> LookupState | None: ...

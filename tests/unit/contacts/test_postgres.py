@@ -2,7 +2,14 @@ from datetime import UTC, datetime, timedelta
 
 from fb_crawl.contacts.postgres import PostgresContactRepository
 from fb_crawl.contacts.models import LookupOutcome
-from fb_data_pipeline.core.models import ProviderStatus
+from fb_data_pipeline.core.models import (
+    FacebookIdentity,
+    PhoneEvidence,
+    ProviderResult,
+    ProviderStatus,
+    UserBundle,
+)
+from fb_data_pipeline.services.pipeline import EnrichedUser
 
 
 NOW = datetime(2026, 8, 30, 10, tzinfo=UTC)
@@ -44,6 +51,9 @@ class LeaseCursor:
 
     def fetchone(self) -> tuple[object, ...] | None:
         return self._row
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return []
 
 
 class LeaseConnection:
@@ -175,15 +185,137 @@ def test_provider_state_update_requires_a_live_matching_lease_owner() -> None:
         NOW,
         NOW + timedelta(days=30),
         owner_token="stale-owner",
-        now=NOW,
     )
 
     assert state is None
-    update = next(
+    lease_check = next(
         (sql, params)
         for sql, params in cursor.commands
-        if "INSERT INTO provider_lookup_state" in sql
+        if "FROM enrichment_leases" in sql
     )
-    assert "FROM enrichment_leases" in update[0]
-    assert "leases.owner_token = %s" in update[0]
-    assert "leases.leased_until > %s" in update[0]
+    assert "leases.owner_token = %s" in lease_check[0]
+    assert "leases.leased_until > statement_timestamp()" in lease_check[0]
+    assert "FOR UPDATE" in lease_check[0]
+    assert not any(
+        "INSERT INTO provider_lookup_state" in sql
+        for sql, _params in cursor.commands
+    )
+
+
+class FinalizationCursor(LeaseCursor):
+    def __init__(self, *, owns_lease: bool) -> None:
+        super().__init__([])
+        self.owns_lease = owns_lease
+        self._rows: list[tuple[object, ...]] = []
+
+    def execute(
+        self,
+        sql: str,
+        params: tuple[object, ...] | None = None,
+    ) -> None:
+        self.commands.append((sql, params))
+        self._row = None
+        self._rows = []
+        if "FROM enrichment_leases" in sql and "FOR UPDATE" in sql:
+            self._row = (41,) if self.owns_lease else None
+        elif "FROM facebook_users" in sql and "FOR UPDATE" in sql:
+            self._rows = [(41,)]
+        elif "UPDATE facebook_users" in sql:
+            self._row = (41,)
+        elif "INSERT INTO phone_numbers" in sql:
+            self._row = (501,)
+        elif "INSERT INTO enrichment_attempts" in sql:
+            self._row = (901,)
+        elif "INSERT INTO provider_lookup_state" in sql:
+            self._row = (
+                ProviderStatus.FOUND.value,
+                NOW,
+                NOW + timedelta(days=30),
+                901,
+                NOW,
+            )
+        elif "DELETE FROM enrichment_leases" in sql:
+            self._row = (1,)
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return self._rows
+
+
+def enriched_result() -> EnrichedUser:
+    evidence = PhoneEvidence(
+        phone_number="0981234567",
+        normalized_phone="+84981234567",
+        source="external:fbnumber",
+        captured_at=NOW,
+        provider="fbnumber",
+    )
+    return EnrichedUser(
+        bundle=UserBundle(
+            identity=FacebookIdentity(
+                uid="100123", username="sample.user"
+            ),
+            evidence=(evidence,),
+        ),
+        provider_result=ProviderResult(
+            provider="fbnumber",
+            status=ProviderStatus.FOUND,
+            evidence=(evidence,),
+            checked_at=NOW,
+        ),
+    )
+
+
+def test_stale_owner_cannot_persist_any_enrichment_data() -> None:
+    cursor = FinalizationCursor(owns_lease=False)
+    repository = PostgresContactRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: LeaseConnection(cursor),
+    )
+
+    state = repository.finalize_enrichment(
+        41,
+        "fbnumber",
+        "phone",
+        "owner-old",
+        enriched_result(),
+        NOW + timedelta(days=30),
+    )
+
+    assert state is None
+    assert not any(
+        "INSERT INTO user_phone_evidence" in sql
+        or "INSERT INTO enrichment_attempts" in sql
+        for sql, _params in cursor.commands
+    )
+
+
+def test_owner_finalizes_evidence_attempt_state_and_lease_in_one_transaction() -> None:
+    cursor = FinalizationCursor(owns_lease=True)
+    repository = PostgresContactRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: LeaseConnection(cursor),
+    )
+
+    state = repository.finalize_enrichment(
+        41,
+        "fbnumber",
+        "phone",
+        "owner-current",
+        enriched_result(),
+        NOW + timedelta(days=30),
+    )
+
+    assert state is not None
+    assert state.latest_attempt_id == 901
+    commands = [sql for sql, _params in cursor.commands]
+    lease_lock = next(i for i, sql in enumerate(commands) if "FOR UPDATE" in sql)
+    evidence = next(
+        i for i, sql in enumerate(commands) if "INSERT INTO user_phone_evidence" in sql
+    )
+    state_write = next(
+        i for i, sql in enumerate(commands) if "INSERT INTO provider_lookup_state" in sql
+    )
+    release = next(
+        i for i, sql in enumerate(commands) if "DELETE FROM enrichment_leases" in sql
+    )
+    assert lease_lock < evidence < state_write < release

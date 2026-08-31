@@ -17,7 +17,9 @@ from fb_crawl.contacts.models import (
 )
 from fb_data_pipeline.core.models import FacebookIdentity, ProviderStatus
 from fb_data_pipeline.repositories.errors import DatabaseError
+from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 from fb_data_pipeline.repositories.postgres import PostgresRepository
+from fb_data_pipeline.services.pipeline import EnrichedUser
 
 
 class PostgresContactRepository:
@@ -440,7 +442,6 @@ class PostgresContactRepository:
         latest_attempt_id: int | None = None,
         *,
         owner_token: str,
-        now: datetime,
     ) -> LookupState | None:
         if refresh_after < checked_at:
             raise ValueError("provider state refresh cannot precede check")
@@ -450,18 +451,32 @@ class PostgresContactRepository:
                     self._set_timeout(cursor)
                     cursor.execute(
                         """
-                        INSERT INTO provider_lookup_state (
-                            facebook_user_id, provider, field, latest_status,
-                            checked_at, refresh_after, latest_attempt_id,
-                            updated_at
-                        )
-                        SELECT %s, %s, %s, %s, %s, %s, %s, %s
+                        SELECT facebook_user_id
                         FROM enrichment_leases AS leases
                         WHERE leases.facebook_user_id = %s
                           AND leases.provider = %s
                           AND leases.field = %s
                           AND leases.owner_token = %s
-                          AND leases.leased_until > %s
+                          AND leases.leased_until > statement_timestamp()
+                        FOR UPDATE
+                        """,
+                        (
+                            facebook_user_id,
+                            provider,
+                            field,
+                            owner_token,
+                        ),
+                    )
+                    if cursor.fetchone() is None:
+                        return None
+                    cursor.execute(
+                        """
+                        INSERT INTO provider_lookup_state (
+                            facebook_user_id, provider, field, latest_status,
+                            checked_at, refresh_after, latest_attempt_id,
+                            updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (facebook_user_id, provider, field) DO UPDATE
                         SET latest_status = EXCLUDED.latest_status,
                             checked_at = EXCLUDED.checked_at,
@@ -482,11 +497,6 @@ class PostgresContactRepository:
                             refresh_after,
                             latest_attempt_id,
                             checked_at,
-                            facebook_user_id,
-                            provider,
-                            field,
-                            owner_token,
-                            now,
                         ),
                     )
                     row = cursor.fetchone()
@@ -496,3 +506,113 @@ class PostgresContactRepository:
             return None
         state = self._state_from_row(facebook_user_id, provider, field, row)
         return state
+
+    def finalize_enrichment(
+        self,
+        facebook_user_id: int,
+        provider: str,
+        field: str,
+        owner_token: str,
+        enriched: EnrichedUser,
+        refresh_after: datetime,
+    ) -> LookupState | None:
+        checked_at = enriched.provider_result.checked_at
+        if refresh_after < checked_at:
+            raise ValueError("provider state refresh cannot precede check")
+        try:
+            with self.connect_factory(self.database_url) as connection:
+                with connection.cursor() as cursor:
+                    self._set_timeout(cursor)
+                    cursor.execute(
+                        """
+                        SELECT facebook_user_id
+                        FROM enrichment_leases
+                        WHERE facebook_user_id = %s
+                          AND provider = %s
+                          AND field = %s
+                          AND owner_token = %s
+                          AND leased_until > statement_timestamp()
+                        FOR UPDATE
+                        """,
+                        (
+                            facebook_user_id,
+                            provider,
+                            field,
+                            owner_token,
+                        ),
+                    )
+                    if cursor.fetchone() is None:
+                        return None
+
+                    persisted_user_id, attempt_id = (
+                        self.identity_repository.persist_enriched_user(
+                            cursor, enriched
+                        )
+                    )
+                    if persisted_user_id != facebook_user_id:
+                        raise DatabaseIdentityConflict(
+                            "Enrichment identity changed during finalization."
+                        )
+
+                    cursor.execute(
+                        """
+                        INSERT INTO provider_lookup_state (
+                            facebook_user_id, provider, field, latest_status,
+                            checked_at, refresh_after, latest_attempt_id,
+                            updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (facebook_user_id, provider, field) DO UPDATE
+                        SET latest_status = EXCLUDED.latest_status,
+                            checked_at = EXCLUDED.checked_at,
+                            refresh_after = EXCLUDED.refresh_after,
+                            latest_attempt_id = EXCLUDED.latest_attempt_id,
+                            updated_at = EXCLUDED.updated_at
+                        WHERE provider_lookup_state.checked_at
+                              <= EXCLUDED.checked_at
+                        RETURNING latest_status, checked_at, refresh_after,
+                                  latest_attempt_id, updated_at
+                        """,
+                        (
+                            facebook_user_id,
+                            provider,
+                            field,
+                            enriched.provider_result.status.value,
+                            checked_at,
+                            refresh_after,
+                            attempt_id,
+                            checked_at,
+                        ),
+                    )
+                    row = cursor.fetchone()
+                    if row is None:
+                        raise DatabaseError(
+                            "Database provider state finalization failed."
+                        )
+                    cursor.execute(
+                        """
+                        DELETE FROM enrichment_leases
+                        WHERE facebook_user_id = %s
+                          AND provider = %s
+                          AND field = %s
+                          AND owner_token = %s
+                        RETURNING 1
+                        """,
+                        (
+                            facebook_user_id,
+                            provider,
+                            field,
+                            owner_token,
+                        ),
+                    )
+                    if cursor.fetchone() is None:
+                        raise DatabaseError(
+                            "Database enrichment lease release failed."
+                        )
+        except DatabaseError:
+            raise
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database operation failed.") from error
+        return self._state_from_row(
+            facebook_user_id, provider, field, row
+        )

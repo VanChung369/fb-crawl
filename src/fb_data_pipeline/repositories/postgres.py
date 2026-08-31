@@ -243,26 +243,27 @@ class PostgresRepository:
                     "SELECT set_config('statement_timeout', %s, true)",
                     (f"{self.statement_timeout_ms}ms",),
                 )
-                user_id = self._upsert_user(
-                    cursor,
-                    enriched.bundle.identity,
-                )
-                self._upsert_profile(
-                    cursor,
-                    user_id,
-                    enriched.bundle.profile,
-                )
-                self._upsert_evidence(
-                    cursor,
-                    user_id,
-                    enriched.bundle.evidence,
-                )
-                self._insert_attempt(
-                    cursor,
-                    user_id,
-                    enriched.provider_result,
+                user_id, _attempt_id = self.persist_enriched_user(
+                    cursor, enriched
                 )
         return user_id
+
+    def persist_enriched_user(
+        self,
+        cursor,
+        enriched: EnrichedUser,
+    ) -> tuple[int, int]:
+        if not enriched.bundle.identity.is_usable:
+            raise DatabaseIdentityConflict(
+                "Cannot persist a Facebook user without an identity alias."
+            )
+        user_id = self._upsert_user(cursor, enriched.bundle.identity)
+        self._upsert_profile(cursor, user_id, enriched.bundle.profile)
+        self._upsert_evidence(cursor, user_id, enriched.bundle.evidence)
+        attempt_id = self._insert_attempt(
+            cursor, user_id, enriched.provider_result
+        )
+        return user_id, attempt_id
 
     @staticmethod
     def _identity_values(
@@ -626,7 +627,7 @@ class PostgresRepository:
         cursor,
         user_id: int,
         provider_result: ProviderResult,
-    ) -> None:
+    ) -> int:
         cursor.execute(
             """
             INSERT INTO enrichment_attempts (
@@ -639,6 +640,7 @@ class PostgresRepository:
                 values_found
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
             """,
             (
                 user_id,
@@ -650,3 +652,7 @@ class PostgresRepository:
                 len(provider_result.evidence),
             ),
         )
+        row = cursor.fetchone()
+        if row is None:
+            raise DatabaseError("Database enrichment attempt insert failed.")
+        return int(row[0])

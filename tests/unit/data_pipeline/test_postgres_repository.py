@@ -86,6 +86,8 @@ class RecordingCursor:
                 100 + len(self._phone_ids),
             )
             self._row = (phone_id,)
+        elif "INSERT INTO enrichment_attempts" in sql:
+            self._row = (701,)
 
     def fetchall(self) -> list[tuple[object, ...]]:
         return self._rows
