@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Callable
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import JSONResponse
 
 from fb_crawl.api.dependencies import (
@@ -40,7 +40,10 @@ def create_contact_router(
             raise ProductAuthenticationError()
         return current
 
-    @router.post("/api/v1/contacts/lookup")
+    @router.post(
+        "/api/v1/contacts/lookup",
+        response_model=ContactLookupResponse,
+    )
     def lookup_contact(
         payload: ContactLookupRequest,
         request: Request,
@@ -70,14 +73,15 @@ def create_contact_router(
             return _safe_error(403, "contact_access_denied")
         return _lookup_response(result)
 
-    @router.get("/api/v1/contacts/lookups/{event_id}")
+    @router.get(
+        "/api/v1/contacts/lookups/{event_id}",
+        response_model=ContactLookupResponse,
+    )
     def poll_contact_lookup(
-        event_id: int,
         request: Request,
+        event_id: int = Path(gt=0, le=9223372036854775807),
         current: CurrentAccount = Depends(require_bearer_account),
     ) -> JSONResponse:
-        if event_id <= 0:
-            return _safe_error(404, "contact_lookup_not_found")
         if not current.device_allowed:
             return _safe_error(403, "contact_device_not_allowed")
         rate_limiter.check(

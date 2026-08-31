@@ -286,3 +286,20 @@ def test_contact_lookup_is_rate_limited_before_service_call() -> None:
     assert first.status_code == 200
     assert limited.status_code == 429
     assert len(service.lookup_calls) == 1
+
+
+def test_profile_url_only_derives_provider_username() -> None:
+    service = ContactLookupServiceFake(result(LookupOutcome.NOT_FOUND))
+    client, _repository, _auth, access = product_client(
+        contact_lookup_service=service
+    )
+
+    response = client.post(
+        "/api/v1/contacts/lookup",
+        headers=headers(access),
+        json={"profile_url": "https://www.facebook.com/sample.user"},
+    )
+
+    assert response.status_code == 200
+    request = service.lookup_calls[0][2]
+    assert request.username == "sample.user"

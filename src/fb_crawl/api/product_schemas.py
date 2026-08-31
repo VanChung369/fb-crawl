@@ -322,6 +322,10 @@ class ContactLookupRequest(BaseModel):
             raise ValueError("Facebook username aliases conflict")
         if not (self.facebook_uid or self.username or url_uid or url_username):
             raise ValueError("a Facebook UID or username is required")
+        if not self.facebook_uid and url_uid:
+            object.__setattr__(self, "facebook_uid", url_uid)
+        if not self.username and url_username:
+            object.__setattr__(self, "username", url_username)
         return self
 
     def to_domain(self) -> DomainContactLookupRequest:
