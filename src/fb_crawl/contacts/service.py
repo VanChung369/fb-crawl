@@ -130,6 +130,10 @@ class ContactLookupService:
         return bool(
             cached.found
             and cached.observed_at is not None
+            and (
+                cached.state is None
+                or cached.state.latest_status is not ProviderStatus.NOT_FOUND
+            )
             and now < cached.observed_at + self.found_ttl
         )
 

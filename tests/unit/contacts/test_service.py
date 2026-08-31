@@ -644,6 +644,29 @@ def test_recent_phone_evidence_survives_a_later_provider_failure() -> None:
     assert pipeline.calls == []
 
 
+def test_definitive_negative_invalidates_recent_phone_evidence() -> None:
+    negative_state = replace(
+        state(ProviderStatus.NOT_FOUND, NOW + timedelta(days=7)),
+        checked_at=NOW - timedelta(minutes=1),
+        updated_at=NOW - timedelta(minutes=1),
+    )
+    cached = CachedContact(
+        CONTACT.id,
+        501,
+        "+84981234567",
+        NOW - timedelta(days=1),
+        negative_state,
+    )
+    lookup, _contacts, quota, pipeline = service(cached)
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.state is LookupOutcome.NOT_FOUND
+    assert result.source is LookupSource.NEGATIVE_CACHE
+    assert quota.reserve_calls == []
+    assert pipeline.calls == []
+
+
 def test_terminal_found_poll_uses_event_phone_and_current_month_quota() -> None:
     cached = CachedContact(
         CONTACT.id,

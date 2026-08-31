@@ -273,6 +273,16 @@ class FBNumberProvider:
                 )
 
             if response.status_code == 429:
+                retry_after = _retry_after(response, self._clock())
+                if retry_after is not None:
+                    return ProviderResult(
+                        provider=self.name,
+                        status=ProviderStatus.RATE_LIMITED,
+                        checked_at=checked_at,
+                        correlation_id=_correlation_id({}, response),
+                        error_code="provider_rate_limited",
+                        retry_after=retry_after,
+                    )
                 if attempt < self.max_retries:
                     self._sleeper(0.25 * (2**attempt))
                     continue
@@ -282,7 +292,6 @@ class FBNumberProvider:
                     checked_at=checked_at,
                     correlation_id=_correlation_id({}, response),
                     error_code="provider_rate_limited",
-                    retry_after=_retry_after(response, self._clock()),
                 )
 
             if response.status_code >= 500 and attempt < self.max_retries:

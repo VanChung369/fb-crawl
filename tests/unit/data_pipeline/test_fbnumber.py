@@ -239,3 +239,30 @@ def test_fbnumber_preserves_retry_after_from_rate_limit_response() -> None:
 
     assert result.status is ProviderStatus.RATE_LIMITED
     assert result.retry_after == checked_at + timedelta(minutes=2)
+
+
+def test_fbnumber_does_not_retry_rate_limit_with_retry_after() -> None:
+    checked_at = datetime(2026, 8, 31, 3, tzinfo=UTC)
+    calls = 0
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429, headers={"Retry-After": "120"})
+
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        max_retries=2,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        clock=lambda: checked_at,
+        sleeper=sleeps.append,
+    )
+
+    result = provider.search(FacebookIdentity(uid="10001"))
+
+    assert result.status is ProviderStatus.RATE_LIMITED
+    assert result.retry_after == checked_at + timedelta(minutes=2)
+    assert calls == 1
+    assert sleeps == []
