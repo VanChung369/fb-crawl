@@ -1,0 +1,619 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
+from typing import Callable, Protocol
+from uuid import uuid4
+
+from fb_crawl.accounts.models import (
+    Account,
+    AccountStatus,
+    Device,
+    DeviceStatus,
+)
+from fb_crawl.contacts.models import (
+    CachedContact,
+    ContactIdentity,
+    LookupEvent,
+    LookupOutcome,
+    LookupSource,
+)
+from fb_data_pipeline.core.models import (
+    FacebookIdentity,
+    ProviderStatus,
+    UserBundle,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ContactLookupRequest:
+    facebook_uid: str = ""
+    username: str = ""
+    name: str = ""
+    profile_url: str = ""
+
+    @property
+    def identity(self) -> FacebookIdentity:
+        identity = FacebookIdentity(
+            uid=self.facebook_uid,
+            username=self.username,
+            name=self.name,
+            profile_url=self.profile_url,
+        )
+        if not identity.is_usable:
+            raise ValueError("contact lookup requires a Facebook identity")
+        return identity
+
+
+@dataclass(frozen=True, slots=True)
+class ContactLookupResult:
+    event_id: int
+    state: LookupOutcome
+    source: LookupSource
+    user: FacebookIdentity
+    phone: str = ""
+    observed_at: datetime | None = None
+    provider_called: bool = False
+    quota_charged: bool = False
+    monthly_used: int = 0
+    monthly_limit: int = 0
+    safe_error_code: str = ""
+
+
+class EntitlementsPort(Protocol):
+    def for_account(self, account_id: int, now: datetime): ...
+
+
+class QuotaPort(Protocol):
+    def precheck(self, account_id: int, user_id: int, now: datetime): ...
+
+    def reserve(
+        self,
+        account_id: int,
+        user_id: int,
+        phone_id: int,
+        event_id: int | None,
+        now: datetime,
+    ): ...
+
+
+class ContactLookupService:
+    def __init__(
+        self,
+        entitlements: EntitlementsPort,
+        quota: QuotaPort,
+        contacts,
+        pipeline,
+        *,
+        lease_ttl: timedelta = timedelta(seconds=30),
+        wait_timeout_seconds: float = 2.0,
+        manual_refresh_interval: timedelta = timedelta(hours=24),
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self.entitlements = entitlements
+        self.quota = quota
+        self.contacts = contacts
+        self.pipeline = pipeline
+        self.lease_ttl = lease_ttl
+        self.wait_timeout_seconds = wait_timeout_seconds
+        self.manual_refresh_interval = manual_refresh_interval
+        self.clock = clock or (lambda: datetime.now(UTC))
+
+    @staticmethod
+    def _require_access(account: Account, device: Device) -> None:
+        if (
+            account.status is not AccountStatus.ACTIVE
+            or account.email_verified_at is None
+            or device.account_id != account.id
+            or device.status is not DeviceStatus.ACTIVE
+        ):
+            raise PermissionError("contact lookup access denied")
+
+    @staticmethod
+    def _is_fresh_found(cached: CachedContact, now: datetime) -> bool:
+        return bool(
+            cached.found
+            and cached.state is not None
+            and cached.state.latest_status is ProviderStatus.FOUND
+            and now < cached.state.refresh_after
+        )
+
+    @staticmethod
+    def _is_fresh_negative(cached: CachedContact, now: datetime) -> bool:
+        return bool(
+            cached.state is not None
+            and cached.state.latest_status is ProviderStatus.NOT_FOUND
+            and now < cached.state.refresh_after
+        )
+
+    @staticmethod
+    def _is_fresh_failure(cached: CachedContact, now: datetime) -> bool:
+        return bool(
+            cached.state is not None
+            and cached.state.latest_status
+            in {ProviderStatus.FAILED, ProviderStatus.RATE_LIMITED}
+            and now < cached.state.refresh_after
+        )
+
+    def _finish_not_found(
+        self,
+        account_id: int,
+        event: LookupEvent,
+        contact: ContactIdentity,
+        now: datetime,
+        *,
+        source: LookupSource,
+        provider_called: bool,
+        used: int,
+        limit: int,
+    ) -> ContactLookupResult:
+        self.contacts.complete_lookup_event(
+            account_id,
+            event.id,
+            LookupOutcome.NOT_FOUND,
+            source,
+            provider_called=provider_called,
+            quota_charged=False,
+            safe_error_code="",
+            now=now,
+        )
+        return self._result(
+            event,
+            contact,
+            state=LookupOutcome.NOT_FOUND,
+            source=source,
+            provider_called=provider_called,
+            monthly_used=used,
+            monthly_limit=limit,
+        )
+
+    def _finish_failed(
+        self,
+        account_id: int,
+        event: LookupEvent,
+        contact: ContactIdentity,
+        now: datetime,
+        *,
+        error_code: str,
+        provider_called: bool,
+        used: int,
+        limit: int,
+    ) -> ContactLookupResult:
+        safe_error = error_code or "provider_failed"
+        self.contacts.complete_lookup_event(
+            account_id,
+            event.id,
+            LookupOutcome.FAILED,
+            LookupSource.NONE,
+            provider_called=provider_called,
+            quota_charged=False,
+            safe_error_code=safe_error,
+            now=now,
+        )
+        return self._result(
+            event,
+            contact,
+            state=LookupOutcome.FAILED,
+            source=LookupSource.NONE,
+            provider_called=provider_called,
+            monthly_used=used,
+            monthly_limit=limit,
+            safe_error_code=safe_error,
+        )
+
+    def _result(
+        self,
+        event: LookupEvent,
+        contact: ContactIdentity,
+        *,
+        state: LookupOutcome,
+        source: LookupSource,
+        phone: str = "",
+        observed_at: datetime | None = None,
+        provider_called: bool = False,
+        quota_charged: bool = False,
+        monthly_used: int = 0,
+        monthly_limit: int = 0,
+        safe_error_code: str = "",
+    ) -> ContactLookupResult:
+        return ContactLookupResult(
+            event_id=event.id,
+            state=state,
+            source=source,
+            user=contact.identity,
+            phone=phone,
+            observed_at=observed_at,
+            provider_called=provider_called,
+            quota_charged=quota_charged,
+            monthly_used=monthly_used,
+            monthly_limit=monthly_limit,
+            safe_error_code=safe_error_code,
+        )
+
+    def _finish_found(
+        self,
+        account_id: int,
+        event: LookupEvent,
+        contact: ContactIdentity,
+        cached: CachedContact,
+        now: datetime,
+        *,
+        source: LookupSource,
+        provider_called: bool,
+    ) -> ContactLookupResult:
+        if cached.phone_number_id is None:
+            raise ValueError("found contact is missing a phone id")
+        decision = self.quota.reserve(
+            account_id,
+            contact.id,
+            cached.phone_number_id,
+            event.id,
+            now,
+        )
+        if not decision.allowed:
+            self.contacts.complete_lookup_event(
+                account_id,
+                event.id,
+                LookupOutcome.QUOTA_EXCEEDED,
+                LookupSource.NONE,
+                provider_called=provider_called,
+                quota_charged=False,
+                safe_error_code="contact_quota_exhausted",
+                now=now,
+            )
+            return self._result(
+                event,
+                contact,
+                state=LookupOutcome.QUOTA_EXCEEDED,
+                source=LookupSource.NONE,
+                provider_called=provider_called,
+                monthly_used=decision.used,
+                monthly_limit=decision.limit,
+                safe_error_code="contact_quota_exhausted",
+            )
+        self.contacts.complete_lookup_event(
+            account_id,
+            event.id,
+            LookupOutcome.FOUND,
+            source,
+            provider_called=provider_called,
+            quota_charged=decision.charged,
+            safe_error_code="",
+            now=now,
+        )
+        return self._result(
+            event,
+            contact,
+            state=LookupOutcome.FOUND,
+            source=source,
+            phone=cached.phone,
+            observed_at=cached.observed_at,
+            provider_called=provider_called,
+            quota_charged=decision.charged,
+            monthly_used=decision.used,
+            monthly_limit=decision.limit,
+        )
+
+    def lookup(
+        self,
+        account: Account,
+        device: Device,
+        request: ContactLookupRequest,
+        now: datetime,
+        force_refresh: bool = False,
+    ) -> ContactLookupResult:
+        self._require_access(account, device)
+        self.entitlements.for_account(account.id, now)
+        requested = request.identity
+        contact = self.contacts.resolve_identity(requested)
+        event = self.contacts.create_lookup_event(
+            account.id, device.id, contact, requested, now
+        )
+        precheck = self.quota.precheck(account.id, contact.id, now)
+        if not precheck.allowed:
+            self.contacts.complete_lookup_event(
+                account.id,
+                event.id,
+                LookupOutcome.QUOTA_EXCEEDED,
+                LookupSource.NONE,
+                provider_called=False,
+                quota_charged=False,
+                safe_error_code="contact_quota_exhausted",
+                now=now,
+            )
+            return self._result(
+                event,
+                contact,
+                state=LookupOutcome.QUOTA_EXCEEDED,
+                source=LookupSource.NONE,
+                monthly_used=precheck.used,
+                monthly_limit=precheck.limit,
+                safe_error_code="contact_quota_exhausted",
+            )
+
+        cached = self.contacts.get_cached_contact(contact.id)
+        refresh_limited = bool(
+            force_refresh
+            and cached.state is not None
+            and now
+            < cached.state.checked_at + self.manual_refresh_interval
+        )
+        use_fresh_cache = not force_refresh or refresh_limited
+        if use_fresh_cache and self._is_fresh_found(cached, now):
+            return self._finish_found(
+                account.id,
+                event,
+                contact,
+                cached,
+                now,
+                source=LookupSource.CACHE,
+                provider_called=False,
+            )
+        if use_fresh_cache and self._is_fresh_negative(cached, now):
+            return self._finish_not_found(
+                account.id,
+                event,
+                contact,
+                now,
+                source=LookupSource.NEGATIVE_CACHE,
+                provider_called=False,
+                used=precheck.used,
+                limit=precheck.limit,
+            )
+        if self._is_fresh_failure(cached, now):
+            return self._finish_failed(
+                account.id,
+                event,
+                contact,
+                now,
+                error_code=(
+                    "provider_rate_limited"
+                    if cached.state.latest_status is ProviderStatus.RATE_LIMITED
+                    else "provider_failed"
+                ),
+                provider_called=False,
+                used=precheck.used,
+                limit=precheck.limit,
+            )
+
+        owner = uuid4().hex
+        lease = self.contacts.claim_lease(
+            contact.id,
+            "fbnumber",
+            "phone",
+            owner,
+            now,
+            now + self.lease_ttl,
+        )
+        if not lease.acquired:
+            updated = self.contacts.wait_for_state(
+                contact.id,
+                "fbnumber",
+                "phone",
+                event.created_at,
+                timeout_seconds=self.wait_timeout_seconds,
+            )
+            if updated is None:
+                return self._result(
+                    event,
+                    contact,
+                    state=LookupOutcome.PROCESSING,
+                    source=LookupSource.NONE,
+                    monthly_used=precheck.used,
+                    monthly_limit=precheck.limit,
+                )
+            cached = self.contacts.get_cached_contact(contact.id)
+            if self._is_fresh_found(cached, now):
+                return self._finish_found(
+                    account.id,
+                    event,
+                    contact,
+                    cached,
+                    now,
+                    source=LookupSource.CACHE,
+                    provider_called=False,
+                )
+            if self._is_fresh_negative(cached, now):
+                return self._finish_not_found(
+                    account.id,
+                    event,
+                    contact,
+                    now,
+                    source=LookupSource.NEGATIVE_CACHE,
+                    provider_called=False,
+                    used=precheck.used,
+                    limit=precheck.limit,
+                )
+            return self._result(
+                event,
+                contact,
+                state=LookupOutcome.PROCESSING,
+                source=LookupSource.NONE,
+                monthly_used=precheck.used,
+                monthly_limit=precheck.limit,
+            )
+
+        try:
+            try:
+                run = self.pipeline.run_bundles(
+                    (UserBundle(identity=contact.identity),)
+                )
+            except Exception:
+                return self._finish_failed(
+                    account.id,
+                    event,
+                    contact,
+                    now,
+                    error_code="contact_enrichment_failed",
+                    provider_called=True,
+                    used=precheck.used,
+                    limit=precheck.limit,
+                )
+            if len(run.users) != 1:
+                raise RuntimeError("contact enrichment returned no user")
+            enriched = run.users[0]
+            status = enriched.provider_result.status
+            if (
+                status is ProviderStatus.FOUND
+                and enriched.bundle.phone_1 is None
+            ):
+                status = ProviderStatus.NOT_FOUND
+                enriched = replace(
+                    enriched,
+                    provider_result=replace(
+                        enriched.provider_result,
+                        status=ProviderStatus.NOT_FOUND,
+                    ),
+                )
+            refresh_after = now + (
+                timedelta(days=30)
+                if status is ProviderStatus.FOUND
+                else timedelta(days=7)
+                if status is ProviderStatus.NOT_FOUND
+                else timedelta(minutes=15)
+            )
+            finalized = self.contacts.finalize_enrichment(
+                contact.id,
+                "fbnumber",
+                "phone",
+                owner,
+                enriched,
+                refresh_after,
+            )
+            if finalized is None:
+                return self._result(
+                    event,
+                    contact,
+                    state=LookupOutcome.PROCESSING,
+                    source=LookupSource.NONE,
+                    provider_called=True,
+                    monthly_used=precheck.used,
+                    monthly_limit=precheck.limit,
+                )
+            cached = self.contacts.get_cached_contact(contact.id)
+            if status is ProviderStatus.FOUND and cached.found:
+                return self._finish_found(
+                    account.id,
+                    event,
+                    contact,
+                    cached,
+                    now,
+                    source=LookupSource.PROVIDER,
+                    provider_called=True,
+                )
+            if status is ProviderStatus.NOT_FOUND:
+                return self._finish_not_found(
+                    account.id,
+                    event,
+                    contact,
+                    now,
+                    source=LookupSource.PROVIDER,
+                    provider_called=True,
+                    used=precheck.used,
+                    limit=precheck.limit,
+                )
+            return self._finish_failed(
+                account.id,
+                event,
+                contact,
+                now,
+                error_code=enriched.provider_result.error_code,
+                provider_called=True,
+                used=precheck.used,
+                limit=precheck.limit,
+            )
+        finally:
+            self.contacts.release_lease(
+                contact.id, "fbnumber", "phone", owner
+            )
+
+    def get_event(
+        self,
+        account_id: int,
+        event_id: int,
+    ) -> ContactLookupResult | None:
+        event = self.contacts.get_lookup_event(account_id, event_id)
+        if event is None:
+            return None
+        contact = ContactIdentity(
+            event.facebook_user_id,
+            FacebookIdentity(
+                uid=event.requested_uid,
+                username=event.requested_username,
+                profile_url=event.requested_profile_url,
+            ),
+        )
+        cached = self.contacts.get_cached_contact(event.facebook_user_id)
+        if event.outcome is not LookupOutcome.PROCESSING:
+            return self._result(
+                event,
+                contact,
+                state=event.outcome,
+                source=event.result_source,
+                phone=(
+                    cached.phone
+                    if event.outcome is LookupOutcome.FOUND and cached.found
+                    else ""
+                ),
+                observed_at=cached.observed_at,
+                provider_called=event.provider_called,
+                quota_charged=event.quota_charged,
+                safe_error_code=event.safe_error_code,
+            )
+        if (
+            cached.state is None
+            or cached.state.checked_at <= event.created_at
+        ):
+            return self._result(
+                event,
+                contact,
+                state=LookupOutcome.PROCESSING,
+                source=LookupSource.NONE,
+            )
+
+        now = self.clock()
+        if self._is_fresh_found(cached, now):
+            return self._finish_found(
+                account_id,
+                event,
+                contact,
+                cached,
+                now,
+                source=LookupSource.CACHE,
+                provider_called=False,
+            )
+        if self._is_fresh_negative(cached, now):
+            return self._finish_not_found(
+                account_id,
+                event,
+                contact,
+                now,
+                source=LookupSource.NEGATIVE_CACHE,
+                provider_called=False,
+                used=0,
+                limit=0,
+            )
+        if cached.state.latest_status in {
+            ProviderStatus.FAILED,
+            ProviderStatus.RATE_LIMITED,
+        }:
+            return self._finish_failed(
+                account_id,
+                event,
+                contact,
+                now,
+                error_code=(
+                    "provider_rate_limited"
+                    if cached.state.latest_status is ProviderStatus.RATE_LIMITED
+                    else "provider_failed"
+                ),
+                provider_called=False,
+                used=0,
+                limit=0,
+            )
+        return self._result(
+            event,
+            contact,
+            state=LookupOutcome.PROCESSING,
+            source=LookupSource.NONE,
+        )
