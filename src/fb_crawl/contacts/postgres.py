@@ -182,6 +182,13 @@ class PostgresContactRepository:
             safe_error_code=str(row[11] or ""),
             created_at=row[12],  # type: ignore[arg-type]
             completed_at=row[13],  # type: ignore[arg-type]
+            revealed_phone_number_id=(
+                int(row[14]) if len(row) > 14 and row[14] is not None else None
+            ),
+            revealed_phone=(str(row[15] or "") if len(row) > 15 else ""),
+            revealed_observed_at=(
+                row[16] if len(row) > 16 else None  # type: ignore[arg-type]
+            ),
         )
 
     @staticmethod
@@ -242,10 +249,21 @@ class PostgresContactRepository:
                 with connection.cursor() as cursor:
                     self._set_timeout(cursor)
                     cursor.execute(
-                        f"""
-                        SELECT {self._event_columns()}
-                        FROM lookup_events
-                        WHERE id = %s AND account_id = %s
+                        """
+                        SELECT events.id, events.account_id, events.device_id,
+                               events.facebook_user_id, events.requested_uid,
+                               events.requested_username,
+                               events.requested_profile_url, events.outcome,
+                               events.result_source, events.provider_called,
+                               events.quota_charged, events.safe_error_code,
+                               events.created_at, events.completed_at,
+                               events.revealed_phone_number_id,
+                               numbers.normalized_phone,
+                               events.revealed_observed_at
+                        FROM lookup_events AS events
+                        LEFT JOIN phone_numbers AS numbers
+                          ON numbers.id = events.revealed_phone_number_id
+                        WHERE events.id = %s AND events.account_id = %s
                         """,
                         (event_id, account_id),
                     )
@@ -265,6 +283,8 @@ class PostgresContactRepository:
         quota_charged: bool,
         safe_error_code: str,
         now: datetime,
+        revealed_phone_number_id: int | None = None,
+        revealed_observed_at: datetime | None = None,
     ) -> LookupEvent | None:
         if outcome is LookupOutcome.PROCESSING:
             raise ValueError("completed lookup outcome cannot be processing")
@@ -280,7 +300,9 @@ class PostgresContactRepository:
                             provider_called = %s,
                             quota_charged = %s,
                             safe_error_code = NULLIF(%s, ''),
-                            completed_at = %s
+                            completed_at = %s,
+                            revealed_phone_number_id = %s,
+                            revealed_observed_at = %s
                         WHERE id = %s
                           AND account_id = %s
                           AND outcome = 'processing'
@@ -293,6 +315,8 @@ class PostgresContactRepository:
                             quota_charged,
                             safe_error_code.strip(),
                             now,
+                            revealed_phone_number_id,
+                            revealed_observed_at,
                             event_id,
                             account_id,
                         ),
@@ -424,7 +448,7 @@ class PostgresContactRepository:
         deadline = self.monotonic() + timeout_seconds
         while True:
             state = self._get_state(facebook_user_id, provider, field)
-            if state is not None and state.checked_at > after:
+            if state is not None and state.updated_at > after:
                 return state
             remaining = deadline - self.monotonic()
             if remaining <= 0:
@@ -476,7 +500,10 @@ class PostgresContactRepository:
                             checked_at, refresh_after, latest_attempt_id,
                             updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s, %s,
+                            GREATEST(statement_timestamp(), %s)
+                        )
                         ON CONFLICT (facebook_user_id, provider, field) DO UPDATE
                         SET latest_status = EXCLUDED.latest_status,
                             checked_at = EXCLUDED.checked_at,
@@ -561,7 +588,10 @@ class PostgresContactRepository:
                             checked_at, refresh_after, latest_attempt_id,
                             updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s, %s,
+                            GREATEST(statement_timestamp(), %s)
+                        )
                         ON CONFLICT (facebook_user_id, provider, field) DO UPDATE
                         SET latest_status = EXCLUDED.latest_status,
                             checked_at = EXCLUDED.checked_at,

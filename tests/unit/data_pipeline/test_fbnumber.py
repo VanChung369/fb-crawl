@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 
@@ -216,3 +216,26 @@ def test_fbnumber_retries_rate_limit_with_bound() -> None:
     assert result.error_code == "provider_rate_limited"
     assert calls == 2
     assert sleeps == [0.25]
+
+
+def test_fbnumber_preserves_retry_after_from_rate_limit_response() -> None:
+    checked_at = datetime(2026, 8, 31, 3, tzinfo=UTC)
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        max_retries=0,
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    429,
+                    headers={"Retry-After": "120"},
+                )
+            )
+        ),
+        clock=lambda: checked_at,
+    )
+
+    result = provider.search(FacebookIdentity(uid="10001"))
+
+    assert result.status is ProviderStatus.RATE_LIMITED
+    assert result.retry_after == checked_at + timedelta(minutes=2)

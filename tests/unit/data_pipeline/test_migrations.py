@@ -12,6 +12,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "005_product_licenses",
         "006_auth_session_reauthentication",
         "007_product_contact_lookup",
+        "008_lookup_event_phone_snapshot",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql
@@ -130,3 +131,13 @@ def test_migrations_are_sorted_by_version() -> None:
     assert tuple(item.version for item in migrations) == tuple(
         sorted(item.version for item in migrations)
     )
+
+
+def test_lookup_event_snapshot_migration_preserves_the_revealed_phone() -> None:
+    migration = load_migrations()[-1]
+
+    assert migration.version == "008_lookup_event_phone_snapshot"
+    assert "revealed_phone_number_id bigint" in migration.sql
+    assert "REFERENCES phone_numbers (id)" in migration.sql
+    assert "revealed_observed_at timestamptz" in migration.sql
+    assert "lookup_events_revealed_phone_snapshot_check" in migration.sql

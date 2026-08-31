@@ -52,6 +52,8 @@ class ContactRepository(Protocol):
         quota_charged: bool,
         safe_error_code: str,
         now: datetime,
+        revealed_phone_number_id: int | None = None,
+        revealed_observed_at: datetime | None = None,
     ) -> LookupEvent | None: ...
 
     def claim_lease(

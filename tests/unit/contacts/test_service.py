@@ -133,10 +133,12 @@ class FakeContacts:
         self.created = event()
         self.lease_acquired = True
         self.wait_result: LookupState | None = None
+        self.wait_cache: CachedContact | None = None
         self.final_state: LookupState | None = None
         self.final_cache: CachedContact | None = None
         self.release_calls: list[tuple[object, ...]] = []
         self.finalized_enriched: EnrichedUser | None = None
+        self.finalized_refresh_after: datetime | None = None
         self.complete_calls: list[tuple[object, ...]] = []
 
     def resolve_identity(self, identity: FacebookIdentity) -> ContactIdentity:
@@ -170,6 +172,8 @@ class FakeContacts:
         )
 
     def wait_for_state(self, *_args: object, **_kwargs: object):
+        if self.wait_result is not None and self.wait_cache is not None:
+            self.cached = self.wait_cache
         return self.wait_result
 
     def complete_lookup_event(
@@ -181,7 +185,7 @@ class FakeContacts:
         **kwargs: object,
     ) -> LookupEvent:
         self.complete_calls.append((account_id, event_id, outcome, source, kwargs))
-        return replace(
+        completed = replace(
             self.created,
             outcome=outcome,
             result_source=source,
@@ -189,10 +193,21 @@ class FakeContacts:
             quota_charged=bool(kwargs["quota_charged"]),
             safe_error_code=str(kwargs["safe_error_code"]),
             completed_at=kwargs["now"],
+            revealed_phone_number_id=kwargs.get("revealed_phone_number_id"),
+            revealed_phone=(
+                self.cached.phone
+                if kwargs.get("revealed_phone_number_id")
+                == self.cached.phone_number_id
+                else ""
+            ),
+            revealed_observed_at=kwargs.get("revealed_observed_at"),
         )
+        self.created = completed
+        return completed
 
     def finalize_enrichment(self, *args: object) -> LookupState | None:
         self.finalized_enriched = args[4]  # type: ignore[assignment]
+        self.finalized_refresh_after = args[5]  # type: ignore[assignment]
         if self.final_state is not None and self.final_cache is not None:
             self.cached = self.final_cache
         return self.final_state
@@ -206,6 +221,7 @@ class FakePipeline:
     def __init__(self) -> None:
         self.calls: list[object] = []
         self.error: Exception | None = None
+        self.users_override: tuple[EnrichedUser, ...] | None = None
         self.provider_result = ProviderResult(
             provider="fbnumber",
             status=ProviderStatus.NOT_FOUND,
@@ -216,8 +232,7 @@ class FakePipeline:
         self.calls.append(bundles)
         if self.error is not None:
             raise self.error
-        return SimpleNamespace(
-            users=(
+        users = (
                 EnrichedUser(
                     bundle=UserBundle(
                         identity=IDENTITY,
@@ -226,6 +241,8 @@ class FakePipeline:
                     provider_result=self.provider_result,
                 ),
             )
+        return SimpleNamespace(
+            users=(self.users_override if self.users_override is not None else users)
         )
 
 
@@ -234,7 +251,13 @@ def service(cached: CachedContact):
     quota = FakeQuota()
     pipeline = FakePipeline()
     return (
-        ContactLookupService(FakeEntitlements(), quota, contacts, pipeline),
+        ContactLookupService(
+            FakeEntitlements(),
+            quota,
+            contacts,
+            pipeline,
+            clock=lambda: NOW,
+        ),
         contacts,
         quota,
         pipeline,
@@ -463,6 +486,7 @@ def test_polling_completes_event_when_other_owner_published_phone() -> None:
     published_state = replace(
         state(ProviderStatus.FOUND, NOW + timedelta(days=30)),
         checked_at=NOW + timedelta(seconds=1),
+        updated_at=NOW + timedelta(seconds=1),
     )
     cached = CachedContact(
         CONTACT.id,
@@ -541,3 +565,206 @@ def test_provider_identity_without_phone_is_negative_for_phone_field() -> None:
         contacts.finalized_enriched.provider_result.status
         is ProviderStatus.NOT_FOUND
     )
+
+
+def test_poll_accepts_state_published_after_event_even_if_provider_started_before() -> None:
+    published_state = replace(
+        state(ProviderStatus.FOUND, NOW + timedelta(days=30)),
+        checked_at=NOW - timedelta(seconds=5),
+        updated_at=NOW + timedelta(seconds=1),
+    )
+    cached = CachedContact(
+        CONTACT.id,
+        501,
+        "+84981234567",
+        NOW + timedelta(seconds=1),
+        published_state,
+    )
+    lookup, _contacts, _quota, _pipeline = service(cached)
+
+    result = lookup.get_event(ACCOUNT.id, 71)
+
+    assert result is not None
+    assert result.state is LookupOutcome.FOUND
+    assert result.phone == "+84981234567"
+
+
+def test_non_owner_reuses_published_rate_limit_instead_of_processing() -> None:
+    limited = replace(
+        state(ProviderStatus.RATE_LIMITED, NOW + timedelta(minutes=15)),
+        checked_at=NOW - timedelta(seconds=5),
+        updated_at=NOW + timedelta(seconds=1),
+    )
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, pipeline = service(cached)
+    contacts.lease_acquired = False
+    contacts.wait_result = limited
+    contacts.wait_cache = CachedContact(CONTACT.id, None, "", None, limited)
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.state is LookupOutcome.FAILED
+    assert result.safe_error_code == "provider_rate_limited"
+    assert pipeline.calls == []
+
+
+def test_malformed_pipeline_result_terminalizes_event_safely() -> None:
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, pipeline = service(cached)
+    pipeline.users_override = ()
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.state is LookupOutcome.FAILED
+    assert result.safe_error_code == "contact_enrichment_failed"
+    assert contacts.created.outcome is LookupOutcome.FAILED
+    assert len(contacts.release_calls) == 1
+
+
+def test_recent_phone_evidence_survives_a_later_provider_failure() -> None:
+    failed_state = replace(
+        state(ProviderStatus.FAILED, NOW + timedelta(minutes=15)),
+        checked_at=NOW - timedelta(minutes=1),
+        updated_at=NOW - timedelta(minutes=1),
+    )
+    cached = CachedContact(
+        CONTACT.id,
+        501,
+        "+84981234567",
+        NOW - timedelta(days=1),
+        failed_state,
+    )
+    lookup, _contacts, _quota, pipeline = service(cached)
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.state is LookupOutcome.FOUND
+    assert result.source is LookupSource.CACHE
+    assert result.phone == "+84981234567"
+    assert pipeline.calls == []
+
+
+def test_terminal_found_poll_uses_event_phone_and_current_month_quota() -> None:
+    cached = CachedContact(
+        CONTACT.id,
+        999,
+        "+84999999999",
+        NOW,
+        state(ProviderStatus.FOUND, NOW + timedelta(days=30)),
+    )
+    lookup, contacts, quota, _pipeline = service(cached)
+    contacts.created = replace(
+        event(),
+        outcome=LookupOutcome.FOUND,
+        result_source=LookupSource.PROVIDER,
+        completed_at=NOW - timedelta(days=31),
+        revealed_phone_number_id=501,
+        revealed_phone="+84981234567",
+        revealed_observed_at=NOW - timedelta(days=31),
+    )
+
+    result = lookup.get_event(ACCOUNT.id, 71)
+
+    assert result is not None
+    assert result.phone == "+84981234567"
+    assert result.monthly_used == 12
+    assert result.monthly_limit == 100
+    assert quota.reserve_calls == [(ACCOUNT.id, CONTACT.id, 501, 71, NOW)]
+    assert contacts.complete_calls == []
+
+
+def test_terminal_found_poll_withholds_event_phone_when_new_month_is_full() -> None:
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, quota, _pipeline = service(cached)
+    contacts.created = replace(
+        event(),
+        outcome=LookupOutcome.FOUND,
+        result_source=LookupSource.PROVIDER,
+        completed_at=NOW - timedelta(days=31),
+        revealed_phone_number_id=501,
+        revealed_phone="+84981234567",
+        revealed_observed_at=NOW - timedelta(days=31),
+    )
+    quota.reserve_result = RevealDecision(False, False, None, 100, 100)
+
+    result = lookup.get_event(ACCOUNT.id, 71)
+
+    assert result is not None
+    assert result.state is LookupOutcome.QUOTA_EXCEEDED
+    assert result.phone == ""
+    assert result.monthly_used == 100
+    assert result.safe_error_code == "contact_quota_exhausted"
+
+
+def test_terminal_failure_poll_reports_current_quota_metadata() -> None:
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, _pipeline = service(cached)
+    contacts.created = replace(
+        event(),
+        outcome=LookupOutcome.FAILED,
+        safe_error_code="provider_failed",
+        completed_at=NOW,
+    )
+
+    result = lookup.get_event(ACCOUNT.id, 71)
+
+    assert result is not None
+    assert result.monthly_used == 11
+    assert result.monthly_limit == 100
+
+
+def test_provider_auth_failure_is_mapped_and_cached_for_a_day() -> None:
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, pipeline = service(cached)
+    pipeline.provider_result = ProviderResult(
+        provider="fbnumber",
+        status=ProviderStatus.FAILED,
+        checked_at=NOW,
+        error_code="provider_http_401",
+    )
+    contacts.final_state = state(
+        ProviderStatus.FAILED, NOW + timedelta(days=1)
+    )
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.safe_error_code == "provider_authentication_failed"
+    assert contacts.finalized_refresh_after == NOW + timedelta(days=1)
+
+
+def test_provider_rate_limit_uses_retry_after_for_cache_expiry() -> None:
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, pipeline = service(cached)
+    retry_after = NOW + timedelta(hours=2)
+    pipeline.provider_result = ProviderResult(
+        provider="fbnumber",
+        status=ProviderStatus.RATE_LIMITED,
+        checked_at=NOW,
+        error_code="provider_rate_limited",
+        retry_after=retry_after,
+    )
+    contacts.final_state = state(ProviderStatus.RATE_LIMITED, retry_after)
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.safe_error_code == "provider_rate_limited"
+    assert contacts.finalized_refresh_after == retry_after
+
+
+def test_unknown_provider_error_is_not_exposed_to_client() -> None:
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, pipeline = service(cached)
+    pipeline.provider_result = ProviderResult(
+        provider="fbnumber",
+        status=ProviderStatus.FAILED,
+        checked_at=NOW,
+        error_code="secret_vendor_internal_state",
+    )
+    contacts.final_state = state(
+        ProviderStatus.FAILED, NOW + timedelta(minutes=15)
+    )
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.safe_error_code == "provider_failed"
+    assert "secret" not in result.safe_error_code

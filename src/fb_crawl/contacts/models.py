@@ -79,3 +79,6 @@ class LookupEvent:
     safe_error_code: str
     created_at: datetime
     completed_at: datetime | None
+    revealed_phone_number_id: int | None = None
+    revealed_phone: str = ""
+    revealed_observed_at: datetime | None = None

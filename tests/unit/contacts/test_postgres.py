@@ -134,6 +134,37 @@ def test_wait_for_state_does_not_accept_the_preexisting_check_boundary() -> None
     assert state is None
 
 
+def test_wait_for_state_accepts_a_publish_after_the_event_boundary() -> None:
+    published_at = NOW + timedelta(seconds=1)
+    cursor = LeaseCursor(
+        [],
+        state_row=(
+            ProviderStatus.NOT_FOUND.value,
+            NOW - timedelta(seconds=5),
+            NOW + timedelta(days=7),
+            91,
+            published_at,
+        ),
+    )
+    repository = PostgresContactRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: LeaseConnection(cursor),
+        monotonic=lambda: 0.0,
+        sleeper=lambda _seconds: None,
+    )
+
+    state = repository.wait_for_state(
+        41,
+        "fbnumber",
+        "phone",
+        NOW,
+        timeout_seconds=0,
+    )
+
+    assert state is not None
+    assert state.updated_at == published_at
+
+
 def test_lookup_event_read_is_scoped_to_the_owning_account() -> None:
     event_row = (
         71,
@@ -150,6 +181,9 @@ def test_lookup_event_read_is_scoped_to_the_owning_account() -> None:
         None,
         NOW,
         None,
+        501,
+        "+84981234567",
+        NOW,
     )
     cursor = LeaseCursor([], event_row=event_row)
     repository = PostgresContactRepository(
@@ -161,13 +195,17 @@ def test_lookup_event_read_is_scoped_to_the_owning_account() -> None:
 
     assert event is not None
     assert event.outcome is LookupOutcome.PROCESSING
+    assert event.revealed_phone_number_id == 501
+    assert event.revealed_phone == "+84981234567"
     query = next(
         (sql, params)
         for sql, params in cursor.commands
         if "FROM lookup_events" in sql
     )
-    assert "WHERE id = %s AND account_id = %s" in query[0]
+    assert "WHERE events.id = %s AND events.account_id = %s" in query[0]
     assert query[1] == (71, 5)
+    assert "account_contact_reveals" not in query[0]
+    assert "phone_numbers" in query[0]
 
 
 def test_provider_state_update_requires_a_live_matching_lease_owner() -> None:
@@ -319,3 +357,5 @@ def test_owner_finalizes_evidence_attempt_state_and_lease_in_one_transaction() -
         i for i, sql in enumerate(commands) if "DELETE FROM enrichment_leases" in sql
     )
     assert lease_lock < evidence < state_write < release
+    state_sql = commands[state_write]
+    assert "GREATEST(statement_timestamp(), %s)" in state_sql

@@ -20,6 +20,7 @@ from fb_crawl.contacts.models import (
 )
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
+    ProviderResult,
     ProviderStatus,
     UserBundle,
 )
@@ -78,6 +79,20 @@ class QuotaPort(Protocol):
 
 
 class ContactLookupService:
+    SAFE_ERROR_CODES = frozenset(
+        {
+            "contact_enrichment_failed",
+            "contact_result_unavailable",
+            "provider_authentication_failed",
+            "provider_failed",
+            "provider_identity_conflict",
+            "provider_identity_insufficient",
+            "provider_invalid_json",
+            "provider_rate_limited",
+            "provider_transport_error",
+        }
+    )
+
     def __init__(
         self,
         entitlements: EntitlementsPort,
@@ -88,6 +103,7 @@ class ContactLookupService:
         lease_ttl: timedelta = timedelta(seconds=30),
         wait_timeout_seconds: float = 2.0,
         manual_refresh_interval: timedelta = timedelta(hours=24),
+        found_ttl: timedelta = timedelta(days=30),
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.entitlements = entitlements
@@ -97,6 +113,7 @@ class ContactLookupService:
         self.lease_ttl = lease_ttl
         self.wait_timeout_seconds = wait_timeout_seconds
         self.manual_refresh_interval = manual_refresh_interval
+        self.found_ttl = found_ttl
         self.clock = clock or (lambda: datetime.now(UTC))
 
     @staticmethod
@@ -109,14 +126,34 @@ class ContactLookupService:
         ):
             raise PermissionError("contact lookup access denied")
 
-    @staticmethod
-    def _is_fresh_found(cached: CachedContact, now: datetime) -> bool:
+    def _is_fresh_found(self, cached: CachedContact, now: datetime) -> bool:
         return bool(
             cached.found
-            and cached.state is not None
-            and cached.state.latest_status is ProviderStatus.FOUND
-            and now < cached.state.refresh_after
+            and cached.observed_at is not None
+            and now < cached.observed_at + self.found_ttl
         )
+
+    @classmethod
+    def _safe_error(cls, error_code: str) -> str:
+        cleaned = error_code.strip()
+        if cleaned in {"provider_http_401", "provider_http_403"}:
+            return "provider_authentication_failed"
+        return cleaned if cleaned in cls.SAFE_ERROR_CODES else "provider_failed"
+
+    @staticmethod
+    def _refresh_after(result: ProviderResult) -> datetime:
+        checked_at = result.checked_at
+        if result.status is ProviderStatus.FOUND:
+            return checked_at + timedelta(days=30)
+        if result.status is ProviderStatus.NOT_FOUND:
+            return checked_at + timedelta(days=7)
+        if result.status is ProviderStatus.RATE_LIMITED:
+            if result.retry_after is not None and result.retry_after >= checked_at:
+                return result.retry_after
+            return checked_at + timedelta(minutes=15)
+        if result.error_code in {"provider_http_401", "provider_http_403"}:
+            return checked_at + timedelta(days=1)
+        return checked_at + timedelta(minutes=15)
 
     @staticmethod
     def _is_fresh_negative(cached: CachedContact, now: datetime) -> bool:
@@ -179,7 +216,7 @@ class ContactLookupService:
         used: int,
         limit: int,
     ) -> ContactLookupResult:
-        safe_error = error_code or "provider_failed"
+        safe_error = self._safe_error(error_code)
         self.contacts.complete_lookup_event(
             account_id,
             event.id,
@@ -280,6 +317,8 @@ class ContactLookupService:
             quota_charged=decision.charged,
             safe_error_code="",
             now=now,
+            revealed_phone_number_id=cached.phone_number_id,
+            revealed_observed_at=cached.observed_at,
         )
         return self._result(
             event,
@@ -424,6 +463,22 @@ class ContactLookupService:
                     used=precheck.used,
                     limit=precheck.limit,
                 )
+            if self._is_fresh_failure(cached, now):
+                return self._finish_failed(
+                    account.id,
+                    event,
+                    contact,
+                    now,
+                    error_code=(
+                        "provider_rate_limited"
+                        if cached.state.latest_status
+                        is ProviderStatus.RATE_LIMITED
+                        else "provider_failed"
+                    ),
+                    provider_called=False,
+                    used=precheck.used,
+                    limit=precheck.limit,
+                )
             return self._result(
                 event,
                 contact,
@@ -450,7 +505,16 @@ class ContactLookupService:
                     limit=precheck.limit,
                 )
             if len(run.users) != 1:
-                raise RuntimeError("contact enrichment returned no user")
+                return self._finish_failed(
+                    account.id,
+                    event,
+                    contact,
+                    now,
+                    error_code="contact_enrichment_failed",
+                    provider_called=True,
+                    used=precheck.used,
+                    limit=precheck.limit,
+                )
             enriched = run.users[0]
             status = enriched.provider_result.status
             if (
@@ -465,13 +529,7 @@ class ContactLookupService:
                         status=ProviderStatus.NOT_FOUND,
                     ),
                 )
-            refresh_after = now + (
-                timedelta(days=30)
-                if status is ProviderStatus.FOUND
-                else timedelta(days=7)
-                if status is ProviderStatus.NOT_FOUND
-                else timedelta(minutes=15)
-            )
+            refresh_after = self._refresh_after(enriched.provider_result)
             finalized = self.contacts.finalize_enrichment(
                 contact.id,
                 "fbnumber",
@@ -491,7 +549,9 @@ class ContactLookupService:
                     monthly_limit=precheck.limit,
                 )
             cached = self.contacts.get_cached_contact(contact.id)
-            if status is ProviderStatus.FOUND and cached.found:
+            if status is ProviderStatus.FOUND and self._is_fresh_found(
+                cached, now
+            ):
                 return self._finish_found(
                     account.id,
                     event,
@@ -517,7 +577,9 @@ class ContactLookupService:
                 event,
                 contact,
                 now,
-                error_code=enriched.provider_result.error_code,
+                error_code=self._safe_error(
+                    enriched.provider_result.error_code
+                ),
                 provider_called=True,
                 used=precheck.used,
                 limit=precheck.limit,
@@ -543,35 +605,81 @@ class ContactLookupService:
                 profile_url=event.requested_profile_url,
             ),
         )
+        now = self.clock()
+        quota = self.quota.precheck(
+            account_id, event.facebook_user_id, now
+        )
         cached = self.contacts.get_cached_contact(event.facebook_user_id)
         if event.outcome is not LookupOutcome.PROCESSING:
+            if event.outcome is LookupOutcome.FOUND:
+                if (
+                    event.revealed_phone_number_id is None
+                    or not event.revealed_phone
+                ):
+                    return self._result(
+                        event,
+                        contact,
+                        state=LookupOutcome.FAILED,
+                        source=LookupSource.NONE,
+                        provider_called=event.provider_called,
+                        monthly_used=quota.used,
+                        monthly_limit=quota.limit,
+                        safe_error_code="contact_result_unavailable",
+                    )
+                decision = self.quota.reserve(
+                    account_id,
+                    event.facebook_user_id,
+                    event.revealed_phone_number_id,
+                    event.id,
+                    now,
+                )
+                if not decision.allowed:
+                    return self._result(
+                        event,
+                        contact,
+                        state=LookupOutcome.QUOTA_EXCEEDED,
+                        source=LookupSource.NONE,
+                        provider_called=event.provider_called,
+                        monthly_used=decision.used,
+                        monthly_limit=decision.limit,
+                        safe_error_code="contact_quota_exhausted",
+                    )
+                return self._result(
+                    event,
+                    contact,
+                    state=LookupOutcome.FOUND,
+                    source=event.result_source,
+                    phone=event.revealed_phone,
+                    observed_at=event.revealed_observed_at,
+                    provider_called=event.provider_called,
+                    quota_charged=decision.charged,
+                    monthly_used=decision.used,
+                    monthly_limit=decision.limit,
+                )
             return self._result(
                 event,
                 contact,
                 state=event.outcome,
                 source=event.result_source,
-                phone=(
-                    cached.phone
-                    if event.outcome is LookupOutcome.FOUND and cached.found
-                    else ""
-                ),
-                observed_at=cached.observed_at,
                 provider_called=event.provider_called,
                 quota_charged=event.quota_charged,
+                monthly_used=quota.used,
+                monthly_limit=quota.limit,
                 safe_error_code=event.safe_error_code,
             )
         if (
             cached.state is None
-            or cached.state.checked_at <= event.created_at
+            or cached.state.updated_at <= event.created_at
         ):
             return self._result(
                 event,
                 contact,
                 state=LookupOutcome.PROCESSING,
                 source=LookupSource.NONE,
+                monthly_used=quota.used,
+                monthly_limit=quota.limit,
             )
 
-        now = self.clock()
         if self._is_fresh_found(cached, now):
             return self._finish_found(
                 account_id,
@@ -590,8 +698,8 @@ class ContactLookupService:
                 now,
                 source=LookupSource.NEGATIVE_CACHE,
                 provider_called=False,
-                used=0,
-                limit=0,
+                used=quota.used,
+                limit=quota.limit,
             )
         if cached.state.latest_status in {
             ProviderStatus.FAILED,
@@ -608,12 +716,14 @@ class ContactLookupService:
                     else "provider_failed"
                 ),
                 provider_called=False,
-                used=0,
-                limit=0,
+                used=quota.used,
+                limit=quota.limit,
             )
         return self._result(
             event,
             contact,
             state=LookupOutcome.PROCESSING,
             source=LookupSource.NONE,
+            monthly_used=quota.used,
+            monthly_limit=quota.limit,
         )

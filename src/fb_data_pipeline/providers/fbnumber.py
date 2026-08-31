@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -133,6 +134,28 @@ def _correlation_id(payload: Any, response: httpx.Response) -> str:
     return ""
 
 
+def _retry_after(
+    response: httpx.Response,
+    received_at: datetime,
+) -> datetime | None:
+    value = response.headers.get("Retry-After", "").strip()
+    if not value:
+        return None
+    try:
+        seconds = int(value)
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    if seconds < 0:
+        return None
+    return received_at + timedelta(seconds=seconds)
+
+
 def _phone_candidates(payload: Any) -> tuple[str, ...]:
     found: list[str] = []
 
@@ -259,6 +282,7 @@ class FBNumberProvider:
                     checked_at=checked_at,
                     correlation_id=_correlation_id({}, response),
                     error_code="provider_rate_limited",
+                    retry_after=_retry_after(response, self._clock()),
                 )
 
             if response.status_code >= 500 and attempt < self.max_retries:

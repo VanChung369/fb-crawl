@@ -190,3 +190,4 @@ class ProviderResult:
     profile: ProfileData = field(default_factory=ProfileData)
     name: str = ""
     resolved_identity: FacebookIdentity | None = None
+    retry_after: datetime | None = None
