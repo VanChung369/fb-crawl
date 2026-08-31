@@ -24,6 +24,7 @@ from fb_data_pipeline.core.models import (
     ProviderStatus,
     UserBundle,
 )
+from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 
 
 @dataclass(frozen=True, slots=True)
@@ -588,6 +589,17 @@ class ContactLookupService:
                 used=precheck.used,
                 limit=precheck.limit,
             )
+        except DatabaseIdentityConflict:
+            return self._finish_failed(
+                account.id,
+                event,
+                contact,
+                now,
+                error_code="provider_identity_conflict",
+                provider_called=True,
+                used=precheck.used,
+                limit=precheck.limit,
+            )
         finally:
             self.contacts.release_lease(
                 contact.id, "fbnumber", "phone", owner
@@ -601,14 +613,7 @@ class ContactLookupService:
         event = self.contacts.get_lookup_event(account_id, event_id)
         if event is None:
             return None
-        contact = ContactIdentity(
-            event.facebook_user_id,
-            FacebookIdentity(
-                uid=event.requested_uid,
-                username=event.requested_username,
-                profile_url=event.requested_profile_url,
-            ),
-        )
+        contact = self.contacts.get_identity(event.facebook_user_id)
         now = self.clock()
         quota = self.quota.precheck(
             account_id, event.facebook_user_id, now

@@ -16,6 +16,8 @@ from fb_crawl.entitlements.quota import ContactQuotaService, PostgresContactQuot
 from fb_crawl.entitlements.service import EntitlementService
 from fb_crawl.contacts.postgres import PostgresContactRepository
 from fb_crawl.contacts.service import ContactLookupService
+from fb_crawl.history.postgres import PostgresHistoryRepository
+from fb_crawl.history.repository import HistoryRepository
 from fb_crawl.licenses.config import load_license_keyring
 from fb_crawl.licenses.keys import LicenseKeyService
 from fb_crawl.licenses.postgres import PostgresLicenseRepository
@@ -35,6 +37,7 @@ class ProductServices:
     entitlement_service: EntitlementService | None = None
     quota_service: ContactQuotaService | None = None
     contact_lookup_service: ContactLookupService | None = None
+    history_repository: HistoryRepository | None = None
 
 
 def compose_product_services(
@@ -123,4 +126,8 @@ def compose_product_services(
         entitlement_service=entitlement_service,
         quota_service=quota_service,
         contact_lookup_service=contact_lookup_service,
+        history_repository=PostgresHistoryRepository(
+            database_url,
+            statement_timeout_seconds=statement_timeout_seconds,
+        ),
     )

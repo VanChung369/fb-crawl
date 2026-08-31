@@ -22,10 +22,12 @@ class LeaseCursor:
         *,
         state_row: tuple[object, ...] | None = None,
         event_row: tuple[object, ...] | None = None,
+        identity_row: tuple[object, ...] | None = None,
     ) -> None:
         self.rows = rows
         self.state_row = state_row
         self.event_row = event_row
+        self.identity_row = identity_row
         self.commands: list[tuple[str, tuple[object, ...] | None]] = []
         self._row: tuple[object, ...] | None = None
 
@@ -48,6 +50,8 @@ class LeaseCursor:
             self._row = self.state_row
         elif "FROM lookup_events" in sql:
             self._row = self.event_row
+        elif "FROM facebook_users" in sql:
+            self._row = self.identity_row
 
     def fetchone(self) -> tuple[object, ...] | None:
         return self._row
@@ -206,6 +210,30 @@ def test_lookup_event_read_is_scoped_to_the_owning_account() -> None:
     assert query[1] == (71, 5)
     assert "account_contact_reveals" not in query[0]
     assert "phone_numbers" in query[0]
+
+
+def test_contact_identity_read_returns_canonical_enriched_values() -> None:
+    cursor = LeaseCursor(
+        [],
+        identity_row=(
+            "100123",
+            "sample.user",
+            "Canonical Name",
+            "https://www.facebook.com/sample.user",
+        ),
+    )
+    repository = PostgresContactRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: LeaseConnection(cursor),
+    )
+
+    contact = repository.get_identity(41)
+
+    assert contact.id == 41
+    assert contact.identity.name == "Canonical Name"
+    assert contact.identity.profile_url == (
+        "https://www.facebook.com/sample.user"
+    )
 
 
 def test_provider_state_update_requires_a_live_matching_lease_owner() -> None:

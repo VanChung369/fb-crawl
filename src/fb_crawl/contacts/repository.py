@@ -26,6 +26,8 @@ class ContactRepository(Protocol):
         field: str = "phone",
     ) -> CachedContact | None: ...
 
+    def get_identity(self, facebook_user_id: int) -> ContactIdentity: ...
+
     def create_lookup_event(
         self,
         account_id: int,

@@ -35,6 +35,7 @@ from fb_data_pipeline.core.models import (
     UserBundle,
 )
 from fb_data_pipeline.services.pipeline import EnrichedUser
+from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 
 
 NOW = datetime(2026, 8, 31, 3, tzinfo=UTC)
@@ -139,6 +140,8 @@ class FakeContacts:
         self.release_calls: list[tuple[object, ...]] = []
         self.finalized_enriched: EnrichedUser | None = None
         self.finalized_refresh_after: datetime | None = None
+        self.finalize_error: Exception | None = None
+        self.canonical = CONTACT
         self.complete_calls: list[tuple[object, ...]] = []
 
     def resolve_identity(self, identity: FacebookIdentity) -> ContactIdentity:
@@ -150,6 +153,9 @@ class FakeContacts:
 
     def get_cached_contact(self, *_args: object) -> CachedContact:
         return self.cached
+
+    def get_identity(self, *_args: object) -> ContactIdentity:
+        return self.canonical
 
     def get_lookup_event(
         self, account_id: int, event_id: int
@@ -206,6 +212,8 @@ class FakeContacts:
         return completed
 
     def finalize_enrichment(self, *args: object) -> LookupState | None:
+        if self.finalize_error is not None:
+            raise self.finalize_error
         self.finalized_enriched = args[4]  # type: ignore[assignment]
         self.finalized_refresh_after = args[5]  # type: ignore[assignment]
         if self.final_state is not None and self.final_cache is not None:
@@ -791,3 +799,39 @@ def test_unknown_provider_error_is_not_exposed_to_client() -> None:
 
     assert result.safe_error_code == "provider_failed"
     assert "secret" not in result.safe_error_code
+
+
+def test_provider_alias_conflict_terminalizes_created_event() -> None:
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, _pipeline = service(cached)
+    contacts.finalize_error = DatabaseIdentityConflict("private conflict")
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.state is LookupOutcome.FAILED
+    assert result.safe_error_code == "provider_identity_conflict"
+    assert contacts.created.outcome is LookupOutcome.FAILED
+    assert len(contacts.release_calls) == 1
+
+
+def test_poll_returns_canonical_identity_enriched_after_event_creation() -> None:
+    canonical = ContactIdentity(
+        CONTACT.id,
+        FacebookIdentity(
+            uid="100123",
+            username="sample.user",
+            name="Canonical Name",
+            profile_url="https://www.facebook.com/sample.user",
+        ),
+    )
+    cached = CachedContact(CONTACT.id, None, "", None, None)
+    lookup, contacts, _quota, _pipeline = service(cached)
+    contacts.canonical = canonical
+    contacts.created = replace(
+        event(), outcome=LookupOutcome.NOT_FOUND, completed_at=NOW
+    )
+
+    result = lookup.get_event(ACCOUNT.id, 71)
+
+    assert result is not None
+    assert result.user == canonical.identity

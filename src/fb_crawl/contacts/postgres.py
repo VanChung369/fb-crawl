@@ -165,6 +165,35 @@ class PostgresContactRepository:
             ),
         )
 
+    def get_identity(self, facebook_user_id: int) -> ContactIdentity:
+        try:
+            with self.connect_factory(self.database_url) as connection:
+                with connection.cursor() as cursor:
+                    self._set_timeout(cursor)
+                    cursor.execute(
+                        """
+                        SELECT facebook_uid, facebook_username, display_name,
+                               profile_url
+                        FROM facebook_users
+                        WHERE id = %s
+                        """,
+                        (facebook_user_id,),
+                    )
+                    row = cursor.fetchone()
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database operation failed.") from error
+        if row is None:
+            raise DatabaseError("Database contact identity was not found.")
+        return ContactIdentity(
+            facebook_user_id,
+            FacebookIdentity(
+                uid=row[0],
+                username=row[1],
+                name=row[2],
+                profile_url=row[3],
+            ),
+        )
+
     @staticmethod
     def _event_from_row(row: tuple[object, ...]) -> LookupEvent:
         return LookupEvent(

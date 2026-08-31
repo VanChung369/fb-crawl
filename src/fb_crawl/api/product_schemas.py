@@ -375,3 +375,41 @@ class ContactLookupResponse(BaseModel):
     user: ContactUserResponse
     contact: ContactDataResponse
     meta: ContactLookupMetaResponse
+
+
+class HistoryItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    device_id: int | None
+    facebook_user_id: int
+    user: ContactUserResponse
+    phone: str
+    outcome: Literal[
+        "found", "not_found", "processing", "quota_exceeded", "failed"
+    ]
+    source: Literal["cache", "provider", "negative_cache", "none"]
+    provider_called: bool
+    quota_charged: bool
+    safe_error_code: str
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class HistoryPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[HistoryItemResponse]
+    next_cursor: str | None
+
+
+class HistoryDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: Literal[True]
+
+
+class HistoryDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deleted_count: int

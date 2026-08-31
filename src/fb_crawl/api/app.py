@@ -148,6 +148,20 @@ def create_app(
                     clock=clock,
                 )
             )
+        if (
+            product_services.history_repository is not None
+            and product_services.quota_service is not None
+        ):
+            from fb_crawl.api.routes.history import create_history_router
+
+            app.include_router(
+                create_history_router(
+                    product_services.history_repository,
+                    product_auth,
+                    product_services.quota_service,
+                    clock=clock,
+                )
+            )
         app.include_router(
             create_product_account_router(
                 product_services.account_repository,
@@ -285,6 +299,7 @@ def _requires_internal_api_key(path: str) -> bool:
         "/api/v1/licenses",
         "/api/v1/admin",
         "/api/v1/contacts",
+        "/api/v1/history",
     )
     if any(path == prefix or path.startswith(f"{prefix}/") for prefix in product_prefixes):
         return False
@@ -392,10 +407,13 @@ def _install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unexpected_error_handler(
-        _request: Request,
+        request: Request,
         _error: Exception,
     ) -> JSONResponse:
-        log_unexpected_api_error(logger)
+        log_unexpected_api_error(
+            logger,
+            request_id=getattr(request.state, "request_id", None),
+        )
         return JSONResponse(
             status_code=500,
             content={
