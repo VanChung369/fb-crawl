@@ -406,6 +406,23 @@ class UserQueryRepository:
 
         return self.get_user(user_id)
 
+    def delete_user(self, user_id: int) -> bool:
+        user_id = self._user_id(user_id)
+        with self._connect() as cursor:
+            cursor.execute(
+                "DELETE FROM account_contact_reveals WHERE facebook_user_id = %s",
+                (user_id,),
+            )
+            cursor.execute(
+                "DELETE FROM lookup_events WHERE facebook_user_id = %s",
+                (user_id,),
+            )
+            cursor.execute(
+                "DELETE FROM facebook_users WHERE id = %s",
+                (user_id,),
+            )
+            return bool(cursor.rowcount and cursor.rowcount > 0)
+
     @staticmethod
     def _user_id(value: object) -> int:
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
