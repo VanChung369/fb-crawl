@@ -23,6 +23,16 @@ class EntitlementServiceFake:
         return self.entitlements
 
 
+class QuotaServiceFake:
+    def __init__(self, used: int) -> None:
+        self.used = used
+        self.calls: list[tuple[int, object]] = []
+
+    def current_usage(self, account_id: int, now) -> int:
+        self.calls.append((account_id, now))
+        return self.used
+
+
 class LicenseServiceFake:
     def __init__(self) -> None:
         self.grant = LicenseGrant(LicenseDuration("day", 7), 500, 2, True, False)
@@ -66,12 +76,14 @@ def _headers(access: str) -> dict[str, str]:
 
 def test_user_redeems_license_and_reads_effective_entitlements() -> None:
     licenses = LicenseServiceFake()
+    quota = QuotaServiceFake(2)
     entitlements = EntitlementServiceFake(
         Entitlements(500, 2, True, False, 21, NOW, NOW + timedelta(days=7))
     )
     client, _repository, _auth, access = product_client(
         license_service=licenses,
         entitlement_service=entitlements,
+        quota_service=quota,
     )
 
     redeemed = client.post(
@@ -86,8 +98,13 @@ def test_user_redeems_license_and_reads_effective_entitlements() -> None:
     assert redeemed.status_code == effective.status_code == 200
     assert redeemed.json()["subscription_id"] == 21
     assert effective.json()["monthly_contact_limit"] == 500
+    assert effective.json()["monthly_contact_used"] == 2
     assert effective.json()["allow_group_crawl"] is True
+    assert effective.json()["allow_auto_group_crawl"] is True
+    assert effective.json()["allow_auto_comment_crawl"] is False
+    assert effective.json()["max_auto_crawl_identities"] == 1000
     assert licenses.redeemed == [(7, "LF-REAL-PLAINTEXT-ABCD")]
+    assert quota.calls == [(7, NOW)]
 
 
 def test_account_me_marks_devices_outside_oldest_entitlement_slots() -> None:

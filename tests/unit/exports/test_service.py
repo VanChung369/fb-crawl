@@ -4,8 +4,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
 from fb_crawl.exports.models import ExportFormat, ExportJob, ExportStatus
 from fb_crawl.exports.service import ExportService, ExportWorker
+from fb_crawl.core.exceptions import ValidationError
 
 
 NOW = datetime(2026, 8, 31, 3, tzinfo=UTC)
@@ -40,11 +43,29 @@ class Repository:
         self.cleared = []
         self.deleted_jobs = []
         self.delete_path = ""
+        self.events = []
+        self.worker_recent = True
+        self.worker_seen_at = NOW
+        self.created = []
+
+    def worker_is_recent(self, now, max_age):
+        return self.worker_recent
+
+    def worker_last_seen(self):
+        return self.worker_seen_at
+
+    def create(self, account_id, format_name, filters, now):
+        self.created.append((account_id, format_name, filters, now))
+        return job()
+
+    def touch_worker(self, worker_id, now):
+        self.events.append(("touch_worker", worker_id, now))
 
     def expire_completed(self, now):
         return self.expired_paths
 
     def claim_next(self, owner, now):
+        self.events.append(("claim_next", owner, now))
         self.claim_call = (owner, now)
         value, self.claimed = self.claimed, None
         return value
@@ -118,6 +139,23 @@ def test_export_worker_claims_generates_and_completes_with_24_hour_expiry() -> N
     ]
 
 
+def test_export_worker_touches_liveness_before_claiming_queue_work() -> None:
+    repository = Repository()
+    worker = ExportWorker(
+        repository,
+        History(),
+        ArtifactStore(),
+        worker_id="worker-1",
+        clock=lambda: NOW,
+    )
+
+    assert worker.run_once() is False
+    assert repository.events[:2] == [
+        ("touch_worker", "worker-1", NOW),
+        ("claim_next", "worker-1", NOW),
+    ]
+
+
 def test_export_worker_records_only_safe_error_code_and_continues() -> None:
     repository = Repository(job())
     worker = ExportWorker(
@@ -161,3 +199,25 @@ def test_user_delete_cleans_artifact_completed_during_the_delete_race() -> None:
     assert service.delete(7, JOB_ID) is True
 
     assert artifacts.deleted == ["completed-during-delete.csv"]
+
+
+def test_create_rejects_before_queue_write_when_export_worker_is_stale() -> None:
+    repository = Repository()
+    repository.worker_recent = False
+    service = ExportService(repository, ArtifactStore())
+
+    with pytest.raises(ValidationError) as caught:
+        service.create(7, "csv", {}, NOW)
+
+    assert caught.value.code == "export_worker_unavailable"
+    assert repository.created == []
+
+
+def test_worker_health_returns_safe_availability_and_last_seen_time() -> None:
+    repository = Repository()
+    service = ExportService(repository, ArtifactStore())
+
+    health = service.worker_health(NOW)
+
+    assert health.available is True
+    assert health.last_seen_at == NOW

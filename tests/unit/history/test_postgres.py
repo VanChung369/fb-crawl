@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from fb_crawl.history.models import AccountHistoryQuery
 from fb_crawl.history.postgres import PostgresHistoryRepository
@@ -66,6 +67,10 @@ def row(account_id: int = 5):
         "",
         NOW,
         NOW + timedelta(seconds=1),
+        "manual_loaded",
+        "comment_author",
+        "https://www.facebook.com/groups/123/posts/456",
+        UUID("11111111-1111-4111-8111-111111111111"),
     )
 
 
@@ -86,6 +91,14 @@ def test_history_list_binds_account_before_every_filter() -> None:
     )
 
     assert [item.account_id for item in page.items] == [5]
+    assert page.items[0].scan_mode == "manual_loaded"
+    assert page.items[0].source_type == "comment_author"
+    assert page.items[0].source_url == (
+        "https://www.facebook.com/groups/123/posts/456"
+    )
+    assert page.items[0].product_crawl_job_id == UUID(
+        "11111111-1111-4111-8111-111111111111"
+    )
     query = next(
         (sql, params)
         for sql, params in cursor.commands
@@ -94,6 +107,56 @@ def test_history_list_binds_account_before_every_filter() -> None:
     assert "events.account_id = %s" in query[0]
     assert query[1][0] == 5
     assert query[1][-1] == 21
+    assert "events.scan_mode" in query[0]
+    assert "events.source_type" in query[0]
+    assert "events.source_url" in query[0]
+    assert "events.product_crawl_job_id" in query[0]
+
+
+def test_history_list_keeps_only_the_newest_event_for_each_person() -> None:
+    cursor = Cursor([row()])
+    repository = PostgresHistoryRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: Connection(cursor),
+    )
+
+    repository.list(AccountHistoryQuery(account_id=5, limit=20))
+
+    sql = next(
+        command
+        for command, _params in cursor.commands
+        if "FROM lookup_events AS events" in command
+    )
+    normalized_sql = " ".join(sql.split())
+    assert "ROW_NUMBER() OVER" in normalized_sql
+    assert (
+        "PARTITION BY events.account_id, events.facebook_user_id"
+        in normalized_sql
+    )
+    assert "person_rank = 1" in normalized_sql
+
+
+def test_history_list_can_scope_results_to_one_product_crawl_job() -> None:
+    cursor = Cursor([row()])
+    repository = PostgresHistoryRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: Connection(cursor),
+    )
+    job_id = UUID("11111111-1111-4111-8111-111111111111")
+
+    repository.list(AccountHistoryQuery(
+        account_id=5,
+        product_crawl_job_id=job_id,
+        limit=20,
+    ))
+
+    sql, params = next(
+        (command, values)
+        for command, values in cursor.commands
+        if "FROM lookup_events AS events" in command
+    )
+    assert "events.product_crawl_job_id = %s" in sql
+    assert params == (5, job_id, 21)
 
 
 def test_history_get_and_delete_are_tenant_scoped() -> None:
@@ -114,6 +177,26 @@ def test_history_get_and_delete_are_tenant_scoped() -> None:
         if "lookup_events" in sql and "set_config" not in sql
     ]
     assert all(params[:2] == (5, 71) for _sql, params in scoped)
+
+
+def test_delete_person_removes_all_events_only_for_the_account_user_pair() -> None:
+    cursor = Cursor()
+    repository = PostgresHistoryRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: Connection(cursor),
+    )
+
+    deleted = repository.delete_person(5, 41)
+
+    assert deleted == 1
+    delete_sql, params = next(
+        (sql, values)
+        for sql, values in cursor.commands
+        if "DELETE FROM lookup_events" in sql
+    )
+    assert "account_id = %s" in delete_sql
+    assert "facebook_user_id = %s" in delete_sql
+    assert params == (5, 41)
 
 
 def test_filtered_delete_never_touches_reveal_or_usage_ledgers() -> None:

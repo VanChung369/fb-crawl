@@ -31,6 +31,8 @@ class RevealDecision:
 
 
 class ContactQuotaRepository(Protocol):
+    def current_usage(self, account_id: int, period_start: date) -> int: ...
+
     def precheck(
         self,
         account_id: int,
@@ -56,6 +58,11 @@ class ContactQuotaService:
     ) -> None:
         self.repository = repository
         self.timezone = timezone
+
+    def current_usage(self, account_id: int, now: datetime) -> int:
+        return self.repository.current_usage(
+            account_id, quota_period(now, self.timezone)
+        )
 
     def precheck(
         self, account_id: int, facebook_user_id: int, now: datetime
@@ -130,6 +137,19 @@ class PostgresContactQuotaRepository:
             used=used,
             limit=limit,
         )
+
+    def current_usage(self, account_id: int, period_start: date) -> int:
+        with self._connect() as cursor:
+            cursor.execute(
+                """
+                SELECT used_contact_count
+                FROM usage_monthly
+                WHERE account_id = %s AND period_start = %s
+                """,
+                (account_id, period_start),
+            )
+            row = cursor.fetchone()
+        return 0 if row is None else int(row[0])
 
     def reserve(
         self,

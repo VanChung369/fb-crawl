@@ -25,6 +25,7 @@ class ContactLookupServiceFake:
         self.lookup_calls: list[tuple[object, ...]] = []
         self.poll_accounts: list[int] = []
         self.request_ids: list[str] = []
+        self.scan_contexts: list[object] = []
         self.event_visible = True
 
     def lookup(
@@ -34,11 +35,13 @@ class ContactLookupServiceFake:
         request,
         now,
         force_refresh: bool = False,
+        scan_context=None,
     ) -> ContactLookupResult:
         self.lookup_calls.append(
             (account.id, device.id, request, now, force_refresh)
         )
         self.request_ids.append(current_request_id())
+        self.scan_contexts.append(scan_context)
         return self.result
 
     def get_event(
@@ -303,3 +306,63 @@ def test_profile_url_only_derives_provider_username() -> None:
     assert response.status_code == 200
     request = service.lookup_calls[0][2]
     assert request.username == "sample.user"
+
+
+def test_batch_lookup_returns_ordered_manual_scan_results() -> None:
+    service = ContactLookupServiceFake(result(LookupOutcome.FOUND))
+    client, _repository, _auth, access = product_client(
+        contact_lookup_service=service
+    )
+
+    response = client.post(
+        "/api/v1/contacts/batch-lookup",
+        headers=headers(access),
+        json={
+            "items": [
+                {
+                    **REQUEST,
+                    "source_type": "comment_author",
+                    "source_url": "https://www.facebook.com/groups/123/posts/456",
+                },
+                {
+                    **REQUEST,
+                    "source_type": "comment_author",
+                    "source_url": "https://www.facebook.com/groups/123/posts/456",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["detected_count"] == 2
+    assert body["unique_count"] == body["processed_count"] == 1
+    assert body["items"][1]["duplicate_of"] == 0
+    assert len(service.lookup_calls) == 1
+    assert service.scan_contexts[0].mode == "manual_loaded"
+    assert service.scan_contexts[0].source_type == "comment_author"
+
+
+def test_batch_lookup_rejects_unknown_fields_and_foreign_source_urls() -> None:
+    service = ContactLookupServiceFake(result(LookupOutcome.FOUND))
+    client, _repository, _auth, access = product_client(
+        contact_lookup_service=service
+    )
+
+    response = client.post(
+        "/api/v1/contacts/batch-lookup",
+        headers=headers(access),
+        json={
+            "items": [
+                {
+                    **REQUEST,
+                    "source_type": "member",
+                    "source_url": "https://evil.example/groups/123",
+                    "html": "<html>secret</html>",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert service.lookup_calls == []

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import signal
+import subprocess
 from uuid import UUID
 
 import pytest
@@ -431,3 +433,31 @@ def test_export_worker_mode_requires_no_provider_browser_or_saved_session(
 
     assert result == 0
     assert events == ["require_database", "compose_export", "run_once"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows launcher")
+def test_windows_launcher_dry_run_plans_api_and_workers_without_starting() -> None:
+    project_root = Path(__file__).parents[2]
+    script = project_root / "scripts" / "start-lead-finder.ps1"
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "-WhatIf",
+        ],
+        cwd=project_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "API: would start" in result.stdout
+    assert "Export worker: would start" in result.stdout
+    assert "Crawl worker: would start" in result.stdout
+    assert "python.exe -m fb_crawl" in result.stdout

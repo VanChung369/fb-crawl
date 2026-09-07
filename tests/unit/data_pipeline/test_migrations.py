@@ -13,6 +13,10 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "006_auth_session_reauthentication",
         "007_product_contact_lookup",
         "008_lookup_event_phone_snapshot",
+        "009_export_worker_heartbeat",
+        "010_lookup_event_scan_context",
+        "011_product_crawl_jobs",
+        "012_provider_health",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql
@@ -134,10 +138,68 @@ def test_migrations_are_sorted_by_version() -> None:
 
 
 def test_lookup_event_snapshot_migration_preserves_the_revealed_phone() -> None:
-    migration = load_migrations()[-1]
+    migration = next(
+        item
+        for item in load_migrations()
+        if item.version == "008_lookup_event_phone_snapshot"
+    )
 
     assert migration.version == "008_lookup_event_phone_snapshot"
     assert "revealed_phone_number_id bigint" in migration.sql
     assert "REFERENCES phone_numbers (id)" in migration.sql
     assert "revealed_observed_at timestamptz" in migration.sql
     assert "lookup_events_revealed_phone_snapshot_check" in migration.sql
+
+
+def test_export_worker_heartbeat_migration_tracks_only_safe_liveness() -> None:
+    migration = next(
+        item
+        for item in load_migrations()
+        if item.version == "009_export_worker_heartbeat"
+    )
+
+    assert migration.version == "009_export_worker_heartbeat"
+    assert "CREATE TABLE product_worker_heartbeats" in migration.sql
+    assert "worker_kind text PRIMARY KEY" in migration.sql
+    assert "worker_id text NOT NULL" in migration.sql
+    assert "heartbeat_at timestamptz NOT NULL" in migration.sql
+
+
+def test_lookup_event_scan_context_migration_uses_closed_values() -> None:
+    migration = next(
+        item for item in load_migrations()
+        if item.version == "010_lookup_event_scan_context"
+    )
+
+    assert migration.version == "010_lookup_event_scan_context"
+    assert "scan_mode text NOT NULL DEFAULT 'single'" in migration.sql
+    assert "source_type text NOT NULL DEFAULT 'profile'" in migration.sql
+    assert "source_url text NOT NULL DEFAULT ''" in migration.sql
+    assert "product_crawl_job_id uuid" in migration.sql
+    assert "'single', 'manual_loaded', 'automatic'" in migration.sql
+    assert "'profile', 'member', 'post_author', 'comment_author'" in migration.sql
+
+
+def test_product_crawl_job_migration_is_tenant_owned_and_bounded() -> None:
+    migration = next(
+        item for item in load_migrations() if item.version == "011_product_crawl_jobs"
+    )
+
+    assert migration.version == "011_product_crawl_jobs"
+    assert "account_id bigint NOT NULL REFERENCES accounts" in migration.sql
+    assert "'members', 'engagement', 'both'" in migration.sql
+    assert "max_identities BETWEEN 1 AND 1000" in migration.sql
+    assert "product_crawl_job_children" in migration.sql
+
+
+def test_provider_health_migration_stores_only_safe_status() -> None:
+    migration = load_migrations()[-1]
+
+    assert migration.version == "012_provider_health"
+    assert "CREATE TABLE provider_health" in migration.sql
+    assert "provider_name text PRIMARY KEY" in migration.sql
+    assert "configured boolean NOT NULL" in migration.sql
+    assert "last_success_at timestamptz" in migration.sql
+    assert "safe_error_code text NOT NULL" in migration.sql
+    assert "token" not in migration.sql.casefold()
+    assert "response_body" not in migration.sql.casefold()

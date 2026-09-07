@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -69,6 +70,52 @@ def test_fbnumber_returns_consistent_resolved_identity_from_selected_data() -> N
         uid="100123",
         username="sample.user",
     )
+
+
+def test_fbnumber_retries_with_uid_resolved_from_username_response() -> None:
+    request_bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        request_bodies.append(body)
+        if body["uid"]:
+            return httpx.Response(
+                201,
+                json={
+                    "status": "success",
+                    "data": {
+                        "uid": "100123",
+                        "number": "0981 234 567",
+                    },
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {
+                    "uid": "100123",
+                    "number": "",
+                },
+            },
+        )
+
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = provider.search(FacebookIdentity(username="sample.user"))
+
+    assert result.status is ProviderStatus.FOUND
+    assert [item.normalized_phone for item in result.evidence] == [
+        "+84981234567"
+    ]
+    assert request_bodies == [
+        {"username": "sample.user", "name": "", "uid": ""},
+        {"username": "sample.user", "name": "", "uid": "100123"},
+    ]
 
 
 def test_fbnumber_rejects_conflicting_returned_username() -> None:

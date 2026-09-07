@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Protocol
@@ -23,6 +24,16 @@ _FILTER_FIELDS = frozenset(
         "created_to",
     }
 )
+
+
+class ExportWorkerUnavailable(ValidationError):
+    code = "export_worker_unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class ExportWorkerHealth:
+    available: bool
+    last_seen_at: datetime | None
 
 
 def normalize_filter_snapshot(
@@ -95,6 +106,14 @@ class HistoryExportSource:
 
 
 class ExportRepository(Protocol):
+    def worker_is_recent(
+        self,
+        now: datetime,
+        max_age: timedelta,
+    ) -> bool: ...
+
+    def worker_last_seen(self) -> datetime | None: ...
+
     def create(
         self,
         account_id: int,
@@ -113,9 +132,16 @@ class ExportRepository(Protocol):
 
 
 class ExportService:
-    def __init__(self, repository: ExportRepository, artifacts) -> None:
+    def __init__(
+        self,
+        repository: ExportRepository,
+        artifacts,
+        *,
+        worker_max_age: timedelta = timedelta(seconds=15),
+    ) -> None:
         self.repository = repository
         self.artifacts = artifacts
+        self.worker_max_age = worker_max_age
 
     def create(
         self,
@@ -128,16 +154,28 @@ class ExportService:
             resolved_format = ExportFormat(format_name)
         except (TypeError, ValueError) as error:
             raise ValidationError("Invalid export format.") from error
+        normalized_filters = normalize_filter_snapshot(filters)
+        if not self.repository.worker_is_recent(now, self.worker_max_age):
+            raise ExportWorkerUnavailable("Export worker is unavailable.")
         return self.repository.create(
             account_id,
             resolved_format,
-            normalize_filter_snapshot(filters),
+            normalized_filters,
             now,
         )
 
     def get(self, account_id: int, job_id, now: datetime) -> ExportJob | None:
         self._expire(now)
         return self.repository.get(account_id, job_id)
+
+    def worker_health(self, now: datetime) -> ExportWorkerHealth:
+        return ExportWorkerHealth(
+            available=self.repository.worker_is_recent(
+                now,
+                self.worker_max_age,
+            ),
+            last_seen_at=self.repository.worker_last_seen(),
+        )
 
     def artifact(self, job: ExportJob) -> Path | None:
         if job.status is not ExportStatus.COMPLETED or not job.artifact_path:
@@ -168,6 +206,8 @@ class ExportService:
 
 
 class ExportWorkerRepository(Protocol):
+    def touch_worker(self, worker_id: str, now: datetime) -> None: ...
+
     def expire_completed(self, now: datetime) -> tuple[str, ...]: ...
 
     def clear_artifact(self, artifact_path: str, now: datetime) -> bool: ...
@@ -224,6 +264,7 @@ class ExportWorker:
 
     def run_once(self) -> bool:
         now = self.clock()
+        self.repository.touch_worker(self.worker_id, now)
         for path in self.repository.expire_completed(now):
             try:
                 self.artifacts.delete(path)

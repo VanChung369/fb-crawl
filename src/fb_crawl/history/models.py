@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
-from fb_crawl.contacts.models import LookupOutcome, LookupSource
+from fb_crawl.contacts.models import (
+    LookupOutcome,
+    LookupScanMode,
+    LookupSource,
+    LookupSourceType,
+)
 from fb_crawl.core.exceptions import ValidationError
 from fb_crawl.core.jobs import decode_cursor
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
@@ -12,6 +18,7 @@ from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
 @dataclass(frozen=True, slots=True)
 class AccountHistoryQuery:
     account_id: int
+    product_crawl_job_id: UUID | None = None
     outcome: LookupOutcome | str | None = None
     name: str | None = None
     uid: str | None = None
@@ -29,6 +36,10 @@ class AccountHistoryQuery:
             or self.account_id <= 0
         ):
             raise ValidationError("Invalid history account.")
+        if self.product_crawl_job_id is not None and not isinstance(
+            self.product_crawl_job_id, UUID
+        ):
+            raise ValidationError("Invalid product crawl job filter.")
         if self.outcome is not None:
             try:
                 outcome = LookupOutcome(str(self.outcome))
@@ -87,3 +98,18 @@ class HistoryItem:
     safe_error_code: str
     created_at: datetime
     completed_at: datetime | None
+    scan_mode: LookupScanMode | str = LookupScanMode.SINGLE
+    source_type: LookupSourceType | str = LookupSourceType.PROFILE
+    source_url: str = ""
+    product_crawl_job_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            object.__setattr__(self, "scan_mode", LookupScanMode(str(self.scan_mode)))
+            object.__setattr__(
+                self,
+                "source_type",
+                LookupSourceType(str(self.source_type)),
+            )
+        except ValueError as error:
+            raise ValidationError("Invalid history scan context.") from error

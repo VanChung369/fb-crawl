@@ -140,6 +140,36 @@ def test_create_key_persists_digest_and_mask_but_never_plaintext() -> None:
     assert any("INSERT INTO admin_audit_events" in sql for sql, _ in cursor.commands)
 
 
+def test_list_keys_first_page_avoids_untyped_null_cursor_parameter() -> None:
+    cursor = ScriptedCursor([], all_rows=[[]])
+    repository = PostgresLicenseRepository(
+        "postgresql://hidden", connect_factory=connect(cursor)
+    )
+
+    keys = repository.list_keys(limit=25)
+
+    assert keys == ()
+    sql, params = cursor.commands[-1]
+    assert "FROM license_keys" in sql
+    assert "WHERE" not in sql
+    assert params == (25,)
+
+
+def test_list_audit_events_first_page_avoids_untyped_null_cursor_parameter() -> None:
+    cursor = ScriptedCursor([], all_rows=[[]])
+    repository = PostgresLicenseRepository(
+        "postgresql://hidden", connect_factory=connect(cursor)
+    )
+
+    events = repository.list_audit_events(limit=50)
+
+    assert events == ()
+    sql, params = cursor.commands[-1]
+    assert "FROM admin_audit_events" in sql
+    assert "WHERE" not in sql
+    assert params == (50,)
+
+
 def test_second_key_starts_after_existing_valid_end() -> None:
     existing_end = datetime(2026, 9, 30, 8, tzinfo=UTC)
     cursor = ScriptedCursor(

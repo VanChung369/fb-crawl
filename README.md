@@ -35,9 +35,29 @@ python -m fb_crawl api serve --host 127.0.0.1 --port 8000
 # Terminal 2: Start Background Crawl Worker (Default: 1 Worker)
 python -m fb_crawl worker run
 
+# Terminal 3: Process Lead Finder CSV/XLSX export jobs
+python -m fb_crawl worker run --kind export
+
 # Hoặc chạy nhiều Worker song song cùng lúc (Ví dụ: 3 Workers xử lý 3 Job đồng thời)
 python -m fb_crawl worker run --concurrency 3
 ```
+
+On Windows, the project-local launcher starts the missing API, crawl-worker, and export-worker
+processes with the current virtual environment and leaves matching processes
+alone:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-lead-finder.ps1
+```
+
+Use `-WhatIf` to print the commands without starting processes. Logs are kept
+under `runtime/api.*.log`, `runtime/crawl-worker.*.log`, and
+`runtime/export-worker.*.log`. The export worker
+updates its PostgreSQL heartbeat on every poll; `GET /api/v1/worker-health`
+reports safe bearer-authenticated liveness. New export requests return
+`export_worker_unavailable` when no heartbeat has been seen for 15 seconds.
+Artifacts are written below `LEAD_FINDER_EXPORT_DIR` (default
+`runtime/lead-finder-exports`) and retain the existing 24-hour expiry.
 
 ### Lead Finder account setup
 

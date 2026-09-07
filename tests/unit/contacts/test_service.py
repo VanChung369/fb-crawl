@@ -143,12 +143,14 @@ class FakeContacts:
         self.finalize_error: Exception | None = None
         self.canonical = CONTACT
         self.complete_calls: list[tuple[object, ...]] = []
+        self.create_calls: list[tuple[object, ...]] = []
 
     def resolve_identity(self, identity: FacebookIdentity) -> ContactIdentity:
         assert identity == IDENTITY
         return CONTACT
 
     def create_lookup_event(self, *_args: object) -> LookupEvent:
+        self.create_calls.append(_args)
         return self.created
 
     def get_cached_contact(self, *_args: object) -> CachedContact:
@@ -290,6 +292,25 @@ def test_fresh_cache_never_calls_provider() -> None:
     assert result.quota_charged is True
     assert len(quota.reserve_calls) == 1
     assert pipeline.calls == []
+
+
+def test_single_lookup_creates_profile_scan_context_by_default() -> None:
+    cached = CachedContact(
+        CONTACT.id,
+        501,
+        "+84981234567",
+        NOW - timedelta(minutes=1),
+        state(ProviderStatus.FOUND, NOW + timedelta(days=30)),
+    )
+    lookup, contacts, _quota, _pipeline = service(cached)
+
+    lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    context = contacts.create_calls[0][-1]
+    assert context.mode == "single"
+    assert context.source_type == "profile"
+    assert context.source_url == "https://www.facebook.com/100123"
+    assert context.product_crawl_job_id is None
 
 
 def test_non_owner_returns_processing_after_bounded_wait() -> None:

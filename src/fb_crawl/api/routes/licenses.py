@@ -13,6 +13,7 @@ from fb_crawl.api.product_schemas import (
     SubscriptionResponse,
 )
 from fb_crawl.entitlements.models import Entitlements
+from fb_crawl.entitlements.quota import ContactQuotaService
 from fb_crawl.entitlements.service import EntitlementService
 from fb_crawl.licenses.models import Subscription
 from fb_crawl.licenses.service import LicenseService
@@ -25,6 +26,7 @@ def create_license_router(
     current_auth: ProductAccountAuth,
     rate_limiter: RateLimitService,
     *,
+    quota: ContactQuotaService | None = None,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> APIRouter:
     router = APIRouter(tags=["product-licenses"])
@@ -55,8 +57,14 @@ def create_license_router(
     def account_entitlements(
         current: CurrentAccount = Depends(current_auth),
     ) -> EntitlementsResponse:
+        now = clock()
         return _entitlements_response(
-            entitlements.for_account(current.account.id, clock())
+            entitlements.for_account(current.account.id, now),
+            monthly_contact_used=(
+                quota.current_usage(current.account.id, now)
+                if quota is not None
+                else 0
+            ),
         )
 
     return router
@@ -66,12 +74,18 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client is not None else "unknown"
 
 
-def _entitlements_response(value: Entitlements) -> EntitlementsResponse:
+def _entitlements_response(
+    value: Entitlements, *, monthly_contact_used: int
+) -> EntitlementsResponse:
     return EntitlementsResponse(
         monthly_contact_limit=value.monthly_contact_limit,
+        monthly_contact_used=monthly_contact_used,
         max_devices=value.max_devices,
         allow_group_crawl=value.allow_group_crawl,
         allow_comment_crawl=value.allow_comment_crawl,
+        allow_auto_group_crawl=value.allow_auto_group_crawl,
+        allow_auto_comment_crawl=value.allow_auto_comment_crawl,
+        max_auto_crawl_identities=value.max_auto_crawl_identities,
         subscription_id=value.subscription_id,
         starts_at=value.starts_at,
         ends_at=value.ends_at,

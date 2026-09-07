@@ -147,6 +147,22 @@ def test_create_account_uses_parameterized_sql_and_maps_closed_model() -> None:
     )
 
 
+def test_list_accounts_first_page_avoids_untyped_null_cursor_parameter() -> None:
+    cursor = ScriptedCursor([()])
+    repository = PostgresAccountRepository(
+        "postgresql://hidden",
+        connect_factory=ConnectionSequence(cursor),
+    )
+
+    accounts = repository.list_accounts(limit=25)
+
+    assert accounts == ()
+    sql, params = cursor.commands[-1]
+    assert "FROM accounts" in sql
+    assert "WHERE" not in sql
+    assert params == (25,)
+
+
 def test_rotate_refresh_token_is_single_use_and_reuse_revokes_family() -> None:
     original_authentication = NOW - timedelta(hours=1)
     first_cursor = ScriptedCursor(

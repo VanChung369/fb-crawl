@@ -19,7 +19,7 @@ from fb_crawl.api.product_schemas import (
 )
 from fb_crawl.exports.models import ExportJob, ExportStatus
 from fb_crawl.exports.postgres import ExportQueueFull
-from fb_crawl.exports.service import ExportService
+from fb_crawl.exports.service import ExportService, ExportWorkerUnavailable
 from fb_crawl.auth.rate_limit import RateLimitService
 
 
@@ -64,6 +64,8 @@ def create_product_export_router(
             )
         except ExportQueueFull:
             return _error(429, "export_queue_full")
+        except ExportWorkerUnavailable:
+            return _error(503, "export_worker_unavailable")
         return _response(job)
 
     @router.get("/{export_id}", response_model=ExportJobResponse)

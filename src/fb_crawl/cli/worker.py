@@ -170,11 +170,40 @@ def _compose_worker(
         )
 
     policy = load_worker_policy()
+    result_sink = None
+    if (
+        pipeline_settings.fb_number_api_token
+        and os.environ.get("LEAD_FINDER_JWT_SECRET", "").strip()
+        and os.environ.get("LEAD_FINDER_TOKEN_HMAC_SECRET", "").strip()
+    ):
+        from fb_crawl.auth.config import load_auth_settings
+        from fb_crawl.composition.product import compose_product_services
+        from fb_crawl.product_jobs.results import ProductJobResultSink
+
+        product = compose_product_services(
+            pipeline_settings.database_url,
+            load_auth_settings(os.environ),
+            os.environ,
+            statement_timeout_seconds=(
+                pipeline_settings.database_statement_timeout_seconds
+            ),
+            pipeline_settings=pipeline_settings,
+        )
+        if (
+            product.product_crawl_repository is not None
+            and product.contact_lookup_service is not None
+        ):
+            result_sink = ProductJobResultSink(
+                product.product_crawl_repository,
+                product.account_repository,
+                product.contact_lookup_service,
+            )
     worker = CrawlWorker(
         repository,
         runtime_factory,
         worker_id=worker_id,
         policy=policy,
+        result_sink=result_sink,
     )
     return repository, worker
 

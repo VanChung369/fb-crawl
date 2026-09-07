@@ -175,6 +175,7 @@ class JobExecutionControl:
         monotonic: Callable[[], float] = time.monotonic,
         deadline_monotonic: float | None = None,
         now: Callable[[], datetime] | None = None,
+        result_sink: object | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("Job timeout must be positive.")
@@ -186,6 +187,7 @@ class JobExecutionControl:
             deadline_monotonic if deadline_monotonic is not None else monotonic() + timeout_seconds
         )
         self._now = now or (lambda: datetime.now(UTC))
+        self._result_sink = result_sink
         self._active_target_id: object | None = None
 
     def set_active_target(self, target_id: object | None) -> None:
@@ -388,6 +390,7 @@ class CrawlWorker:
         monotonic: Callable[[], float] = time.monotonic,
         heartbeat_factory: Callable[..., LeaseHeartbeat] = LeaseHeartbeat,
         now: Callable[[], datetime] | None = None,
+        result_sink: object | None = None,
     ) -> None:
         if not isinstance(worker_id, str) or not worker_id.strip():
             raise ValueError("Worker identifier is required.")
@@ -400,6 +403,7 @@ class CrawlWorker:
         self._monotonic = monotonic
         self._heartbeat_factory = heartbeat_factory
         self._now = now or (lambda: datetime.now(UTC))
+        self._result_sink = result_sink
 
     def _persist_terminal(
         self,
@@ -478,6 +482,14 @@ class CrawlWorker:
                             promote_facebook_safety_issues(result)
                             control.guard_before_persistence()
                             report = session.ingest(result)
+                            control.guard_before_persistence()
+                            if self._result_sink is not None:
+                                self._result_sink.record(
+                                    job.id,
+                                    job.action,
+                                    result.records,
+                                    self._now(),
+                                )
                             control.emit(
                                 "provider_progress",
                                 counters={

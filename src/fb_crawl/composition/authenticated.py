@@ -186,6 +186,10 @@ def build_authenticated_persistence(
     from fb_data_pipeline.services.ingestion import AuthenticatedIngestionService
     from fb_data_pipeline.services.persistence import PipelinePersistenceService
     from fb_data_pipeline.services.pipeline import EnrichmentPipeline
+    from fb_crawl.providers.health import (
+        ObservedPhoneProvider,
+        PostgresProviderHealthRepository,
+    )
 
     try:
         pipeline_settings.require_database()
@@ -195,7 +199,16 @@ def build_authenticated_persistence(
             "Persistence pipeline configuration is incomplete."
         ) from error
 
-    provider = FBNumberProvider.from_settings(pipeline_settings)
+    provider = ObservedPhoneProvider(
+        FBNumberProvider.from_settings(pipeline_settings),
+        PostgresProviderHealthRepository(
+            pipeline_settings.database_url,
+            statement_timeout_seconds=(
+                pipeline_settings.database_statement_timeout_seconds
+            ),
+        ),
+        configured=True,
+    )
     repository = PostgresRepository(
         pipeline_settings.database_url,
         statement_timeout_seconds=(

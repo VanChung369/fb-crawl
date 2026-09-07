@@ -1,0 +1,1 @@
+"""Safe shared provider observability."""

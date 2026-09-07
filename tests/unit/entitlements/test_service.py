@@ -27,3 +27,14 @@ def test_for_account_returns_effective_repository_snapshot() -> None:
 
     assert actual is expected
     assert repository.calls == [(7, NOW)]
+    assert actual.allow_auto_group_crawl is True
+    assert actual.allow_auto_comment_crawl is True
+    assert actual.max_auto_crawl_identities == 1000
+
+
+def test_default_entitlements_keep_manual_scan_but_disable_automatic_crawl() -> None:
+    value = Entitlements(100, 1, False, False)
+
+    assert value.allow_auto_group_crawl is False
+    assert value.allow_auto_comment_crawl is False
+    assert value.max_auto_crawl_identities == 0

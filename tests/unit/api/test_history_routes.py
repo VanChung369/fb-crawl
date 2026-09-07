@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import timedelta
+from uuid import UUID
 
 from fb_crawl.contacts.models import LookupOutcome, LookupSource
 from fb_crawl.core.jobs import Page
@@ -19,9 +20,16 @@ class HistoryRepositoryFake:
             "https://www.facebook.com/sample.user", 81, "+84981234567",
             LookupOutcome.FOUND, LookupSource.CACHE, False, True, "", NOW,
             NOW + timedelta(seconds=1),
+            scan_mode="automatic",
+            source_type="member",
+            source_url="https://www.facebook.com/groups/123/members",
+            product_crawl_job_id=UUID(
+                "11111111-1111-4111-8111-111111111111"
+            ),
         )
         self.queries = []
         self.deleted: list[tuple[int, int]] = []
+        self.deleted_people: list[tuple[int, int]] = []
         self.filtered = []
         self.visible = True
 
@@ -35,6 +43,10 @@ class HistoryRepositoryFake:
     def delete_one(self, account_id, event_id):
         self.deleted.append((account_id, event_id))
         return self.visible and (account_id, event_id) == (7, 71)
+
+    def delete_person(self, account_id, facebook_user_id):
+        self.deleted_people.append((account_id, facebook_user_id))
+        return 4
 
     def delete_filtered(self, query):
         self.filtered.append(query)
@@ -72,6 +84,14 @@ def test_history_list_forces_authenticated_account_into_query() -> None:
 
     assert response.status_code == 200
     assert response.json()["items"][0]["phone"] == "+84981234567"
+    assert response.json()["items"][0]["scan_mode"] == "automatic"
+    assert response.json()["items"][0]["source_type"] == "member"
+    assert response.json()["items"][0]["source_url"] == (
+        "https://www.facebook.com/groups/123/members"
+    )
+    assert response.json()["items"][0]["product_crawl_job_id"] == (
+        "11111111-1111-4111-8111-111111111111"
+    )
     assert response.json()["next_cursor"] == "next-token"
     assert history.queries[0].account_id == 7
     assert history.queries[0].uid == "100"
@@ -120,6 +140,23 @@ def test_filtered_history_delete_requires_explicit_confirmation() -> None:
     assert allowed.json() == {"deleted_count": 3}
     assert len(history.filtered) == 1
     assert history.filtered[0].account_id == 7
+
+
+def test_history_delete_person_removes_all_account_events_for_that_person() -> None:
+    history = HistoryRepositoryFake()
+    client, _repository, _auth, access = product_client(
+        history_repository=history,
+        quota_service=QuotaFake(),
+    )
+
+    response = client.delete(
+        "/api/v1/history/people/41",
+        headers=headers(access),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted_count": 4}
+    assert history.deleted_people == [(7, 41)]
 
 
 def test_history_requires_bearer_even_for_safe_reads() -> None:

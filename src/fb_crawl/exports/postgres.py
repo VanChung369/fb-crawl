@@ -190,6 +190,53 @@ class PostgresExportRepository:
             row = cursor.fetchone()
         return None if row is None else self._job(row)
 
+    def touch_worker(self, worker_id: str, now: datetime) -> None:
+        self._owner(worker_id)
+        with self._connect() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO product_worker_heartbeats (
+                    worker_kind, worker_id, heartbeat_at
+                ) VALUES ('export', %s, %s)
+                ON CONFLICT (worker_kind) DO UPDATE
+                SET worker_id = EXCLUDED.worker_id,
+                    heartbeat_at = EXCLUDED.heartbeat_at
+                """,
+                (worker_id, now),
+            )
+
+    def worker_is_recent(
+        self,
+        now: datetime,
+        max_age: timedelta,
+    ) -> bool:
+        with self._connect() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM product_worker_heartbeats
+                    WHERE worker_kind = 'export'
+                      AND heartbeat_at >= %s
+                )
+                """,
+                (now - max_age,),
+            )
+            row = cursor.fetchone()
+        return bool(row and row[0])
+
+    def worker_last_seen(self) -> datetime | None:
+        with self._connect() as cursor:
+            cursor.execute(
+                """
+                SELECT heartbeat_at
+                FROM product_worker_heartbeats
+                WHERE worker_kind = 'export'
+                """
+            )
+            row = cursor.fetchone()
+        return None if row is None else row[0]
+
     def complete(
         self,
         job_id: UUID,

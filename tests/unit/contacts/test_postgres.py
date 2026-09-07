@@ -50,6 +50,8 @@ class LeaseCursor:
             self._row = self.state_row
         elif "FROM lookup_events" in sql:
             self._row = self.event_row
+        elif "INSERT INTO lookup_events" in sql:
+            self._row = self.event_row
         elif "FROM facebook_users" in sql:
             self._row = self.identity_row
 
@@ -210,6 +212,77 @@ def test_lookup_event_read_is_scoped_to_the_owning_account() -> None:
     assert query[1] == (71, 5)
     assert "account_contact_reveals" not in query[0]
     assert "phone_numbers" in query[0]
+
+
+def test_lookup_event_creation_persists_normalized_scan_context() -> None:
+    from fb_crawl.contacts import models
+
+    event_row = (
+        71,
+        5,
+        7,
+        41,
+        "100123",
+        "sample.user",
+        "https://www.facebook.com/sample.user",
+        "processing",
+        "none",
+        False,
+        False,
+        None,
+        NOW,
+        None,
+        "manual_loaded",
+        "comment_author",
+        "https://www.facebook.com/groups/123/posts/456",
+        None,
+    )
+    cursor = LeaseCursor([], event_row=event_row)
+    repository = PostgresContactRepository(
+        "postgresql://hidden",
+        connect_factory=lambda _url: LeaseConnection(cursor),
+    )
+    context = models.LookupScanContext(
+        mode="manual_loaded",
+        source_type="comment_author",
+        source_url="https://www.facebook.com/groups/123/posts/456",
+        product_crawl_job_id=None,
+    )
+
+    created = repository.create_lookup_event(
+        5,
+        7,
+        models.ContactIdentity(
+            41,
+            FacebookIdentity(uid="100123", username="sample.user"),
+        ),
+        FacebookIdentity(
+            uid="100123",
+            username="sample.user",
+            profile_url="https://www.facebook.com/sample.user",
+        ),
+        NOW,
+        context,
+    )
+
+    insert_sql, params = next(
+        (sql, values)
+        for sql, values in cursor.commands
+        if "INSERT INTO lookup_events" in sql
+    )
+    assert "scan_mode" in insert_sql
+    assert "source_type" in insert_sql
+    assert "source_url" in insert_sql
+    assert "product_crawl_job_id" in insert_sql
+    assert params is not None
+    assert params[-5:] == (
+        NOW,
+        "manual_loaded",
+        "comment_author",
+        "https://www.facebook.com/groups/123/posts/456",
+        None,
+    )
+    assert created.scan_context == context
 
 
 def test_contact_identity_read_returns_canonical_enriched_values() -> None:

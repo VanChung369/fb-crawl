@@ -63,6 +63,16 @@ class FBNumberTestResponse(BaseModel):
     raw_response: str
 
 
+class ProviderHealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    configured: bool
+    last_success_at: datetime | None
+    safe_error_code: str
+    updated_at: datetime | None
+
+
 class WorkerSettingsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -174,6 +184,7 @@ def create_settings_router(
     job_repository: object = None,
     *,
     auth: ApiKeyAuth,
+    provider_health_repository: object | None = None,
 ) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1/settings",
@@ -266,6 +277,26 @@ def create_settings_router(
                 message="Could not connect to the FBNumber server.",
                 raw_response="",
             )
+
+    @router.get(
+        "/fbnumber/health",
+        response_model=ProviderHealthResponse,
+        responses=ERROR_RESPONSES,
+    )
+    def get_fbnumber_health() -> ProviderHealthResponse:
+        config = effective_fbnumber_config()
+        value = (
+            provider_health_repository.get("fbnumber")
+            if provider_health_repository is not None
+            else None
+        )
+        return ProviderHealthResponse(
+            provider="fbnumber",
+            configured=bool(config["api_url"] and config["api_token"]),
+            last_success_at=(value.last_success_at if value is not None else None),
+            safe_error_code=(value.safe_error_code if value is not None else ""),
+            updated_at=(value.updated_at if value is not None else None),
+        )
 
     @router.get("/worker", response_model=WorkerSettingsResponse, responses=ERROR_RESPONSES)
     def get_worker_settings() -> WorkerSettingsResponse:

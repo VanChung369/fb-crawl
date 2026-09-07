@@ -16,6 +16,7 @@ from fb_crawl.contacts.models import (
     ContactIdentity,
     LookupEvent,
     LookupOutcome,
+    LookupScanContext,
     LookupSource,
 )
 from fb_data_pipeline.core.models import (
@@ -60,6 +61,19 @@ class ContactLookupResult:
     monthly_used: int = 0
     monthly_limit: int = 0
     safe_error_code: str = ""
+
+
+def _profile_source_url(
+    canonical: FacebookIdentity,
+    requested: FacebookIdentity,
+) -> str:
+    if canonical.profile_url or requested.profile_url:
+        return canonical.profile_url or requested.profile_url
+    uid = canonical.uid or requested.uid
+    if uid:
+        return f"https://www.facebook.com/{uid}"
+    username = canonical.username or requested.username
+    return f"https://www.facebook.com/{username}" if username else ""
 
 
 class EntitlementsPort(Protocol):
@@ -345,13 +359,22 @@ class ContactLookupService:
         request: ContactLookupRequest,
         now: datetime,
         force_refresh: bool = False,
+        scan_context: LookupScanContext | None = None,
     ) -> ContactLookupResult:
         self._require_access(account, device)
         self.entitlements.for_account(account.id, now)
         requested = request.identity
         contact = self.contacts.resolve_identity(requested)
+        resolved_scan_context = scan_context or LookupScanContext(
+            source_url=_profile_source_url(contact.identity, requested)
+        )
         event = self.contacts.create_lookup_event(
-            account.id, device.id, contact, requested, now
+            account.id,
+            device.id,
+            contact,
+            requested,
+            now,
+            resolved_scan_context,
         )
         precheck = self.quota.precheck(account.id, contact.id, now)
         if not precheck.allowed:

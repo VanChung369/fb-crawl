@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from urllib.parse import urlsplit
+from uuid import UUID
+
+from fb_crawl.core.exceptions import ValidationError
 
 from fb_data_pipeline.core.models import FacebookIdentity, ProviderStatus
 
@@ -20,6 +24,57 @@ class LookupSource(StrEnum):
     PROVIDER = "provider"
     NEGATIVE_CACHE = "negative_cache"
     NONE = "none"
+
+
+class LookupScanMode(StrEnum):
+    SINGLE = "single"
+    MANUAL_LOADED = "manual_loaded"
+    AUTOMATIC = "automatic"
+
+
+class LookupSourceType(StrEnum):
+    PROFILE = "profile"
+    MEMBER = "member"
+    POST_AUTHOR = "post_author"
+    COMMENT_AUTHOR = "comment_author"
+
+
+@dataclass(frozen=True, slots=True)
+class LookupScanContext:
+    mode: LookupScanMode | str = LookupScanMode.SINGLE
+    source_type: LookupSourceType | str = LookupSourceType.PROFILE
+    source_url: str = ""
+    product_crawl_job_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            mode = LookupScanMode(str(self.mode))
+            source_type = LookupSourceType(str(self.source_type))
+        except ValueError as error:
+            raise ValidationError("Invalid lookup scan context.") from error
+        if not isinstance(self.source_url, str):
+            raise ValidationError("Invalid lookup scan source URL.")
+        source_url = self.source_url.strip()
+        if len(source_url) > 2048:
+            raise ValidationError("Invalid lookup scan source URL.")
+        if source_url:
+            parsed = urlsplit(source_url)
+            if (
+                parsed.scheme != "https"
+                or (parsed.hostname or "").casefold()
+                not in {"facebook.com", "www.facebook.com", "m.facebook.com"}
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                raise ValidationError("Invalid lookup scan source URL.")
+        if self.product_crawl_job_id is not None and not isinstance(
+            self.product_crawl_job_id,
+            UUID,
+        ):
+            raise ValidationError("Invalid product crawl job identifier.")
+        object.__setattr__(self, "mode", mode)
+        object.__setattr__(self, "source_type", source_type)
+        object.__setattr__(self, "source_url", source_url)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,3 +137,4 @@ class LookupEvent:
     revealed_phone_number_id: int | None = None
     revealed_phone: str = ""
     revealed_observed_at: datetime | None = None
+    scan_context: LookupScanContext = LookupScanContext()

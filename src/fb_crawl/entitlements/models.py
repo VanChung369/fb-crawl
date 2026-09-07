@@ -19,3 +19,17 @@ class Entitlements:
             raise ValueError("monthly contact limit must not be negative")
         if self.max_devices < 1:
             raise ValueError("max devices must be positive")
+
+    @property
+    def allow_auto_group_crawl(self) -> bool:
+        return self.allow_group_crawl
+
+    @property
+    def allow_auto_comment_crawl(self) -> bool:
+        return self.allow_comment_crawl
+
+    @property
+    def max_auto_crawl_identities(self) -> int:
+        return 1000 if (
+            self.allow_auto_group_crawl or self.allow_auto_comment_crawl
+        ) else 0

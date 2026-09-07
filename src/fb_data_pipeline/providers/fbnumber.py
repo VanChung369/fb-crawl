@@ -240,6 +240,14 @@ class FBNumberProvider:
             self._client.close()
 
     def search(self, identity: FacebookIdentity) -> ProviderResult:
+        return self._search(identity, allow_resolved_uid_retry=True)
+
+    def _search(
+        self,
+        identity: FacebookIdentity,
+        *,
+        allow_resolved_uid_retry: bool,
+    ) -> ProviderResult:
         checked_at = self._clock()
         if not identity.uid and not identity.username:
             return ProviderResult(
@@ -360,6 +368,23 @@ class FBNumberProvider:
                         provider=self.name,
                         correlation_id=correlation_id,
                     )
+                )
+
+            if (
+                allow_resolved_uid_retry
+                and not evidence
+                and not identity.uid
+                and resolved_identity is not None
+                and resolved_identity.uid
+            ):
+                return self._search(
+                    FacebookIdentity(
+                        uid=resolved_identity.uid,
+                        username=identity.username or resolved_identity.username,
+                        name=identity.name,
+                        profile_url=identity.profile_url,
+                    ),
+                    allow_resolved_uid_retry=False,
                 )
 
             profile, extracted_name = _extract_profile_data(response_body, checked_at)

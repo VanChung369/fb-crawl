@@ -143,6 +143,32 @@ def test_claim_recovers_expired_lease_with_skip_locked_and_owner_fencing() -> No
     assert params[1] == "worker-1"
 
 
+def test_worker_heartbeat_upserts_and_recent_check_uses_inclusive_cutoff() -> None:
+    cursor = Cursor([(True,)])
+    exports = repository(cursor)
+
+    exports.touch_worker("worker-1", NOW)
+    available = exports.worker_is_recent(NOW, timedelta(seconds=15))
+
+    assert available is True
+    touch_sql, touch_params = command(cursor, "product_worker_heartbeats")
+    assert "ON CONFLICT (worker_kind) DO UPDATE" in touch_sql
+    assert touch_params == ("worker-1", NOW)
+    recent_sql, recent_params = cursor.commands[-1]
+    assert "heartbeat_at >= %s" in recent_sql
+    assert recent_params == (NOW - timedelta(seconds=15),)
+
+
+def test_worker_last_seen_returns_only_export_heartbeat_timestamp() -> None:
+    cursor = Cursor([(NOW,)])
+    exports = repository(cursor)
+
+    assert exports.worker_last_seen() == NOW
+    sql, params = command(cursor, "SELECT heartbeat_at")
+    assert "worker_kind = 'export'" in sql
+    assert params is None
+
+
 def test_complete_and_fail_require_current_owner_and_live_running_job() -> None:
     cursor = Cursor()
     exports = repository(cursor)

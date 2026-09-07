@@ -12,12 +12,16 @@ from fb_crawl.api.dependencies import (
     ProductAuthenticationError,
 )
 from fb_crawl.api.product_schemas import (
+    BatchContactLookupRequest,
+    BatchContactLookupResponse,
+    BatchContactResultResponse,
     ContactDataResponse,
     ContactLookupMetaResponse,
     ContactLookupRequest,
     ContactLookupResponse,
     ContactUserResponse,
 )
+from fb_crawl.contacts.batch import BatchContactItem, BatchContactLookupService
 from fb_crawl.contacts.models import LookupOutcome
 from fb_crawl.contacts.service import ContactLookupResult, ContactLookupService
 from fb_crawl.auth.rate_limit import RateLimitService
@@ -32,6 +36,7 @@ def create_contact_router(
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> APIRouter:
     router = APIRouter(tags=["product-contacts"])
+    batch_service = BatchContactLookupService(service)
 
     async def require_bearer_account(
         current: CurrentAccount = Depends(current_auth),
@@ -73,6 +78,60 @@ def create_contact_router(
             return _safe_error(403, "contact_access_denied")
         return _lookup_response(result)
 
+    @router.post(
+        "/api/v1/contacts/batch-lookup",
+        response_model=BatchContactLookupResponse,
+    )
+    def batch_lookup_contacts(
+        payload: BatchContactLookupRequest,
+        request: Request,
+        current: CurrentAccount = Depends(require_bearer_account),
+    ) -> JSONResponse:
+        if not current.device_allowed:
+            return _safe_error(403, "contact_device_not_allowed")
+        try:
+            now = clock()
+            rate_limiter.check(
+                "contact_batch_lookup",
+                str(current.account.id),
+                str(current.device.id),
+                _client_ip(request),
+                now,
+            )
+            result = batch_service.lookup(
+                current.account,
+                current.device,
+                tuple(
+                    BatchContactItem(
+                        request=item.to_domain(),
+                        source_type=item.source_type,
+                        source_url=item.source_url,
+                    )
+                    for item in payload.items
+                ),
+                now,
+            )
+        except DatabaseIdentityConflict:
+            return _safe_error(409, "provider_identity_conflict")
+        except PermissionError:
+            return _safe_error(403, "contact_access_denied")
+        response = BatchContactLookupResponse(
+            items=[
+                BatchContactResultResponse(
+                    index=item.index,
+                    duplicate_of=item.duplicate_of,
+                    **_lookup_model(item.result).model_dump(),
+                )
+                for item in result.items
+            ],
+            detected_count=result.detected_count,
+            unique_count=result.unique_count,
+            processed_count=result.processed_count,
+            found_count=result.found_count,
+            quota_exceeded_count=result.quota_exceeded_count,
+        )
+        return JSONResponse(content=response.model_dump(mode="json"))
+
     @router.get(
         "/api/v1/contacts/lookups/{event_id}",
         response_model=ContactLookupResponse,
@@ -100,7 +159,15 @@ def create_contact_router(
 
 
 def _lookup_response(result: ContactLookupResult) -> JSONResponse:
-    response = ContactLookupResponse(
+    response = _lookup_model(result)
+    return JSONResponse(
+        status_code=_status_code(result),
+        content=response.model_dump(mode="json"),
+    )
+
+
+def _lookup_model(result: ContactLookupResult) -> ContactLookupResponse:
+    return ContactLookupResponse(
         user=ContactUserResponse(
             facebook_uid=result.user.uid,
             username=result.user.username,
@@ -124,10 +191,6 @@ def _lookup_response(result: ContactLookupResult) -> JSONResponse:
             ),
             safe_error_code=result.safe_error_code,
         ),
-    )
-    return JSONResponse(
-        status_code=_status_code(result),
-        content=response.model_dump(mode="json"),
     )
 
 

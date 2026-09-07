@@ -12,6 +12,7 @@ from fb_crawl.contacts.models import (
     EnrichmentLease,
     LookupEvent,
     LookupOutcome,
+    LookupScanContext,
     LookupSource,
     LookupState,
 )
@@ -196,6 +197,18 @@ class PostgresContactRepository:
 
     @staticmethod
     def _event_from_row(row: tuple[object, ...]) -> LookupEvent:
+        has_snapshot = len(row) in {17, 21}
+        context_index = 17 if len(row) >= 21 else 14 if len(row) >= 18 else None
+        scan_context = (
+            LookupScanContext(
+                mode=str(row[context_index]),
+                source_type=str(row[context_index + 1]),
+                source_url=str(row[context_index + 2] or ""),
+                product_crawl_job_id=row[context_index + 3],  # type: ignore[arg-type]
+            )
+            if context_index is not None
+            else LookupScanContext()
+        )
         return LookupEvent(
             id=int(row[0]),
             account_id=int(row[1]),
@@ -212,12 +225,13 @@ class PostgresContactRepository:
             created_at=row[12],  # type: ignore[arg-type]
             completed_at=row[13],  # type: ignore[arg-type]
             revealed_phone_number_id=(
-                int(row[14]) if len(row) > 14 and row[14] is not None else None
+                int(row[14]) if has_snapshot and row[14] is not None else None
             ),
-            revealed_phone=(str(row[15] or "") if len(row) > 15 else ""),
+            revealed_phone=(str(row[15] or "") if has_snapshot else ""),
             revealed_observed_at=(
-                row[16] if len(row) > 16 else None  # type: ignore[arg-type]
+                row[16] if has_snapshot else None  # type: ignore[arg-type]
             ),
+            scan_context=scan_context,
         )
 
     @staticmethod
@@ -226,7 +240,8 @@ class PostgresContactRepository:
             id, account_id, device_id, facebook_user_id,
             requested_uid, requested_username, requested_profile_url,
             outcome, result_source, provider_called, quota_charged,
-            safe_error_code, created_at, completed_at
+            safe_error_code, created_at, completed_at,
+            scan_mode, source_type, source_url, product_crawl_job_id
         """
 
     def create_lookup_event(
@@ -236,6 +251,7 @@ class PostgresContactRepository:
         contact: ContactIdentity,
         requested: FacebookIdentity,
         now: datetime,
+        scan_context: LookupScanContext = LookupScanContext(),
     ) -> LookupEvent:
         try:
             with self.connect_factory(self.database_url) as connection:
@@ -246,9 +262,10 @@ class PostgresContactRepository:
                         INSERT INTO lookup_events (
                             account_id, device_id, facebook_user_id,
                             requested_uid, requested_username,
-                            requested_profile_url, created_at
+                            requested_profile_url, created_at, scan_mode,
+                            source_type, source_url, product_crawl_job_id
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING {self._event_columns()}
                         """,
                         (
@@ -259,6 +276,10 @@ class PostgresContactRepository:
                             requested.username or None,
                             requested.profile_url or None,
                             now,
+                            scan_context.mode.value,
+                            scan_context.source_type.value,
+                            scan_context.source_url,
+                            scan_context.product_crawl_job_id,
                         ),
                     )
                     row = cursor.fetchone()
@@ -288,7 +309,10 @@ class PostgresContactRepository:
                                events.created_at, events.completed_at,
                                events.revealed_phone_number_id,
                                numbers.normalized_phone,
-                               events.revealed_observed_at
+                               events.revealed_observed_at,
+                               events.scan_mode, events.source_type,
+                               events.source_url,
+                               events.product_crawl_job_id
                         FROM lookup_events AS events
                         LEFT JOIN phone_numbers AS numbers
                           ON numbers.id = events.revealed_phone_number_id

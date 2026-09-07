@@ -32,6 +32,10 @@ def product_client(
     history_repository=None,
     export_service=None,
     metrics_repository=None,
+    product_crawl_repository=None,
+    facebook_session_available=False,
+    job_service=None,
+    job_repository=None,
 ) -> tuple[TestClient, ProductRepositoryFake, ProductAuthServiceFake, str]:
     repository = ProductRepositoryFake()
     tokens = TokenService(jwt_secret="j" * 32, token_hmac_secret="h" * 32)
@@ -53,11 +57,13 @@ def product_client(
         history_repository=history_repository,
         export_service=export_service,
         metrics_repository=metrics_repository,
+        product_crawl_repository=product_crawl_repository,
+        facebook_session_available=facebook_session_available,
     )
     app = create_app(
         ApiSettings(api_key=API_KEY, cors_origins=(WEB_ORIGIN,)),
-        job_service=object(),
-        job_repository=object(),
+        job_service=job_service or object(),
+        job_repository=job_repository or object(),
         user_repository=object(),
         readiness=lambda _migration: True,
         product_services=services,
@@ -92,6 +98,15 @@ def test_existing_and_unknown_api_routes_still_require_internal_api_key() -> Non
     assert client.get("/api/v1/protected-probe").status_code == 401
     allowed = client.get("/api/v1/jobs", headers={"X-API-Key": API_KEY})
     assert allowed.status_code != 401
+
+
+def test_product_crawl_routes_use_product_bearer_auth_not_internal_api_key() -> None:
+    from fb_crawl.api.app import _requires_internal_api_key
+
+    assert not _requires_internal_api_key("/api/v1/crawl-jobs")
+    assert not _requires_internal_api_key(
+        "/api/v1/crawl-jobs/11111111-1111-4111-8111-111111111111/results"
+    )
 
 
 def test_web_login_sets_secure_refresh_and_csrf_cookies_without_json_refresh() -> None:

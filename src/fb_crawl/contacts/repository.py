@@ -9,6 +9,7 @@ from fb_crawl.contacts.models import (
     EnrichmentLease,
     LookupEvent,
     LookupOutcome,
+    LookupScanContext,
     LookupSource,
     LookupState,
 )
@@ -35,6 +36,7 @@ class ContactRepository(Protocol):
         contact: ContactIdentity,
         requested: FacebookIdentity,
         now: datetime,
+        scan_context: LookupScanContext = LookupScanContext(),
     ) -> LookupEvent: ...
 
     def get_lookup_event(

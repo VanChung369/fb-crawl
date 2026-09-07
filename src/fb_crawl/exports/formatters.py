@@ -19,6 +19,10 @@ EXPORT_COLUMNS = (
     "phone",
     "outcome",
     "source",
+    "scan_mode",
+    "source_type",
+    "source_url",
+    "product_crawl_job_id",
     "provider_called",
     "quota_charged",
     "created_at",
@@ -46,6 +50,12 @@ def history_row(item: HistoryItem) -> dict[str, object]:
         "phone": item.phone,
         "outcome": item.outcome.value,
         "source": item.source.value,
+        "scan_mode": item.scan_mode.value,
+        "source_type": item.source_type.value,
+        "source_url": item.source_url,
+        "product_crawl_job_id": (
+            str(item.product_crawl_job_id) if item.product_crawl_job_id else ""
+        ),
         "provider_called": item.provider_called,
         "quota_charged": item.quota_charged,
         "created_at": _instant(item.created_at),

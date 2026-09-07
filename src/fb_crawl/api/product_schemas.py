@@ -157,9 +157,13 @@ class EntitlementsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     monthly_contact_limit: int
+    monthly_contact_used: int = Field(ge=0)
     max_devices: int
     allow_group_crawl: bool
     allow_comment_crawl: bool
+    allow_auto_group_crawl: bool
+    allow_auto_comment_crawl: bool
+    max_auto_crawl_identities: int
     subscription_id: int | None
     starts_at: datetime | None
     ends_at: datetime | None
@@ -377,6 +381,83 @@ class ContactLookupResponse(BaseModel):
     meta: ContactLookupMetaResponse
 
 
+class BatchContactItemRequest(ContactLookupRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    source_type: Literal["member", "post_author", "comment_author"]
+    source_url: str = Field(min_length=1, max_length=2048)
+
+    @model_validator(mode="after")
+    def validate_manual_scan_context(self) -> BatchContactItemRequest:
+        from fb_crawl.contacts.models import LookupScanContext
+
+        if self.force_refresh:
+            raise ValueError("Batch lookup cannot force refresh")
+        LookupScanContext(
+            mode="manual_loaded",
+            source_type=self.source_type,
+            source_url=self.source_url,
+        )
+        return self
+
+
+class BatchContactLookupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BatchContactItemRequest] = Field(min_length=1, max_length=1000)
+
+
+class BatchContactResultResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int
+    duplicate_of: int | None
+    user: ContactUserResponse
+    contact: ContactDataResponse
+    meta: ContactLookupMetaResponse
+
+
+class BatchContactLookupResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BatchContactResultResponse]
+    detected_count: int
+    unique_count: int
+    processed_count: int
+    found_count: int
+    quota_exceeded_count: int
+
+
+class ProductCrawlJobCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_url: str = Field(min_length=1, max_length=2048)
+    scan_scope: Literal["members", "engagement", "both"]
+    max_identities: int = Field(default=1000, ge=1, le=1000)
+
+
+class ProductCrawlJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    scan_scope: Literal["members", "engagement", "both"]
+    target_url: str
+    max_identities: int
+    status: Literal[
+        "queued", "running", "succeeded", "partial", "failed",
+        "cancelled", "blocked"
+    ]
+    discovered_count: int
+    processed_count: int
+    found_count: int
+    not_found_count: int
+    quota_exceeded_count: int
+    safe_error_code: str
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+
 class HistoryItemResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -394,6 +475,12 @@ class HistoryItemResponse(BaseModel):
     safe_error_code: str
     created_at: datetime
     completed_at: datetime | None
+    scan_mode: Literal["single", "manual_loaded", "automatic"]
+    source_type: Literal[
+        "profile", "member", "post_author", "comment_author"
+    ]
+    source_url: str
+    product_crawl_job_id: UUID | None
 
 
 class HistoryPageResponse(BaseModel):
@@ -456,6 +543,25 @@ class ExportDeleteResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     deleted: Literal[True]
+
+
+class ExportWorkerHealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    available: bool
+    last_seen_at: datetime | None
+
+
+class ProductWorkersHealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    export: ExportWorkerHealthResponse
+
+
+class ProductWorkerHealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workers: ProductWorkersHealthResponse
 
 
 class ProductMetricsResponse(BaseModel):

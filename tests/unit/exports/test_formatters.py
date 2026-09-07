@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from datetime import UTC, datetime
+from uuid import UUID
 
 import pytest
 from openpyxl import load_workbook
@@ -38,6 +39,12 @@ def item(*, name: str = "Sample User", phone: str = "+84981234567"):
         safe_error_code="",
         created_at=NOW,
         completed_at=NOW,
+        scan_mode="manual_loaded",
+        source_type="post_author",
+        source_url="https://www.facebook.com/groups/123/posts/456",
+        product_crawl_job_id=UUID(
+            "11111111-1111-4111-8111-111111111111"
+        ),
     )
 
 
@@ -54,6 +61,29 @@ def test_csv_is_utf8_and_neutralizes_every_user_controlled_cell(tmp_path) -> Non
     with path.open(encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.DictReader(stream))
     assert tuple(rows[0]) == EXPORT_COLUMNS
+    assert EXPORT_COLUMNS == (
+        "event_id",
+        "facebook_uid",
+        "username",
+        "name",
+        "profile_url",
+        "phone",
+        "outcome",
+        "source",
+        "scan_mode",
+        "source_type",
+        "source_url",
+        "product_crawl_job_id",
+        "provider_called",
+        "quota_charged",
+        "created_at",
+        "completed_at",
+    )
+    assert rows[0]["scan_mode"] == "manual_loaded"
+    assert rows[0]["source_type"] == "post_author"
+    assert rows[0]["source_url"] == (
+        "https://www.facebook.com/groups/123/posts/456"
+    )
     assert rows[0]["name"].startswith("'")
     assert rows[0]["phone"].startswith("'")
 

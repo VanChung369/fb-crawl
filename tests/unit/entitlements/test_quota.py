@@ -46,6 +46,11 @@ class MemoryQuotaRepository:
         self.reveals[key] = reveal_id
         return RevealDecision(True, True, reveal_id, self.used, self.limit)
 
+    def current_usage(
+        self, account_id: int, period_start: date
+    ) -> int:
+        return self.used
+
 
 class ScriptedCursor:
     def __init__(self, rows: list[tuple[object, ...] | None]) -> None:
@@ -107,6 +112,14 @@ def test_upgrade_keeps_usage_and_raises_limit() -> None:
     assert decision.allowed is True
 
 
+def test_current_usage_uses_the_product_month() -> None:
+    repository = MemoryQuotaRepository()
+    repository.used = 2
+    quota = ContactQuotaService(repository, ZoneInfo("Asia/Ho_Chi_Minh"))
+
+    assert quota.current_usage(7, NOW) == 2
+
+
 def test_postgres_reservation_locks_usage_and_increments_once() -> None:
     cursor = ScriptedCursor([(100,), (99,), None, (55,), (100,)])
     repository = PostgresContactQuotaRepository(
@@ -118,6 +131,19 @@ def test_postgres_reservation_locks_usage_and_increments_once() -> None:
     assert decision == RevealDecision(True, True, 55, 100, 100)
     assert any("FOR UPDATE" in sql for sql, _ in cursor.commands)
     assert sum("UPDATE usage_monthly" in sql for sql, _ in cursor.commands) == 1
+
+
+def test_postgres_current_usage_reads_without_creating_or_incrementing() -> None:
+    cursor = ScriptedCursor([(2,)])
+    repository = PostgresContactQuotaRepository(
+        "postgresql://hidden", connect_factory=connect(cursor)
+    )
+
+    assert repository.current_usage(7, PERIOD) == 2
+    sql = "\n".join(command for command, _params in cursor.commands)
+    assert "SELECT used_contact_count" in sql
+    assert "INSERT INTO usage_monthly" not in sql
+    assert "UPDATE usage_monthly" not in sql
 
 
 def test_existing_reveal_is_allowed_even_when_usage_is_at_limit() -> None:

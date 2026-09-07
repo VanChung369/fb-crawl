@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Mapping
+from pathlib import Path
 
 from fb_crawl.accounts.postgres import PostgresAccountRepository
 from fb_crawl.accounts.repository import AccountRepository
@@ -16,6 +17,11 @@ from fb_crawl.entitlements.quota import ContactQuotaService, PostgresContactQuot
 from fb_crawl.entitlements.service import EntitlementService
 from fb_crawl.contacts.postgres import PostgresContactRepository
 from fb_crawl.contacts.service import ContactLookupService
+from fb_crawl.product_jobs.postgres import PostgresProductCrawlRepository
+from fb_crawl.providers.health import (
+    ObservedPhoneProvider,
+    PostgresProviderHealthRepository,
+)
 from fb_crawl.history.postgres import PostgresHistoryRepository
 from fb_crawl.history.repository import HistoryRepository
 from fb_crawl.exports.artifacts import ExportArtifactStore
@@ -47,6 +53,9 @@ class ProductServices:
     history_repository: HistoryRepository | None = None
     export_service: ExportService | None = None
     metrics_repository: ProductMetricsRepository | None = None
+    product_crawl_repository: object | None = None
+    facebook_session_available: bool = False
+    provider_health_repository: object | None = None
 
 
 def compose_product_services(
@@ -114,9 +123,17 @@ def compose_product_services(
         auth_settings.product_timezone,
     )
     resolved_pipeline_settings = pipeline_settings or load_pipeline_settings(env)
+    provider_health_repository = PostgresProviderHealthRepository(
+        database_url,
+        statement_timeout_seconds=statement_timeout_seconds,
+    )
     contact_lookup_service = None
     if resolved_pipeline_settings.fb_number_api_token:
-        provider = FBNumberProvider.from_settings(resolved_pipeline_settings)
+        provider = ObservedPhoneProvider(
+            FBNumberProvider.from_settings(resolved_pipeline_settings),
+            provider_health_repository,
+            configured=True,
+        )
         contact_lookup_service = ContactLookupService(
             entitlement_service,
             quota_service,
@@ -151,4 +168,20 @@ def compose_product_services(
             database_url,
             statement_timeout_seconds=statement_timeout_seconds,
         ),
+        product_crawl_repository=PostgresProductCrawlRepository(
+            database_url,
+            statement_timeout_seconds=statement_timeout_seconds,
+        ),
+        facebook_session_available=_session_is_available(env),
+        provider_health_repository=provider_health_repository,
     )
+
+
+def _session_is_available(env: Mapping[str, str]) -> bool:
+    raw = env.get("FB_CRAWL_SESSION_PATH", "runtime/session.json").strip()
+    if not raw:
+        return False
+    try:
+        return Path(raw).expanduser().resolve().is_file()
+    except OSError:
+        return False

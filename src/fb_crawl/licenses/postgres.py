@@ -276,18 +276,28 @@ class PostgresLicenseRepository:
             raise ValueError("license key list limit must be from 1 to 101")
         if cursor is not None and cursor <= 0:
             raise ValueError("license key cursor must be positive")
-        cursor_id = cursor
         with self._connect() as database_cursor:
-            database_cursor.execute(
-                f"""
-                SELECT {_KEY_COLUMNS}
-                FROM license_keys
-                WHERE (%s IS NULL OR id < %s)
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (cursor_id, cursor_id, limit),
-            )
+            if cursor is None:
+                database_cursor.execute(
+                    f"""
+                    SELECT {_KEY_COLUMNS}
+                    FROM license_keys
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            else:
+                database_cursor.execute(
+                    f"""
+                    SELECT {_KEY_COLUMNS}
+                    FROM license_keys
+                    WHERE id < %s
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (cursor, limit),
+                )
             rows = database_cursor.fetchall()
         return tuple(self._key(row) for row in rows)
 
@@ -422,17 +432,29 @@ class PostgresLicenseRepository:
         if cursor is not None and cursor <= 0:
             raise ValueError("audit event cursor must be positive")
         with self._connect() as database_cursor:
-            database_cursor.execute(
-                """
-                SELECT id, actor_account_id, action, target_type,
-                       target_id, details, created_at
-                FROM admin_audit_events
-                WHERE (%s IS NULL OR id < %s)
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (cursor, cursor, limit),
-            )
+            if cursor is None:
+                database_cursor.execute(
+                    """
+                    SELECT id, actor_account_id, action, target_type,
+                           target_id, details, created_at
+                    FROM admin_audit_events
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            else:
+                database_cursor.execute(
+                    """
+                    SELECT id, actor_account_id, action, target_type,
+                           target_id, details, created_at
+                    FROM admin_audit_events
+                    WHERE id < %s
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (cursor, limit),
+                )
             rows = database_cursor.fetchall()
         return tuple(
             AdminAuditEvent(

@@ -8,6 +8,7 @@ from uuid import UUID
 from fb_crawl.entitlements.models import Entitlements
 from fb_crawl.auth.rate_limit import RateLimitPolicy
 from fb_crawl.exports.models import ExportFormat, ExportJob, ExportStatus
+from fb_crawl.exports.service import ExportWorkerUnavailable
 from tests.unit.api.product_auth_fakes import INSTALLATION_ID, NOW
 from tests.unit.api.test_product_auth_routes import product_client
 
@@ -41,8 +42,11 @@ class ExportServiceFake:
         self.create_calls = []
         self.get_accounts = []
         self.deleted = []
+        self.create_error = None
 
     def create(self, account_id, format_name, filters, now):
+        if self.create_error is not None:
+            raise self.create_error
         self.create_calls.append((account_id, format_name, filters, now))
         return self.value
 
@@ -161,3 +165,22 @@ def test_export_creation_is_rate_limited_before_queue_write(tmp_path) -> None:
     assert first.status_code == 202
     assert limited.status_code == 429
     assert len(service.create_calls) == 1
+
+
+def test_create_export_reports_unavailable_worker_without_queueing(tmp_path) -> None:
+    service = ExportServiceFake(tmp_path / "export.csv")
+    service.create_error = ExportWorkerUnavailable("worker unavailable")
+    client, _repository, _auth, access = product_client(export_service=service)
+
+    response = client.post(
+        "/api/v1/exports",
+        headers=headers(access),
+        json={"format": "csv", "filters": {}},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "export_worker_unavailable",
+        "message": "Export request failed.",
+    }
+    assert service.create_calls == []

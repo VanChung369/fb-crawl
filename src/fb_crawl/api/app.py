@@ -101,7 +101,15 @@ def create_app(
     )
     app.include_router(create_stats_router(job_repository, user_repository, resolved_session_pool, resolved_proxy_pool, auth))
     app.include_router(create_export_router(user_repository, auth))
-    app.include_router(create_settings_router(job_repository=job_repository, auth=auth))
+    app.include_router(create_settings_router(
+        job_repository=job_repository,
+        auth=auth,
+        provider_health_repository=(
+            product_services.provider_health_repository
+            if product_services is not None
+            else None
+        ),
+    ))
 
     if product_services is not None:
         from fb_crawl.api.routes.auth import create_product_auth_router
@@ -136,6 +144,7 @@ def create_app(
                     product_services.entitlement_service,
                     product_auth,
                     product_services.rate_limiter,
+                    quota=product_services.quota_service,
                     clock=clock,
                 )
             )
@@ -155,12 +164,22 @@ def create_app(
             from fb_crawl.api.routes.product_exports import (
                 create_product_export_router,
             )
+            from fb_crawl.api.routes.product_worker_health import (
+                create_product_worker_health_router,
+            )
 
             app.include_router(
                 create_product_export_router(
                     product_services.export_service,
                     product_auth,
                     product_services.rate_limiter,
+                    clock=clock,
+                )
+            )
+            app.include_router(
+                create_product_worker_health_router(
+                    product_services.export_service,
+                    product_auth,
                     clock=clock,
                 )
             )
@@ -210,6 +229,31 @@ def create_app(
                     clock=clock,
                 )
             )
+        if (
+            product_services.product_crawl_repository is not None
+            and product_services.entitlement_service is not None
+        ):
+            from fb_crawl.api.routes.product_crawl_jobs import (
+                create_product_crawl_router,
+            )
+            from fb_crawl.product_jobs.service import ProductCrawlJobService
+
+            app.include_router(
+                create_product_crawl_router(
+                    ProductCrawlJobService(
+                        product_services.product_crawl_repository,
+                        product_services.entitlement_service,
+                        job_service,
+                        job_repository,
+                        session_available=(
+                            product_services.facebook_session_available
+                        ),
+                    ),
+                    product_auth,
+                    product_services.history_repository,
+                    clock=clock,
+                )
+            )
 
     _install_api_authentication(app, auth)
     app.middleware("http")(correlate_request)
@@ -232,7 +276,7 @@ def create_app(
                 "Content-Type",
                 "X-Request-ID",
             ],
-            expose_headers=["X-Request-ID"],
+            expose_headers=["X-Request-ID", "Content-Disposition"],
         )
 
     ui_dir = Path(__file__).parents[2] / "fb_ui"
@@ -326,8 +370,10 @@ def _requires_internal_api_key(path: str) -> bool:
         "/api/v1/licenses",
         "/api/v1/admin",
         "/api/v1/contacts",
+        "/api/v1/crawl-jobs",
         "/api/v1/history",
         "/api/v1/exports",
+        "/api/v1/worker-health",
     )
     if any(path == prefix or path.startswith(f"{prefix}/") for prefix in product_prefixes):
         return False

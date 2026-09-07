@@ -132,10 +132,17 @@ def test_cors_is_disabled_by_default_and_exact_when_configured() -> None:
             "Access-Control-Request-Method": "GET",
         },
     )
+    exposed = configured_client.get(
+        "/health/live",
+        headers={"Origin": "https://ui.example.test"},
+    )
 
     assert "access-control-allow-origin" not in default.headers
     assert allowed.headers["access-control-allow-origin"] == "https://ui.example.test"
     assert "access-control-allow-origin" not in denied.headers
+    assert "Content-Disposition" in exposed.headers[
+        "access-control-expose-headers"
+    ]
 
 
 def test_api_foundation_import_does_not_load_browser_or_selenium() -> None:

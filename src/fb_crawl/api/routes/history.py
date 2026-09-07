@@ -75,7 +75,7 @@ def create_history_router(
             )
         )
         return HistoryPageResponse(
-            items=[_item(value) for value in page.items],
+            items=[history_item_response(value) for value in page.items],
             next_cursor=page.next_cursor,
         )
 
@@ -90,7 +90,7 @@ def create_history_router(
         if not current.device_allowed:
             return _device_not_allowed()
         value = service.get(current.account.id, event_id)
-        return _not_found() if value is None else _item(value)
+        return _not_found() if value is None else history_item_response(value)
 
     @router.delete(
         "/api/v1/history/lookups/{event_id}",
@@ -105,6 +105,23 @@ def create_history_router(
         if not repository.delete_one(current.account.id, event_id):
             return _not_found()
         return HistoryDeleteResponse(deleted_count=1)
+
+    @router.delete(
+        "/api/v1/history/people/{facebook_user_id}",
+        response_model=HistoryDeleteResponse,
+    )
+    def delete_person_history(
+        facebook_user_id: int = Path(gt=0, le=9223372036854775807),
+        current: CurrentAccount = Depends(require_bearer_account),
+    ):
+        if not current.device_allowed:
+            return _device_not_allowed()
+        return HistoryDeleteResponse(
+            deleted_count=repository.delete_person(
+                current.account.id,
+                facebook_user_id,
+            )
+        )
 
     @router.delete(
         "/api/v1/history/lookups",
@@ -145,7 +162,7 @@ def _query(account_id: int, **values: object) -> AccountHistoryQuery:
     return AccountHistoryQuery(account_id=account_id, **values)
 
 
-def _item(value: HistoryItem) -> HistoryItemResponse:
+def history_item_response(value: HistoryItem) -> HistoryItemResponse:
     return HistoryItemResponse(
         id=value.id,
         device_id=value.device_id,
@@ -164,6 +181,10 @@ def _item(value: HistoryItem) -> HistoryItemResponse:
         safe_error_code=value.safe_error_code,
         created_at=value.created_at,
         completed_at=value.completed_at,
+        scan_mode=value.scan_mode,
+        source_type=value.source_type,
+        source_url=value.source_url,
+        product_crawl_job_id=value.product_crawl_job_id,
     )
 
 
