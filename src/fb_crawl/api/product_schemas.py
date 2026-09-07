@@ -348,6 +348,9 @@ class ContactUserResponse(BaseModel):
     username: str
     name: str
     profile_url: str
+    gender: str = ""
+    address: str = ""
+    birth_date: str = ""
 
 
 class ContactDataResponse(BaseModel):
@@ -481,6 +484,9 @@ class HistoryItemResponse(BaseModel):
     ]
     source_url: str
     product_crawl_job_id: UUID | None
+    gender: str = ""
+    address: str = ""
+    birth_date: str = ""
 
 
 class HistoryPageResponse(BaseModel):

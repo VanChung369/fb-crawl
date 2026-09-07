@@ -102,6 +102,9 @@ class HistoryItem:
     source_type: LookupSourceType | str = LookupSourceType.PROFILE
     source_url: str = ""
     product_crawl_job_id: UUID | None = None
+    gender: str = ""
+    address: str = ""
+    birth_date: str = ""
 
     def __post_init__(self) -> None:
         try:

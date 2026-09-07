@@ -27,7 +27,10 @@ _COLUMNS = """
     events.provider_called, events.quota_charged, events.safe_error_code,
     events.created_at, events.completed_at,
     events.scan_mode, events.source_type, events.source_url,
-    events.product_crawl_job_id
+    events.product_crawl_job_id,
+    COALESCE(profiles.gender, ''),
+    COALESCE(profiles.address, ''),
+    COALESCE(profiles.birth_date, '')
 """
 
 
@@ -87,6 +90,8 @@ class PostgresHistoryRepository:
                   ON users.id = events.facebook_user_id
                 LEFT JOIN phone_numbers AS numbers
                   ON numbers.id = events.revealed_phone_number_id
+                LEFT JOIN facebook_user_profiles AS profiles
+                  ON profiles.facebook_user_id = users.id
                 {where}
                 ORDER BY events.created_at DESC, events.id DESC
                 LIMIT %s
@@ -113,6 +118,8 @@ class PostgresHistoryRepository:
                   ON users.id = events.facebook_user_id
                 LEFT JOIN phone_numbers AS numbers
                   ON numbers.id = events.revealed_phone_number_id
+                LEFT JOIN facebook_user_profiles AS profiles
+                  ON profiles.facebook_user_id = users.id
                 WHERE events.account_id = %s AND events.id = %s
                 """,
                 (account_id, event_id),
@@ -249,6 +256,9 @@ class PostgresHistoryRepository:
             source_type=LookupSourceType(str(row[18])),
             source_url=str(row[19] or ""),
             product_crawl_job_id=row[20],  # type: ignore[arg-type]
+            gender=str(row[21] or "") if len(row) > 21 else "",
+            address=str(row[22] or "") if len(row) > 22 else "",
+            birth_date=str(row[23] or "") if len(row) > 23 else "",
         )
 
 

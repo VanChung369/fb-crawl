@@ -172,6 +172,9 @@ def history_item_response(value: HistoryItem) -> HistoryItemResponse:
             username=value.username,
             name=value.name,
             profile_url=value.profile_url,
+            gender=value.gender,
+            address=value.address,
+            birth_date=value.birth_date,
         ),
         phone=value.phone,
         outcome=value.outcome,
@@ -185,6 +188,9 @@ def history_item_response(value: HistoryItem) -> HistoryItemResponse:
         source_type=value.source_type,
         source_url=value.source_url,
         product_crawl_job_id=value.product_crawl_job_id,
+        gender=value.gender,
+        address=value.address,
+        birth_date=value.birth_date,
     )
 
 
