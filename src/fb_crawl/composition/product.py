@@ -24,6 +24,10 @@ from fb_crawl.providers.health import (
 )
 from fb_crawl.history.postgres import PostgresHistoryRepository
 from fb_crawl.history.repository import HistoryRepository
+from fb_crawl.history.service import HistoryService
+from fb_crawl.interaction_sessions.postgres import PostgresInteractionSessionRepository
+from fb_crawl.interaction_sessions.service import InteractionSessionService
+from fb_crawl.interaction_sessions.lookup import SessionLookupService
 from fb_crawl.exports.artifacts import ExportArtifactStore
 from fb_crawl.exports.postgres import PostgresExportRepository
 from fb_crawl.exports.service import ExportService
@@ -56,6 +60,8 @@ class ProductServices:
     product_crawl_repository: object | None = None
     facebook_session_available: bool = False
     provider_health_repository: object | None = None
+    interaction_session_service: InteractionSessionService | None = None
+    interaction_session_lookup_service: SessionLookupService | None = None
 
 
 def compose_product_services(
@@ -174,6 +180,14 @@ def compose_product_services(
         ),
         facebook_session_available=_session_is_available(env),
         provider_health_repository=provider_health_repository,
+        interaction_session_service=InteractionSessionService(
+            PostgresInteractionSessionRepository(database_url, statement_timeout_seconds=statement_timeout_seconds),
+            HistoryService(PostgresHistoryRepository(database_url, statement_timeout_seconds=statement_timeout_seconds), quota_service),
+        ),
+        interaction_session_lookup_service=SessionLookupService(
+            PostgresInteractionSessionRepository(database_url, statement_timeout_seconds=statement_timeout_seconds),
+            contact_lookup_service,
+        ),
     )
 
 

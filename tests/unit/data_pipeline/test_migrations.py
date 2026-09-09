@@ -17,6 +17,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "010_lookup_event_scan_context",
         "011_product_crawl_jobs",
         "012_provider_health",
+        "013_interaction_sessions",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql
@@ -193,7 +194,7 @@ def test_product_crawl_job_migration_is_tenant_owned_and_bounded() -> None:
 
 
 def test_provider_health_migration_stores_only_safe_status() -> None:
-    migration = load_migrations()[-1]
+    migration = next(item for item in load_migrations() if item.version == "012_provider_health")
 
     assert migration.version == "012_provider_health"
     assert "CREATE TABLE provider_health" in migration.sql

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from uuid import UUID
 from typing import Protocol
 
 from fb_crawl.contacts.models import (
@@ -18,6 +19,12 @@ from fb_data_pipeline.services.pipeline import EnrichedUser
 
 
 class ContactRepository(Protocol):
+    def claim_session_event(
+        self, account_id: int, device_id: int, contact: ContactIdentity,
+        requested: FacebookIdentity, now: datetime, scan_context: LookupScanContext,
+        person_id: UUID, retry_failed: bool, lease_ttl: timedelta,
+    ) -> tuple[LookupEvent, bool]: ...
+
     def resolve_identity(self, identity: FacebookIdentity) -> ContactIdentity: ...
 
     def get_cached_contact(

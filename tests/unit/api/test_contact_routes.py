@@ -131,6 +131,9 @@ def test_found_lookup_returns_only_closed_contact_and_quota_fields() -> None:
             "username": "sample.user",
             "name": "Sample User",
             "profile_url": "https://www.facebook.com/sample.user",
+            "gender": "",
+            "address": "",
+            "birth_date": "",
         },
         "contact": {"phone": "+84981234567"},
         "meta": {

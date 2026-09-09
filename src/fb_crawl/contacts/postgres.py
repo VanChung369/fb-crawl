@@ -257,37 +257,70 @@ class PostgresContactRepository:
             with self.connect_factory(self.database_url) as connection:
                 with connection.cursor() as cursor:
                     self._set_timeout(cursor)
-                    cursor.execute(
-                        f"""
-                        INSERT INTO lookup_events (
-                            account_id, device_id, facebook_user_id,
-                            requested_uid, requested_username,
-                            requested_profile_url, created_at, scan_mode,
-                            source_type, source_url, product_crawl_job_id
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING {self._event_columns()}
-                        """,
-                        (
-                            account_id,
-                            device_id,
-                            contact.id,
-                            requested.uid or None,
-                            requested.username or None,
-                            requested.profile_url or None,
-                            now,
-                            scan_context.mode.value,
-                            scan_context.source_type.value,
-                            scan_context.source_url,
-                            scan_context.product_crawl_job_id,
-                        ),
-                    )
-                    row = cursor.fetchone()
+                    row = self._insert_event(cursor, account_id, device_id, contact, requested, now, scan_context)
         except (psycopg.Error, OSError) as error:
             raise DatabaseError("Database operation failed.") from error
         if row is None:
             raise DatabaseError("Database lookup event creation failed.")
         return self._event_from_row(row)
+
+    def _insert_event(self, cursor, account_id, device_id, contact, requested, now, scan_context):
+        cursor.execute(
+            f"""INSERT INTO lookup_events (
+                account_id, device_id, facebook_user_id, requested_uid, requested_username,
+                requested_profile_url, created_at, scan_mode, source_type, source_url, product_crawl_job_id
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING {self._event_columns()}""",
+            (account_id, device_id, contact.id, requested.uid or None, requested.username or None,
+             requested.profile_url or None, now, scan_context.mode.value, scan_context.source_type.value,
+             scan_context.source_url, scan_context.product_crawl_job_id),
+        )
+        return cursor.fetchone()
+
+    def claim_session_event(self, account_id, device_id, contact, requested, now, scan_context, person_id, retry_failed, lease_ttl):
+        from fb_crawl.interaction_sessions.models import SessionError
+        try:
+            with self.connect_factory(self.database_url) as connection:
+                with connection.cursor() as cursor:
+                    self._set_timeout(cursor)
+                    cursor.execute("""SELECT s.id FROM interaction_sessions s JOIN session_people p ON p.session_id=s.id
+                        WHERE s.account_id=%s AND p.id=%s FOR UPDATE OF s""", (account_id, person_id))
+                    owned = cursor.fetchone()
+                    if owned is None:
+                        raise SessionError("interaction_session_not_found", 404)
+                    session_id = owned[0]
+                    cursor.execute("SELECT lookup_event_id,lookup_state FROM session_people WHERE id=%s FOR UPDATE", (person_id,))
+                    event_id, lookup_state = cursor.fetchone()
+                    existing = None
+                    if event_id is not None:
+                        cursor.execute(f"SELECT {self._event_columns()} FROM lookup_events WHERE id=%s AND account_id=%s", (event_id, account_id))
+                        data = cursor.fetchone()
+                        existing = self._event_from_row(data) if data else None
+                    if existing is not None and existing.facebook_user_id != contact.id:
+                        raise SessionError("session_identity_conflict")
+                    if existing is not None and existing.outcome is LookupOutcome.PROCESSING and now > existing.created_at + lease_ttl:
+                        # Recover an abandoned event only after its provider lease expires.
+                        cursor.execute("""UPDATE lookup_events SET outcome='failed', result_source='none',
+                            safe_error_code='contact_lookup_interrupted',completed_at=%s
+                            WHERE id=%s AND outcome='processing' AND NOT EXISTS (
+                                SELECT 1 FROM enrichment_leases WHERE facebook_user_id=%s
+                                AND provider='fbnumber' AND field='phone' AND leased_until>%s)
+                            AND NOT EXISTS (SELECT 1 FROM provider_lookup_state WHERE facebook_user_id=%s
+                                AND provider='fbnumber' AND field='phone' AND updated_at>lookup_events.created_at)
+                            RETURNING id""", (now, event_id, contact.id, now, contact.id))
+                        if cursor.fetchone():
+                            cursor.execute(f"SELECT {self._event_columns()} FROM lookup_events WHERE id=%s", (event_id,))
+                            existing = self._event_from_row(cursor.fetchone())
+                    if existing is not None and not (retry_failed and existing.outcome in (LookupOutcome.FAILED, LookupOutcome.QUOTA_EXCEEDED)):
+                        return existing, False
+                    if existing is None and lookup_state != 'not_looked_up' and not retry_failed:
+                        raise SessionError("contact_result_unavailable", 404)
+                    data = self._insert_event(cursor, account_id, device_id, contact, requested, now, scan_context)
+                    event = self._event_from_row(data)
+                    cursor.execute("UPDATE session_people SET lookup_event_id=%s,lookup_state='processing',updated_at=%s WHERE id=%s", (event.id, now, person_id))
+                    cursor.execute("UPDATE interaction_sessions SET revision=revision+1,updated_at=%s WHERE id=%s", (now, session_id))
+                    return event, True
+        except (psycopg.Error, OSError) as error:
+            raise DatabaseError("Database operation failed.") from error
 
     def get_lookup_event(
         self,

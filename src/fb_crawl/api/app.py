@@ -86,6 +86,11 @@ def create_app(
     app.state.product_services = product_services
 
     _install_exception_handlers(app)
+    from fb_crawl.interaction_sessions.models import SessionError
+
+    @app.exception_handler(SessionError)
+    async def interaction_session_error(_request: Request, error: SessionError):
+        return JSONResponse(status_code=error.status, content={"code": error.code, "message": error.safe_message})
     app.include_router(create_health_router(readiness))
     app.include_router(create_jobs_router(job_service, job_repository, auth))
     app.include_router(create_account_router(job_service, auth))
@@ -122,6 +127,13 @@ def create_app(
             entitlement_service=product_services.entitlement_service,
             clock=clock,
         )
+        if product_services.interaction_session_service is not None:
+            from fb_crawl.api.routes.interaction_sessions import create_interaction_sessions_router
+            app.include_router(create_interaction_sessions_router(
+                product_services.interaction_session_service, product_auth,
+                lookup_service=product_services.interaction_session_lookup_service,
+                rate_limiter=product_services.rate_limiter, clock=clock,
+            ))
         app.include_router(
             create_product_auth_router(
                 product_services.auth_service,
@@ -372,6 +384,7 @@ def _requires_internal_api_key(path: str) -> bool:
         "/api/v1/contacts",
         "/api/v1/crawl-jobs",
         "/api/v1/history",
+        "/api/v1/interaction-sessions",
         "/api/v1/exports",
         "/api/v1/worker-health",
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Callable, Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fb_crawl.accounts.models import (
     Account,
@@ -360,6 +360,8 @@ class ContactLookupService:
         now: datetime,
         force_refresh: bool = False,
         scan_context: LookupScanContext | None = None,
+        session_person_id: UUID | None = None,
+        retry_failed: bool = False,
     ) -> ContactLookupResult:
         self._require_access(account, device)
         self.entitlements.for_account(account.id, now)
@@ -368,14 +370,21 @@ class ContactLookupService:
         resolved_scan_context = scan_context or LookupScanContext(
             source_url=_profile_source_url(contact.identity, requested)
         )
-        event = self.contacts.create_lookup_event(
-            account.id,
-            device.id,
-            contact,
-            requested,
-            now,
-            resolved_scan_context,
-        )
+        if session_person_id is None:
+            event = self.contacts.create_lookup_event(
+                account.id, device.id, contact, requested, now, resolved_scan_context,
+            )
+        else:
+            event, owns_attempt = self.contacts.claim_session_event(
+                account.id, device.id, contact, requested, now, resolved_scan_context,
+                session_person_id, retry_failed, self.lease_ttl,
+            )
+            if not owns_attempt:
+                existing = self.get_event(account.id, event.id)
+                if existing is None:
+                    from fb_crawl.interaction_sessions.models import SessionError
+                    raise SessionError("contact_result_unavailable", 404)
+                return existing
         precheck = self.quota.precheck(account.id, contact.id, now)
         if not precheck.allowed:
             self.contacts.complete_lookup_event(
