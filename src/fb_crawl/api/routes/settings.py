@@ -185,6 +185,7 @@ def create_settings_router(
     *,
     auth: ApiKeyAuth,
     provider_health_repository: object | None = None,
+    product_services: object | None = None,
 ) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1/settings",
@@ -223,6 +224,18 @@ def create_settings_router(
             "PIPELINE_DEFAULT_COUNTRY_CODE": request.default_country_code.strip(),
         }
         update_env_file(updates)
+        if product_services is not None and getattr(product_services, "contact_lookup_service", None) is not None:
+            try:
+                from fb_data_pipeline.providers.fbnumber import FBNumberProvider
+                new_pipeline_settings = load_pipeline_settings()
+                pipeline = getattr(product_services.contact_lookup_service, "pipeline", None)
+                if pipeline and hasattr(pipeline, "provider"):
+                    if hasattr(pipeline.provider, "provider"):
+                        pipeline.provider.provider = FBNumberProvider.from_settings(new_pipeline_settings)
+                    else:
+                        pipeline.provider = FBNumberProvider.from_settings(new_pipeline_settings)
+            except Exception:
+                pass
         config = effective_fbnumber_config()
         token = config["api_token"]
         return FBNumberSettingsResponse(

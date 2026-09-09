@@ -114,6 +114,7 @@ def create_app(
             if product_services is not None
             else None
         ),
+        product_services=product_services,
     ))
 
     if product_services is not None:
