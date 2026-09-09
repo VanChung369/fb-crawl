@@ -275,6 +275,26 @@ class PostgresAccountRepository:
             raise InvalidAccountToken("Account token is invalid or expired.")
         return self._account(row)
 
+    def verify_account_email_directly(
+        self, account_id: int, now: datetime
+    ) -> Account:
+        with self._connect() as cursor:
+            cursor.execute(
+                f"""
+                UPDATE accounts
+                SET email_verified_at = COALESCE(email_verified_at, %s),
+                    status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+                    updated_at = %s
+                WHERE id = %s AND status <> 'deleted'
+                RETURNING {_ACCOUNT_COLUMNS}
+                """,
+                (now, now, account_id),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise AccountNotFound(f"Account {account_id} not found.")
+        return self._account(row)
+
     def consume_password_reset_token(
         self, token_digest: str, now: datetime
     ) -> Account:

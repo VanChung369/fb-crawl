@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import secrets
 from urllib.parse import quote
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from email_validator import EmailNotValidError, validate_email
 from fb_crawl.accounts.models import Account, AccountStatus, DeviceStatus
 from fb_crawl.accounts.repository import AccountRepository
 from fb_crawl.auth.email import EmailDeliveryPort
+from fb_crawl.auth.google import GoogleTokenVerifier, GoogleTokenVerifierPort
 from fb_crawl.auth.passwords import PasswordHasher
 from fb_crawl.auth.rate_limit import RateLimitService
 from fb_crawl.auth.tokens import TokenService
@@ -74,6 +76,7 @@ class AccountAuthService:
         email_delivery: EmailDeliveryPort,
         rate_limiter: RateLimitService,
         public_base_url: str,
+        google_verifier: GoogleTokenVerifierPort | None = None,
     ) -> None:
         self._repository = repository
         self._password_hasher = password_hasher
@@ -81,6 +84,7 @@ class AccountAuthService:
         self._email_delivery = email_delivery
         self._rate_limiter = rate_limiter
         self._public_base_url = public_base_url.rstrip("/")
+        self._google_verifier = google_verifier or GoogleTokenVerifier()
         self._dummy_password_hash = password_hasher.hash(
             "lead-finder-invalid-account-password"
         )
@@ -152,6 +156,55 @@ class AccountAuthService:
         if account.status is not AccountStatus.ACTIVE:
             raise AccountUnavailable("This account is unavailable.")
         _validate_installation(installation_id, device_name)
+        device = self._repository.create_device(
+            account.id, installation_id, device_name.strip(), now
+        )
+        if device.status is not DeviceStatus.ACTIVE:
+            raise AccountUnavailable("This device is unavailable.")
+        raw_refresh = self._token_service.new_opaque_token()
+        session = self._repository.create_session(
+            account.id,
+            device.id,
+            self._token_service.digest_opaque(raw_refresh),
+            now + REFRESH_SESSION_TTL,
+            now,
+        )
+        return self._auth_tokens(account.id, session.id, device.id, raw_refresh, now)
+
+    def login_with_google(
+        self,
+        id_token: str,
+        installation_id: UUID,
+        device_name: str,
+        now: datetime,
+        *,
+        ip_address: str,
+    ) -> AuthTokens:
+        self._rate_limiter.check(
+            "login", None, str(installation_id), ip_address, now
+        )
+        _validate_installation(installation_id, device_name)
+        info = self._google_verifier.verify_id_token(id_token)
+        if not info.email_verified:
+            raise EmailVerificationRequired("Google email verification is required.")
+        normalized, display = _normalized_email(info.email)
+        account = self._repository.find_account_by_email(normalized)
+        if account is None:
+            dummy_password = secrets.token_urlsafe(32)
+            dummy_hash = self._password_hasher.hash(dummy_password)
+            account = self._repository.create_account(
+                normalized, display, dummy_hash
+            )
+            account = self._repository.verify_account_email_directly(
+                account.id, now
+            )
+        else:
+            if account.email_verified_at is None or account.status is AccountStatus.PENDING:
+                account = self._repository.verify_account_email_directly(
+                    account.id, now
+                )
+        if account.status is not AccountStatus.ACTIVE:
+            raise AccountUnavailable("This account is unavailable.")
         device = self._repository.create_device(
             account.id, installation_id, device_name.strip(), now
         )

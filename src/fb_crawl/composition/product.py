@@ -8,6 +8,7 @@ from fb_crawl.accounts.postgres import PostgresAccountRepository
 from fb_crawl.accounts.repository import AccountRepository
 from fb_crawl.auth.config import AuthSettings
 from fb_crawl.auth.email import SmtpEmailDelivery
+from fb_crawl.auth.google import GoogleTokenVerifier
 from fb_crawl.auth.passwords import PasswordHasher
 from fb_crawl.auth.rate_limit import RateLimitService
 from fb_crawl.auth.service import AccountAuthService
@@ -104,6 +105,16 @@ def compose_product_services(
         repository,
         auth_settings.token_hmac_secret,
     )
+    google_client_id = (
+        env.get("LEAD_FINDER_GOOGLE_CLIENT_ID")
+        or env.get("GOOGLE_CLIENT_ID")
+        or ""
+    ).strip()
+    google_verifier = (
+        GoogleTokenVerifier(allowed_client_ids=(google_client_id,))
+        if google_client_id
+        else GoogleTokenVerifier()
+    )
     auth_service = AccountAuthService(
         repository=repository,
         password_hasher=password_hasher,
@@ -111,6 +122,7 @@ def compose_product_services(
         email_delivery=email_delivery,
         rate_limiter=rate_limiter,
         public_base_url=auth_settings.public_base_url,
+        google_verifier=google_verifier,
     )
     license_repository = PostgresLicenseRepository(
         database_url,

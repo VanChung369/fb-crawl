@@ -63,6 +63,68 @@ class ProductRepositoryFake:
         self.fail_admin_audit = False
         self.rate_limit_counts: dict[tuple[str, str], int] = {}
 
+    def find_account_by_email(self, normalized_email: str) -> Account | None:
+        if self.account.normalized_email == normalized_email:
+            return self.account
+        for acc in self.extra_accounts.values():
+            if acc.normalized_email == normalized_email:
+                return acc
+        return None
+
+    def create_account(
+        self, normalized_email: str, display_email: str, password_hash: str
+    ) -> Account:
+        new_id = len(self.extra_accounts) + 100
+        new_acc = Account(
+            id=new_id,
+            normalized_email=normalized_email,
+            display_email=display_email,
+            password_hash=password_hash,
+            role=AccountRole.USER,
+            status=AccountStatus.PENDING,
+            email_verified_at=None,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        self.extra_accounts[new_id] = new_acc
+        return new_acc
+
+    def create_device(
+        self, account_id: int, installation_id: UUID, display_name: str, now: datetime
+    ) -> Device:
+        device = Device(
+            id=len(self.extra_devices) + 10,
+            account_id=account_id,
+            installation_id=installation_id,
+            display_name=display_name,
+            status=DeviceStatus.ACTIVE,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        self.extra_devices.append(device)
+        return device
+
+    def create_session(
+        self,
+        account_id: int,
+        device_id: int,
+        refresh_digest: str,
+        expires_at: datetime,
+        now: datetime,
+    ) -> AuthSession:
+        self.session = AuthSession(
+            id=SESSION_ID,
+            account_id=account_id,
+            device_id=device_id,
+            expires_at=expires_at,
+            rotated_from_id=None,
+            revoked_at=None,
+            created_at=now,
+            last_used_at=now,
+            authenticated_at=now,
+        )
+        return self.session
+
     def get_account(self, account_id: int):
         return self.account if account_id == self.account.id else self.extra_accounts.get(account_id)
 
@@ -157,6 +219,23 @@ class ProductRepositoryFake:
         self.session = replace(self.session, revoked_at=now)
         return self.account
 
+    def verify_account_email_directly(self, account_id: int, now: datetime):
+        account = self.get_account(account_id)
+        if account is None:
+            from fb_crawl.accounts.repository import AccountNotFound
+            raise AccountNotFound(f"Account {account_id} not found.")
+        verified = replace(
+            account,
+            email_verified_at=account.email_verified_at or now,
+            status=AccountStatus.ACTIVE if account.status == AccountStatus.PENDING else account.status,
+            updated_at=now,
+        )
+        if account.id == self.account.id:
+            self.account = verified
+        else:
+            self.extra_accounts[account.id] = verified
+        return verified
+
     def record_rate_limit_hit(self, bucket_hash, action, window_start, expires_at):
         key = (bucket_hash, action)
         self.rate_limit_counts[key] = self.rate_limit_counts.get(key, 0) + 1
@@ -220,3 +299,13 @@ class ProductAuthServiceFake:
                 last_used_at=now,
             )
         return GenericRequestResult()
+
+    def login_with_google(
+        self, id_token, installation_id, device_name, now, *, ip_address
+    ):
+        self.calls.append(("login_with_google", id_token))
+        return AuthTokens(
+            self.access_token,
+            "opaque-google-refresh-token",
+            now + timedelta(minutes=15),
+        )

@@ -76,6 +76,10 @@ class AccountRepository(Protocol):
 
     def verify_email_token(self, token_digest: str, now: datetime) -> Account: ...
 
+    def verify_account_email_directly(
+        self, account_id: int, now: datetime
+    ) -> Account: ...
+
     def create_device(
         self,
         account_id: int,

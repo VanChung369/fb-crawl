@@ -11,6 +11,7 @@ from fb_crawl.api.product_schemas import (
     AuthTokenResponse,
     EmailRequest,
     GenericAcceptedResponse,
+    GoogleLoginRequest,
     LoginRequest,
     LogoutRequest,
     ReauthenticateRequest,
@@ -71,6 +72,27 @@ def create_product_auth_router(
         tokens = auth_service.login(
             payload.email,
             payload.password,
+            payload.installation_id,
+            payload.device_name,
+            clock(),
+            ip_address=_client_ip(request),
+        )
+        return _transport_tokens(
+            tokens,
+            payload.transport,
+            request,
+            response,
+            frozenset(allowed_origins),
+        )
+
+    @router.post("/google", response_model=AuthTokenResponse)
+    def login_with_google(
+        payload: GoogleLoginRequest,
+        request: Request,
+        response: Response,
+    ) -> AuthTokenResponse:
+        tokens = auth_service.login_with_google(
+            payload.id_token,
             payload.installation_id,
             payload.device_name,
             clock(),

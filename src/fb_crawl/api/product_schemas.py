@@ -44,6 +44,15 @@ class LoginRequest(BaseModel):
     transport: Literal["extension", "web"] = "extension"
 
 
+class GoogleLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_token: str = Field(min_length=16, max_length=4096)
+    installation_id: UUID
+    device_name: str = Field(min_length=1, max_length=128)
+    transport: Literal["extension", "web"] = "extension"
+
+
 class RefreshRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
