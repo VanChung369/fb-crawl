@@ -61,6 +61,21 @@ Artifacts are written below `LEAD_FINDER_EXPORT_DIR` (default
 
 ### Lead Finder account setup
 
+After upgrading the extension's lead status/notes feature, apply migration
+`014_account_leads` using the normal migration command from `fb-crawl`, then restart the API:
+
+```powershell
+.\.venv\Scripts\python.exe -m fb_crawl pipeline migrate
+```
+
+Lead status and notes are stored per account/customer on the backend, independently
+of lookup history and scan sessions. The extension creates CSV/XLSX files in the
+browser from all pages matching the applied filters; these downloads do not create
+server export jobs or require the export worker. Existing server export APIs remain
+available for older clients. Save edited notes before exporting; unsaved drafts are
+not included. If another device edits the same lead, refresh notes and explicitly
+choose the saved version before retrying a conflicting change.
+
 Production product routes require independent JWT, token-HMAC, and license-HMAC
 secrets, an HTTPS `LEAD_FINDER_PUBLIC_BASE_URL`, SMTP settings, and
 `LEAD_FINDER_TIMEZONE` (default `Asia/Ho_Chi_Minh`). Configure the versioned

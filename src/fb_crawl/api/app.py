@@ -135,6 +135,9 @@ def create_app(
                 lookup_service=product_services.interaction_session_lookup_service,
                 rate_limiter=product_services.rate_limiter, clock=clock,
             ))
+        if product_services.lead_repository is not None:
+            from fb_crawl.api.routes.leads import create_leads_router
+            app.include_router(create_leads_router(product_services.lead_repository, product_auth))
         app.include_router(
             create_product_auth_router(
                 product_services.auth_service,

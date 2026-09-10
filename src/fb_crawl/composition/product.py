@@ -24,6 +24,7 @@ from fb_crawl.providers.health import (
     PostgresProviderHealthRepository,
 )
 from fb_crawl.history.postgres import PostgresHistoryRepository
+from fb_crawl.history.leads import PostgresLeadRepository
 from fb_crawl.history.repository import HistoryRepository
 from fb_crawl.history.service import HistoryService
 from fb_crawl.interaction_sessions.postgres import PostgresInteractionSessionRepository
@@ -63,6 +64,7 @@ class ProductServices:
     provider_health_repository: object | None = None
     interaction_session_service: InteractionSessionService | None = None
     interaction_session_lookup_service: SessionLookupService | None = None
+    lead_repository: PostgresLeadRepository | None = None
 
 
 def compose_product_services(
@@ -181,6 +183,7 @@ def compose_product_services(
             database_url,
             statement_timeout_seconds=statement_timeout_seconds,
         ),
+        lead_repository=PostgresLeadRepository(database_url, statement_timeout_seconds=statement_timeout_seconds),
         export_service=ExportService(export_repository, export_artifacts),
         metrics_repository=PostgresProductMetricsRepository(
             database_url,
