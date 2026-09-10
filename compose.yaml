@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fb_pipeline}
       POSTGRES_USER: ${POSTGRES_USER:-fb_pipeline}
