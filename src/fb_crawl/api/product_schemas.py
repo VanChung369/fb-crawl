@@ -149,15 +149,15 @@ class LicenseDurationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     unit: Literal["day", "month"]
-    value: int = Field(ge=1, le=3650)
+    value: int = Field(ge=1, le=120_000)
 
 
 class LicenseGrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration: LicenseDurationRequest
-    monthly_contact_limit: int = Field(ge=0, le=10_000_000)
-    max_devices: int = Field(ge=1, le=100)
+    monthly_contact_limit: int = Field(ge=0, le=2_147_483_647)
+    max_devices: int = Field(ge=1, le=1_000_000)
     allow_group_crawl: bool
     allow_comment_crawl: bool
 

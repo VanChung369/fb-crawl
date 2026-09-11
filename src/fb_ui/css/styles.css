@@ -756,29 +756,347 @@ body {
   gap: 12px;
 }
 
-.admin-permission-list {
-  display: grid;
-  gap: 10px;
-  margin: 2px 0 20px;
-  color: var(--text-secondary);
-  font-size: 0.86rem;
+.sub-label {
+  font-size: 0.78rem !important;
+  color: var(--text-muted) !important;
+  margin-bottom: 4px !important;
+  font-weight: 500 !important;
 }
 
-.admin-permission-list label {
+/* ==========================================================================
+   Admin License Builder: Sleek Card & Switch Design
+   ========================================================================== */
+
+.admin-license-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Modern Setting Card */
+.setting-card {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  padding: 13px 15px;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.setting-card:hover {
+  background: rgba(255, 255, 255, 0.038);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.setting-card.is-unlimited {
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.04);
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.08);
+}
+
+.setting-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.setting-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setting-card-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0 !important;
+  line-height: 1.25;
+}
+
+.setting-card-desc {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.setting-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.setting-input {
+  width: 100%;
+  height: 38px;
+  background: rgba(10, 13, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.setting-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  outline: none;
+}
+
+.unlimited-badge-view {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 12px;
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.15), rgba(6, 182, 212, 0.08));
+  border: 1px dashed rgba(99, 102, 241, 0.45);
+  border-radius: var(--radius-sm);
+  color: #c7d2fe;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  user-select: none;
+}
+
+.infinity-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--accent-secondary);
+}
+
+/* Custom iOS/SaaS Toggle Switch */
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.switch input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.switch-slider {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 19px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.switch-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  background: #e2e8f0;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.switch input:checked + .switch-slider {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  border-color: #6366f1;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.45);
+}
+
+.switch input:checked + .switch-slider::before {
+  transform: translateX(15px);
+  background: #ffffff;
+}
+
+.switch-label {
+  font-size: 0.77rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.switch:hover .switch-label {
+  color: var(--text-primary);
+}
+
+.switch input:checked ~ .switch-label {
+  color: #c7d2fe;
+  font-weight: 600;
+}
+
+/* Permission Tiles */
+.admin-permissions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.section-micro-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.permission-tiles-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.permission-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.permission-tile:hover {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.permission-tile input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.permission-tile-content {
   display: flex;
   align-items: center;
   gap: 9px;
-  cursor: pointer;
+  min-width: 0;
 }
 
-.admin-permission-list input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent-primary);
+.permission-tile-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
 
-.admin-license-form > .btn {
+.permission-tile-name {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.permission-tile-sub {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.tile-checkbox {
+  width: 17px;
+  height: 17px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.tile-checkbox::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  opacity: 0;
+  margin-bottom: 2px;
+  transition: opacity var(--transition-fast);
+}
+
+.permission-tile input:checked ~ .tile-checkbox {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.45);
+}
+
+.permission-tile input:checked ~ .tile-checkbox::after {
+  opacity: 1;
+}
+
+.permission-tile input:checked ~ .permission-tile-content .permission-tile-icon {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+}
+
+.permission-tile:has(input:checked) {
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+/* Submit Button */
+.btn-generate-key {
   width: 100%;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: 0 4px 18px rgba(99, 102, 241, 0.35);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  margin-top: 6px;
+  color: #ffffff;
+}
+
+.btn-generate-key:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(99, 102, 241, 0.5);
+  background: linear-gradient(135deg, #6b6ef9 0%, #584feb 100%) !important;
+}
+
+.btn-generate-key:active {
+  transform: translateY(1px);
 }
 
 .admin-empty-cell {

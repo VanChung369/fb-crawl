@@ -106,6 +106,33 @@ def test_created_key_plaintext_is_not_returned_by_list() -> None:
     assert "private-digest" not in created.text + listed.text
 
 
+def test_admin_can_create_unlimited_license_key() -> None:
+    client, _repository, licenses, access = _client(admin=True)
+
+    unlimited_grant = {
+        "duration": {"unit": "month", "value": 1200},
+        "monthly_contact_limit": 2_147_483_647,
+        "max_devices": 1_000_000,
+        "allow_group_crawl": True,
+        "allow_comment_crawl": True,
+    }
+    response = client.post(
+        "/api/v1/admin/license-keys",
+        headers=_headers(access),
+        json=unlimited_grant,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["key"] == "LF-REAL-PLAINTEXT-ABCD"
+    assert len(licenses.created) == 1
+    created_grant, _ = licenses.created[0]
+    assert created_grant.duration.unit == "month"
+    assert created_grant.duration.value == 1200
+    assert created_grant.monthly_contact_limit == 2_147_483_647
+    assert created_grant.max_devices == 1_000_000
+
+
+
 def test_admin_can_list_and_suspend_accounts() -> None:
     client, repository, licenses, access = _client(admin=True)
     repository.add_user_account(8)

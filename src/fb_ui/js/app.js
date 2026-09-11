@@ -186,6 +186,18 @@ class DashboardApp {
     if (durationPreset) {
       durationPreset.addEventListener('change', () => this.applyLicenseDurationPreset());
     }
+    const unlimitedDuration = document.getElementById('unlimited-duration');
+    if (unlimitedDuration) {
+      unlimitedDuration.addEventListener('change', () => this.toggleUnlimitedDuration());
+    }
+    const unlimitedContacts = document.getElementById('unlimited-contact-limit');
+    if (unlimitedContacts) {
+      unlimitedContacts.addEventListener('change', () => this.toggleUnlimitedContacts());
+    }
+    const unlimitedDevices = document.getElementById('unlimited-max-devices');
+    if (unlimitedDevices) {
+      unlimitedDevices.addEventListener('change', () => this.toggleUnlimitedDevices());
+    }
     const refreshLicenses = document.getElementById('btn-refresh-admin-licenses');
     if (refreshLicenses) refreshLicenses.addEventListener('click', () => this.loadAdminLicenses(true));
     const refreshAccounts = document.getElementById('btn-refresh-admin-accounts');
@@ -2041,14 +2053,94 @@ class DashboardApp {
     const preset = document.getElementById('license-duration-preset');
     const unit = document.getElementById('license-duration-unit');
     const value = document.getElementById('license-duration-value');
+    const unlimitedDuration = document.getElementById('unlimited-duration');
+    const customFields = document.getElementById('custom-duration-fields');
+    const cardDuration = document.getElementById('card-duration');
     if (!preset || !unit || !value) return;
+
+    if (preset.value === 'lifetime') {
+      unit.value = 'month';
+      value.value = '1200';
+      unit.disabled = true;
+      value.disabled = true;
+      if (unlimitedDuration) unlimitedDuration.checked = true;
+      if (customFields) customFields.style.display = 'none';
+      if (cardDuration) cardDuration.classList.add('is-unlimited');
+      return;
+    }
+
+    if (unlimitedDuration) unlimitedDuration.checked = false;
+    if (cardDuration) cardDuration.classList.remove('is-unlimited');
+
     const custom = preset.value === 'custom';
     unit.disabled = !custom;
     value.disabled = !custom;
+    if (customFields) customFields.style.display = custom ? 'grid' : 'none';
+
     if (!custom) {
       const [durationUnit, durationValue] = preset.value.split(':');
       unit.value = durationUnit;
       value.value = durationValue;
+    }
+  }
+
+  toggleUnlimitedDuration() {
+    const preset = document.getElementById('license-duration-preset');
+    const unlimitedDuration = document.getElementById('unlimited-duration');
+    if (!preset || !unlimitedDuration) return;
+    if (unlimitedDuration.checked) {
+      preset.value = 'lifetime';
+    } else {
+      preset.value = 'month:1';
+    }
+    this.applyLicenseDurationPreset();
+  }
+
+  toggleUnlimitedContacts() {
+    const checkbox = document.getElementById('unlimited-contact-limit');
+    const input = document.getElementById('monthly-contact-limit');
+    const badge = document.getElementById('tag-unlimited-contacts');
+    const card = document.getElementById('card-contact-limit');
+    if (!checkbox || !input) return;
+    if (checkbox.checked) {
+      if (input.value !== '2147483647') {
+        input.dataset.previousValue = input.value;
+      }
+      input.value = '2147483647';
+      input.style.display = 'none';
+      input.required = false;
+      if (badge) badge.style.display = 'flex';
+      if (card) card.classList.add('is-unlimited');
+    } else {
+      input.value = input.dataset.previousValue || '1000';
+      input.style.display = 'block';
+      input.required = true;
+      if (badge) badge.style.display = 'none';
+      if (card) card.classList.remove('is-unlimited');
+    }
+  }
+
+  toggleUnlimitedDevices() {
+    const checkbox = document.getElementById('unlimited-max-devices');
+    const input = document.getElementById('max-devices');
+    const badge = document.getElementById('tag-unlimited-devices');
+    const card = document.getElementById('card-max-devices');
+    if (!checkbox || !input) return;
+    if (checkbox.checked) {
+      if (input.value !== '1000000') {
+        input.dataset.previousValue = input.value;
+      }
+      input.value = '1000000';
+      input.style.display = 'none';
+      input.required = false;
+      if (badge) badge.style.display = 'flex';
+      if (card) card.classList.add('is-unlimited');
+    } else {
+      input.value = input.dataset.previousValue || '1';
+      input.style.display = 'block';
+      input.required = true;
+      if (badge) badge.style.display = 'none';
+      if (card) card.classList.remove('is-unlimited');
     }
   }
 
@@ -2062,13 +2154,23 @@ class DashboardApp {
     const commentCrawl = document.getElementById('allow-comment-crawl');
     const submitButton = document.getElementById('btn-create-license');
     submitButton.disabled = true;
+
+    const isUnlimitedDuration = document.getElementById('unlimited-duration')?.checked;
+    const isUnlimitedContacts = document.getElementById('unlimited-contact-limit')?.checked;
+    const isUnlimitedDevices = document.getElementById('unlimited-max-devices')?.checked;
+
+    const unit = isUnlimitedDuration ? 'month' : (durationUnit?.value || 'month');
+    const val = isUnlimitedDuration ? 1200 : Number(durationValue?.value || 1);
+    const limit = isUnlimitedContacts ? 2147483647 : Number(monthlyLimit?.value || 1000);
+    const devices = isUnlimitedDevices ? 1000000 : Number(maxDevices?.value || 1);
+
     try {
       const created = await this.fetchProductApi('/api/v1/admin/license-keys', {
         method: 'POST',
         body: JSON.stringify({
-          duration: { unit: durationUnit.value, value: Number(durationValue.value) },
-          monthly_contact_limit: Number(monthlyLimit.value),
-          max_devices: Number(maxDevices.value),
+          duration: { unit, value: val },
+          monthly_contact_limit: limit,
+          max_devices: devices,
           allow_group_crawl: groupCrawl.checked,
           allow_comment_crawl: commentCrawl.checked
         })
@@ -2129,9 +2231,12 @@ class DashboardApp {
     items.forEach(item => {
       const row = document.createElement('tr');
       this.appendAdminTextCell(row, item.masked_key);
-      this.appendAdminTextCell(row, `${item.duration.value} ${item.duration.unit === 'month' ? 'tháng' : 'ngày'}`);
-      this.appendAdminTextCell(row, Number(item.monthly_contact_limit).toLocaleString('vi-VN'));
-      this.appendAdminTextCell(row, item.max_devices);
+      const isLifetime = item.duration.unit === 'month' && Number(item.duration.value) >= 1200;
+      this.appendAdminTextCell(row, isLifetime ? 'Không giới hạn (Vĩnh viễn)' : `${item.duration.value} ${item.duration.unit === 'month' ? 'tháng' : 'ngày'}`);
+      const isUnlimitedContacts = Number(item.monthly_contact_limit) >= 1000000000;
+      this.appendAdminTextCell(row, isUnlimitedContacts ? 'Không giới hạn' : Number(item.monthly_contact_limit).toLocaleString('vi-VN'));
+      const isUnlimitedDevices = Number(item.max_devices) >= 1000000;
+      this.appendAdminTextCell(row, isUnlimitedDevices ? 'Không giới hạn' : item.max_devices);
       this.appendAdminStatusCell(row, item.status);
       const actions = document.createElement('td');
       if (item.status !== 'revoked') {
@@ -2248,9 +2353,10 @@ class DashboardApp {
     }
     items.forEach(item => {
       const row = document.createElement('tr');
-      this.appendAdminTextCell(row, `${item.duration.value} ${item.duration.unit === 'month' ? 'tháng' : 'ngày'}`);
+      const isLifetime = item.duration.unit === 'month' && Number(item.duration.value) >= 1200;
+      this.appendAdminTextCell(row, isLifetime ? 'Không giới hạn (Vĩnh viễn)' : `${item.duration.value} ${item.duration.unit === 'month' ? 'tháng' : 'ngày'}`);
       this.appendAdminTextCell(row, this.formatAdminDate(item.starts_at));
-      this.appendAdminTextCell(row, this.formatAdminDate(item.ends_at));
+      this.appendAdminTextCell(row, isLifetime ? 'Không giới hạn (Vĩnh viễn)' : this.formatAdminDate(item.ends_at));
       this.appendAdminStatusCell(row, item.status);
       const actions = document.createElement('td');
       if (item.status === 'valid' && new Date(item.starts_at) > new Date()) {

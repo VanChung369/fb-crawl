@@ -13,8 +13,11 @@ def test_admin_workspace_has_explicit_duration_and_entitlement_controls() -> Non
         "license-duration-preset",
         "license-duration-unit",
         "license-duration-value",
+        "unlimited-duration",
         "monthly-contact-limit",
+        "unlimited-contact-limit",
         "max-devices",
+        "unlimited-max-devices",
         "allow-group-crawl",
         "allow-comment-crawl",
     ):

@@ -1139,46 +1139,125 @@
                   </div>
                 </div>
                 <form id="form-create-license" class="admin-license-form">
-                  <div class="form-group">
-                    <label for="license-duration-preset">Thời hạn nhanh</label>
-                    <select class="form-control" id="license-duration-preset">
+                  <!-- Duration Card -->
+                  <div class="setting-card" id="card-duration">
+                    <div class="setting-card-header">
+                      <div class="setting-card-text">
+                        <label for="license-duration-preset" class="setting-card-title">Thời hạn license</label>
+                        <span class="setting-card-desc">Thời gian hiệu lực của gói bản quyền</span>
+                      </div>
+                      <label class="switch" title="Cấp quyền sử dụng vĩnh viễn">
+                        <input type="checkbox" id="unlimited-duration" />
+                        <span class="switch-slider"></span>
+                        <span class="switch-label">Vĩnh viễn</span>
+                      </label>
+                    </div>
+                    <select class="form-control setting-input" id="license-duration-preset">
                       <option value="day:1">1 ngày</option>
                       <option value="day:7">7 ngày</option>
                       <option value="month:1" selected>1 tháng</option>
                       <option value="month:3">3 tháng</option>
                       <option value="month:6">6 tháng</option>
-                      <option value="month:12">12 tháng</option>
-                      <option value="custom">Tùy chỉnh</option>
+                      <option value="month:12">12 tháng (1 năm)</option>
+                      <option value="lifetime">Không giới hạn (Vĩnh viễn)</option>
+                      <option value="custom">Tùy chỉnh ngày / tháng...</option>
                     </select>
-                  </div>
-                  <div class="admin-form-row">
-                    <div class="form-group">
-                      <label for="license-duration-unit">Đơn vị</label>
-                      <select class="form-control" id="license-duration-unit">
-                        <option value="day">Ngày</option>
-                        <option value="month" selected>Tháng</option>
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label for="license-duration-value">Số lượng</label>
-                      <input class="form-control" id="license-duration-value" type="number" min="1" max="3650" value="1" required />
-                    </div>
-                  </div>
-                  <div class="admin-form-row">
-                    <div class="form-group">
-                      <label for="monthly-contact-limit">Số liên hệ / tháng</label>
-                      <input class="form-control" id="monthly-contact-limit" type="number" min="0" max="10000000" value="1000" required />
-                    </div>
-                    <div class="form-group">
-                      <label for="max-devices">Số thiết bị tối đa</label>
-                      <input class="form-control" id="max-devices" type="number" min="1" max="100" value="1" required />
+                    <div class="admin-form-row custom-duration-row" id="custom-duration-fields" style="display: none; margin-top: 10px;">
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label for="license-duration-unit" class="sub-label">Đơn vị</label>
+                        <select class="form-control" id="license-duration-unit">
+                          <option value="day">Ngày</option>
+                          <option value="month" selected>Tháng</option>
+                        </select>
+                      </div>
+                      <div class="form-group" style="margin-bottom: 0;">
+                        <label for="license-duration-value" class="sub-label">Số lượng</label>
+                        <input class="form-control" id="license-duration-value" type="number" min="1" max="12000" value="1" required />
+                      </div>
                     </div>
                   </div>
-                  <div class="admin-permission-list">
-                    <label><input id="allow-group-crawl" type="checkbox" /> Tự động crawl group</label>
-                    <label><input id="allow-comment-crawl" type="checkbox" /> Tự động crawl comment</label>
+
+                  <!-- Contact Quota Card -->
+                  <div class="setting-card" id="card-contact-limit">
+                    <div class="setting-card-header">
+                      <div class="setting-card-text">
+                        <label for="monthly-contact-limit" class="setting-card-title">Số liên hệ / tháng</label>
+                        <span class="setting-card-desc">Hạn mức tra cứu số điện thoại hàng tháng</span>
+                      </div>
+                      <label class="switch" title="Không giới hạn số lượt tra cứu">
+                        <input type="checkbox" id="unlimited-contact-limit" />
+                        <span class="switch-slider"></span>
+                        <span class="switch-label">Không giới hạn</span>
+                      </label>
+                    </div>
+                    <div class="setting-input-wrap">
+                      <input class="form-control setting-input" id="monthly-contact-limit" type="number" min="0" max="2147483647" value="1000" required />
+                      <div class="unlimited-badge-view" id="tag-unlimited-contacts" style="display: none;">
+                        <span class="infinity-icon">∞</span>
+                        <span>Không giới hạn số liên hệ</span>
+                      </div>
+                    </div>
                   </div>
-                  <button class="btn btn-primary" id="btn-create-license" type="submit">Tạo license key</button>
+
+                  <!-- Max Devices Card -->
+                  <div class="setting-card" id="card-max-devices">
+                    <div class="setting-card-header">
+                      <div class="setting-card-text">
+                        <label for="max-devices" class="setting-card-title">Số thiết bị tối đa</label>
+                        <span class="setting-card-desc">Số lượng trình duyệt / máy được phép đăng nhập</span>
+                      </div>
+                      <label class="switch" title="Không giới hạn số lượng thiết bị cài đặt">
+                        <input type="checkbox" id="unlimited-max-devices" />
+                        <span class="switch-slider"></span>
+                        <span class="switch-label">Không giới hạn</span>
+                      </label>
+                    </div>
+                    <div class="setting-input-wrap">
+                      <input class="form-control setting-input" id="max-devices" type="number" min="1" max="1000000" value="1" required />
+                      <div class="unlimited-badge-view" id="tag-unlimited-devices" style="display: none;">
+                        <span class="infinity-icon">∞</span>
+                        <span>Không giới hạn thiết bị</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Permissions Grid -->
+                  <div class="admin-permissions-container">
+                    <span class="section-micro-label">Tính năng tự động hóa</span>
+                    <div class="permission-tiles-grid">
+                      <label class="permission-tile">
+                        <input id="allow-group-crawl" type="checkbox" />
+                        <div class="permission-tile-content">
+                          <div class="permission-tile-icon">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                          </div>
+                          <div>
+                            <span class="permission-tile-name">Crawl group</span>
+                            <span class="permission-tile-sub">Tự động quét nhóm</span>
+                          </div>
+                        </div>
+                        <div class="tile-checkbox"></div>
+                      </label>
+                      <label class="permission-tile">
+                        <input id="allow-comment-crawl" type="checkbox" />
+                        <div class="permission-tile-content">
+                          <div class="permission-tile-icon">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                          </div>
+                          <div>
+                            <span class="permission-tile-name">Crawl comment</span>
+                            <span class="permission-tile-sub">Tự động quét bình luận</span>
+                          </div>
+                        </div>
+                        <div class="tile-checkbox"></div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <button class="btn btn-primary btn-generate-key" id="btn-create-license" type="submit">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1-1l-3 3m5 0l-3-3m-5 5l-7 7a2.828 2.828 0 1 1-4-4l7-7m3 3l2-2m2 2l2-2"/></svg>
+                    <span>Tạo license key</span>
+                  </button>
                 </form>
               </div>
 
