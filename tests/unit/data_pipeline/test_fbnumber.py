@@ -12,7 +12,7 @@ from fb_data_pipeline.core.models import (
 from fb_data_pipeline.providers.fbnumber import FBNumberProvider
 
 
-@pytest.mark.parametrize("status", ["fail", "failed", "error", False, " FAIL "])
+@pytest.mark.parametrize("status", ["error", False, " ERROR "])
 @pytest.mark.parametrize("data", [None, {}, {"uid": "1372263648", "number": "0912345678"}])
 def test_fbnumber_http_201_business_failure_is_not_negative_result(status, data) -> None:
     payload = {"status": status, "message": "secret provider trace"}
@@ -39,7 +39,14 @@ def test_fbnumber_http_201_business_failure_is_not_negative_result(status, data)
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("payload", [{"status": "success", "data": {}}, {"data": {}}, {"status": True, "data": []}])
+@pytest.mark.parametrize("payload", [
+    {"status": "success", "data": {}},
+    {"data": {}},
+    {"status": True, "data": []},
+    {"status": "fail", "data": {}},
+    {"status": "failed", "data": {}},
+    {"status": "FAIL", "data": {}},
+])
 def test_fbnumber_successful_empty_result_remains_not_found(payload) -> None:
     provider = FBNumberProvider(
         api_url="https://api.example.test/v1/phone/search",

@@ -338,7 +338,7 @@ class FBNumberProvider:
             status = response_body.get("status") if isinstance(response_body, Mapping) else None
             if status is False or (
                 isinstance(status, str)
-                and status.strip().casefold() in {"fail", "failed", "error"}
+                and status.strip().casefold() in {"error"}
             ):
                 return ProviderResult(
                     provider=self.name,

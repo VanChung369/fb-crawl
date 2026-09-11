@@ -437,7 +437,7 @@ def test_real_fbnumber_business_failure_finishes_failed_without_quota() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(201, json={"status": "fail", "message": "private provider details"})
+        return httpx.Response(201, json={"status": "error", "message": "private provider details"})
 
     provider = FBNumberProvider(
         api_url="https://api.example.test/phone/search", api_token="secret",
