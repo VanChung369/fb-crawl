@@ -10,7 +10,11 @@ from fb_crawl.auth.config import AuthSettings
 from fb_crawl.auth.email import SmtpEmailDelivery
 from fb_crawl.auth.google import GoogleTokenVerifier
 from fb_crawl.auth.passwords import PasswordHasher
-from fb_crawl.auth.rate_limit import RateLimitService
+from fb_crawl.auth.rate_limit import (
+    DEFAULT_AUTH_POLICIES,
+    RateLimitPolicy,
+    RateLimitService,
+)
 from fb_crawl.auth.service import AccountAuthService
 from fb_crawl.auth.tokens import TokenService
 from fb_crawl.core.exceptions import ConfigurationError
@@ -103,9 +107,29 @@ def compose_product_services(
         ),
     )
     password_hasher = PasswordHasher()
+    policies = dict(DEFAULT_AUTH_POLICIES)
+    contact_limit_raw = (
+        env.get("RATE_LIMIT_CONTACT_LOOKUP_PER_MINUTE")
+        or env.get("RATE_LIMIT_CONTACT_LOOKUP")
+        or ""
+    ).strip()
+    if contact_limit_raw.isdigit() and int(contact_limit_raw) > 0:
+        c_limit = int(contact_limit_raw)
+        policies["contact_lookup"] = RateLimitPolicy(c_limit, 60)
+        policies["contact_poll"] = RateLimitPolicy(c_limit, 60)
+
+    contact_batch_raw = (
+        env.get("RATE_LIMIT_CONTACT_BATCH_LOOKUP_PER_MINUTE")
+        or env.get("RATE_LIMIT_CONTACT_BATCH_LOOKUP")
+        or ""
+    ).strip()
+    if contact_batch_raw.isdigit() and int(contact_batch_raw) > 0:
+        policies["contact_batch_lookup"] = RateLimitPolicy(int(contact_batch_raw), 60)
+
     rate_limiter = RateLimitService(
         repository,
         auth_settings.token_hmac_secret,
+        policies=policies,
     )
     google_client_id = (
         env.get("LEAD_FINDER_GOOGLE_CLIENT_ID")
