@@ -268,6 +268,19 @@ def test_update_user_normalizes_manual_phone_numbers_before_writing_slots() -> N
     assert evidence_insert[2] == "fbnumber"
 
 
+def test_clearing_phone_removes_only_that_origin_and_invalidates_phone_cache() -> None:
+    cursor = RecordingCursor([user_row()])
+    repository = UserQueryRepository(
+        "postgresql://hidden", connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+    repository.update_user(7, phone_1="")
+    deletes = [(sql, params) for sql, params in cursor.commands if "DELETE FROM" in sql]
+    assert any("user_phone_evidence" in sql and params == (7, "fbnumber") for sql, params in deletes)
+    assert any("provider_lookup_state" in sql and params == (7,) for sql, params in deletes)
+    assert not any("lookup_events" in sql or "account_contact_reveals" in sql for sql, _ in deletes)
+    assert not any("INSERT INTO phone_numbers" in sql for sql, _ in cursor.commands)
+
+
 @pytest.mark.parametrize("method", ["list_users", "list_phone_evidence", "list_enrichment_attempts"])
 def test_repository_rejects_invalid_keyset_cursors_before_connecting(method: str) -> None:
     """Break caught: malformed cursors reach PostgreSQL and change pagination semantics."""

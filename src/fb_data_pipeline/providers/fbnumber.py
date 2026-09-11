@@ -335,6 +335,18 @@ class FBNumberProvider:
                 )
 
             correlation_id = _correlation_id(response_body, response)
+            status = response_body.get("status") if isinstance(response_body, Mapping) else None
+            if status is False or (
+                isinstance(status, str)
+                and status.strip().casefold() in {"fail", "failed", "error"}
+            ):
+                return ProviderResult(
+                    provider=self.name,
+                    status=ProviderStatus.FAILED,
+                    checked_at=checked_at,
+                    correlation_id=correlation_id,
+                    error_code="provider_lookup_failed",
+                )
             resolved_identity = _resolved_identity(response_body)
             if _identity_conflicts(identity, resolved_identity):
                 return ProviderResult(

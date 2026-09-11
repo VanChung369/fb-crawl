@@ -148,6 +148,7 @@ class ContactLookupService:
             and (
                 cached.state is None
                 or cached.state.latest_status is not ProviderStatus.NOT_FOUND
+                or cached.observed_at > cached.state.checked_at
             )
             and now < cached.observed_at + self.found_ttl
         )

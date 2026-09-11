@@ -58,6 +58,7 @@ class TransitionPayload(StrictPayload):
 
 class LookupPayload(StrictPayload):
     retry_failed: bool = Field(default=False, strict=True)
+    resolved_uid: str | None = Field(default=None, strict=True, min_length=5, max_length=20, pattern=r"^[1-9][0-9]*$")
 
 
 def create_interaction_sessions_router(service, current_account_dependency, *, lookup_service=None, rate_limiter=None, clock=lambda: datetime.now(UTC)):
@@ -121,7 +122,7 @@ def create_interaction_sessions_router(service, current_account_dependency, *, l
         if rate_limiter is not None:
             rate_limiter.check("contact_lookup", str(current.account.id), str(current.device.id),
                                request.client.host if request.client else "unknown", clock())
-        result = lookup_service.lookup(current.account, current.device, session_id, person_id, clock(), payload.retry_failed)
+        result = lookup_service.lookup(current.account, current.device, session_id, person_id, clock(), payload.retry_failed, resolved_uid=payload.resolved_uid)
         return _lookup_response(result)
 
     return router

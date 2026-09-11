@@ -86,6 +86,9 @@ def create_app(
     app.state.product_services = product_services
 
     _install_exception_handlers(app)
+    from fb_crawl.api.routes.auth_page import create_auth_page_router
+
+    app.include_router(create_auth_page_router())
     from fb_crawl.interaction_sessions.models import SessionError
 
     @app.exception_handler(SessionError)

@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import UUID
 
+import httpx
+
 from fb_crawl.accounts.models import (
     Account,
     AccountRole,
@@ -34,7 +36,8 @@ from fb_data_pipeline.core.models import (
     ProviderStatus,
     UserBundle,
 )
-from fb_data_pipeline.services.pipeline import EnrichedUser
+from fb_data_pipeline.services.pipeline import EnrichedUser, EnrichmentPipeline
+from fb_data_pipeline.providers.fbnumber import FBNumberProvider
 from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 
 
@@ -294,6 +297,33 @@ def test_fresh_cache_never_calls_provider() -> None:
     assert pipeline.calls == []
 
 
+def test_newer_synced_phone_overrides_an_older_negative_lookup() -> None:
+    cached = CachedContact(
+        CONTACT.id, 501, "+84981234567", NOW,
+        state(ProviderStatus.NOT_FOUND, NOW + timedelta(days=7)),
+    )
+    lookup, contacts, quota, pipeline = service(cached)
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+    assert result.state is LookupOutcome.FOUND
+    assert result.phone == "+84981234567"
+    assert result.source is LookupSource.CACHE
+    assert result.quota_charged is True
+    assert not pipeline.calls
+    assert contacts.created.outcome is LookupOutcome.FOUND
+
+
+def test_newer_negative_lookup_does_not_reveal_an_older_phone() -> None:
+    cached = CachedContact(
+        CONTACT.id, 501, "+84981234567", NOW - timedelta(days=1),
+        state(ProviderStatus.NOT_FOUND, NOW + timedelta(days=7)),
+    )
+    lookup, _, _, pipeline = service(cached)
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+    assert result.state is LookupOutcome.NOT_FOUND
+    assert not result.phone
+    assert not pipeline.calls
+
+
 def test_single_lookup_creates_profile_scan_context_by_default() -> None:
     cached = CachedContact(
         CONTACT.id,
@@ -396,6 +426,73 @@ def test_lease_owner_finalizes_provider_phone_before_revealing_it() -> None:
     assert result.phone == "+84981234567"
     assert len(pipeline.calls) == 1
     assert len(quota.reserve_calls) == 1
+
+
+def test_real_fbnumber_business_failure_finishes_failed_without_quota() -> None:
+    contacts = FakeContacts(CachedContact(CONTACT.id, None, "", None, None))
+    contacts.final_state = state(ProviderStatus.FAILED, NOW + timedelta(minutes=5))
+    contacts.final_cache = CachedContact(CONTACT.id, None, "", None, contacts.final_state)
+    quota = FakeQuota()
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"status": "fail", "message": "private provider details"})
+
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/phone/search", api_token="secret",
+        client=httpx.Client(transport=httpx.MockTransport(handler)), clock=lambda: NOW,
+    )
+    lookup = ContactLookupService(FakeEntitlements(), quota, contacts,
+                                  EnrichmentPipeline(provider), clock=lambda: NOW)
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.state is LookupOutcome.FAILED
+    assert result.safe_error_code == "provider_failed"
+    assert result.provider_called is True
+    assert result.quota_charged is False
+    assert not result.phone
+    assert quota.reserve_calls == []
+    assert len(requests) == 1
+    assert contacts.finalized_enriched.provider_result.status is ProviderStatus.FAILED
+    assert contacts.created.outcome is LookupOutcome.FAILED
+
+
+def test_real_fbnumber_success_reveals_phone_on_first_lookup_without_sync() -> None:
+    contacts = FakeContacts(CachedContact(CONTACT.id, None, "", None, None))
+    contacts.final_state = state(ProviderStatus.FOUND, NOW + timedelta(days=30))
+    contacts.final_cache = CachedContact(CONTACT.id, 501, "+84981234567", NOW, contacts.final_state)
+    quota = FakeQuota()
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"status": "success", "data": {
+            "uid": IDENTITY.uid, "number": "0981234567", "numberProvider": "Viettel",
+            "gender": "male", "hideInfo": False,
+        }})
+
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/phone/search", api_token="secret",
+        client=httpx.Client(transport=httpx.MockTransport(handler)), clock=lambda: NOW,
+    )
+    lookup = ContactLookupService(FakeEntitlements(), quota, contacts,
+                                  EnrichmentPipeline(provider), clock=lambda: NOW)
+
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+
+    assert result.state is LookupOutcome.FOUND
+    assert result.source is LookupSource.PROVIDER
+    assert result.phone == "+84981234567"
+    assert result.provider_called is True
+    assert result.quota_charged is True
+    assert len(requests) == 1
+    assert len(quota.reserve_calls) == 1
+    enriched = contacts.finalized_enriched
+    assert enriched.provider_result.status is ProviderStatus.FOUND
+    assert enriched.bundle.phone_1 == result.phone
+    assert contacts.created.outcome is LookupOutcome.FOUND
 
 
 def test_owner_that_loses_lease_after_provider_call_returns_processing() -> None:

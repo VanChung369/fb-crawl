@@ -370,7 +370,18 @@ class UserQueryRepository:
 
             # Update phone evidence if phone_1 or phone_2 is provided
             for phone_val, origin in [(phone_1, "fbnumber"), (phone_2, "fb_crawl")]:
-                if phone_val is not None and phone_val.strip():
+                if phone_val is None:
+                    continue
+                cursor.execute(
+                    "DELETE FROM user_phone_evidence WHERE facebook_user_id = %s AND origin = %s",
+                    (user_id, origin),
+                )
+                if origin == "fbnumber":
+                    cursor.execute(
+                        "DELETE FROM provider_lookup_state WHERE facebook_user_id = %s AND provider = 'fbnumber' AND field = 'phone'",
+                        (user_id,),
+                    )
+                if phone_val.strip():
                     display_phone = phone_val.strip()
                     try:
                         norm = normalize_phone(display_phone)

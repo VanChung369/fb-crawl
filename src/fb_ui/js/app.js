@@ -1085,8 +1085,8 @@ class DashboardApp {
     const payload = {
       name: document.getElementById('edit-user-name')?.value.trim() || null,
       username: document.getElementById('edit-user-username')?.value.trim() || null,
-      phone_1: document.getElementById('edit-user-phone1')?.value.trim() || null,
-      phone_2: document.getElementById('edit-user-phone2')?.value.trim() || null,
+      phone_1: document.getElementById('edit-user-phone1')?.value.trim(),
+      phone_2: document.getElementById('edit-user-phone2')?.value.trim(),
       address: document.getElementById('edit-user-address')?.value.trim() || null,
       gender: document.getElementById('edit-user-gender')?.value || null,
       birth_date: document.getElementById('edit-user-birthdate')?.value.trim() || null,

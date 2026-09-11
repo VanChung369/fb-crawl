@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest
 
 from fb_data_pipeline.core.models import (
     FacebookIdentity,
@@ -9,6 +10,65 @@ from fb_data_pipeline.core.models import (
     ProviderStatus,
 )
 from fb_data_pipeline.providers.fbnumber import FBNumberProvider
+
+
+@pytest.mark.parametrize("status", ["fail", "failed", "error", False, " FAIL "])
+@pytest.mark.parametrize("data", [None, {}, {"uid": "1372263648", "number": "0912345678"}])
+def test_fbnumber_http_201_business_failure_is_not_negative_result(status, data) -> None:
+    payload = {"status": status, "message": "secret provider trace"}
+    if data is not None:
+        payload["data"] = data
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(201, json=payload)
+
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    result = provider.search(FacebookIdentity(username="nguyen.huy1505"))
+
+    assert result.status is ProviderStatus.FAILED
+    assert result.error_code == "provider_lookup_failed"
+    assert result.evidence == ()
+    assert result.resolved_identity is None
+    assert "secret provider trace" not in repr(result)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("payload", [{"status": "success", "data": {}}, {"data": {}}, {"status": True, "data": []}])
+def test_fbnumber_successful_empty_result_remains_not_found(payload) -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(201, json=payload),
+        )),
+    )
+    result = provider.search(FacebookIdentity(uid="1372263648"))
+    assert result.status is ProviderStatus.NOT_FOUND
+    assert result.error_code == ""
+
+
+def test_fbnumber_http_201_success_extracts_number_without_number_provider() -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(201, json={
+                "status": "success",
+                "data": {"uid": "1372263648", "number": "0912345678",
+                         "numberProvider": "0987654321", "gender": "male", "hideInfo": False},
+            }),
+        )),
+    )
+    result = provider.search(FacebookIdentity(uid="1372263648"))
+    assert result.status is ProviderStatus.FOUND
+    assert [item.normalized_phone for item in result.evidence] == ["+84912345678"]
+    assert result.profile.gender == "male"
 
 
 def test_fbnumber_maps_identity_and_returns_phone_1() -> None:

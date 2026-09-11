@@ -98,3 +98,37 @@ def test_upload_rejects_unknown_fields_and_malformed_json_without_calling_servic
     for body in ('{"rows":[],"phone":"123"}', '{bad', '{"rows":[]}'):
         assert client.put(f"{ROOT}/{SID}/interactions", headers=headers, content=body).status_code == 400
     assert not service.calls
+
+
+def test_lookup_payload_accepts_only_optional_numeric_resolved_uid():
+    from fb_crawl.api.routes.interaction_sessions import LookupPayload
+    from pydantic import ValidationError
+    assert LookupPayload().resolved_uid is None
+    assert LookupPayload(resolved_uid="100123").resolved_uid == "100123"
+    for invalid in ("", "1234", "1" * 21, "sample.user", "12345\n", 100123):
+        with pytest.raises(ValidationError):
+            LookupPayload(resolved_uid=invalid)
+    with pytest.raises(ValidationError):
+        LookupPayload(resolved_uid="100123", username="other.person")
+
+
+def test_lookup_route_forwards_resolved_uid_for_authenticated_person():
+    from types import SimpleNamespace
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from fb_crawl.api.routes.interaction_sessions import create_interaction_sessions_router
+    from fb_crawl.contacts.models import LookupOutcome, LookupSource
+    from fb_crawl.contacts.service import ContactLookupResult
+    from tests.unit.contacts.test_service import ACCOUNT, DEVICE, CONTACT
+    calls = []
+    class Lookup:
+        def lookup(self, account, device, session_id, person_id, now, retry_failed=False, resolved_uid=None):
+            calls.append((account.id, session_id, person_id, resolved_uid, retry_failed))
+            return ContactLookupResult(event_id=71, state=LookupOutcome.NOT_FOUND, source=LookupSource.PROVIDER, user=CONTACT.identity)
+    current = SimpleNamespace(account=ACCOUNT, device=DEVICE, cookie_authenticated=False, device_allowed=True)
+    app = FastAPI()
+    app.include_router(create_interaction_sessions_router(Sessions(), lambda: current, lookup_service=Lookup(), clock=lambda: NOW))
+    person_id = uuid4()
+    response = TestClient(app).post(f"{ROOT}/{SID}/people/{person_id}/lookup", json={"resolved_uid": "100123"})
+    assert response.status_code == 200
+    assert calls == [(ACCOUNT.id, SID, person_id, "100123", False)]
