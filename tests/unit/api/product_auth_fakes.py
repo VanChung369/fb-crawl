@@ -252,7 +252,7 @@ class ProductAuthServiceFake:
         self.calls.append(("register", email))
         return RegistrationResult(7, email.strip())
 
-    def verify_email(self, token, now, *, ip_address):
+    def verify_email(self, token, now, *, ip_address, email=None):
         self.calls.append(("verify_email", token))
         return object()
 

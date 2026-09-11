@@ -12,7 +12,7 @@ class EmailDeliveryFailed(FbCrawlError):
 
 
 class EmailDeliveryPort(Protocol):
-    def send_verification(self, email: str, url: str) -> None: ...
+    def send_verification(self, email: str, url: str, code: str = "") -> None: ...
 
     def send_password_reset(self, email: str, url: str) -> None: ...
 
@@ -37,14 +37,27 @@ class SmtpEmailDelivery:
         self._timeout_seconds = timeout_seconds
         self._smtp_factory = smtp_factory
 
-    def send_verification(self, email: str, url: str) -> None:
-        self._send(
-            recipient=email,
-            subject="Verify your Lead Finder email",
-            body=(
+    def send_verification(self, email: str, url: str, code: str = "") -> None:
+        if code:
+            subject = f"[Lead Finder] Mã xác nhận của bạn là: {code}"
+            body = (
+                f"Xin chào,\n\n"
+                f"Mã xác nhận tài khoản Lead Finder của bạn là:\n\n"
+                f"    {code}\n\n"
+                f"Vui lòng nhập mã này vào ứng dụng để hoàn tất kích hoạt tài khoản.\n"
+                f"Mã có hiệu lực trong 24 giờ.\n\n"
+                f"(Nếu bạn không yêu cầu mã này, vui lòng bỏ qua email)."
+            )
+        else:
+            subject = "Verify your Lead Finder email"
+            body = (
                 "Verify your Lead Finder account using this link:\n\n"
                 f"{url}\n\nThis link expires in 24 hours."
-            ),
+            )
+        self._send(
+            recipient=email,
+            subject=subject,
+            body=body,
         )
 
     def send_password_reset(self, email: str, url: str) -> None:

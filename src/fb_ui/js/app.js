@@ -1582,6 +1582,35 @@ class DashboardApp {
       if (timeoutInput) timeoutInput.value = data.timeout_seconds || 15;
       if (retriesInput) retriesInput.value = data.max_retries || 2;
       if (countryInput) countryInput.value = data.default_country_code || '84';
+
+      const tokenBadge = document.getElementById('fbnumber-token-badge');
+      const tokenDetail = document.getElementById('fbnumber-token-expiry-detail');
+
+      if (tokenBadge && tokenDetail) {
+        if (!data.api_token_configured) {
+          tokenBadge.className = 'pill danger';
+          tokenBadge.textContent = '❌ Chưa cấu hình';
+          tokenDetail.textContent = 'Chưa có Token FBNumber trong hệ thống. Vui lòng đăng nhập hoặc dán Token để kích hoạt.';
+        } else if (data.token_expired) {
+          tokenBadge.className = 'pill danger';
+          tokenBadge.textContent = '❌ Đã hết hạn';
+          tokenDetail.innerHTML = `Token đã hết hạn vào lúc <strong>${data.token_expires_at ? new Date(data.token_expires_at).toLocaleString('vi-VN') : 'vừa qua'}</strong>. Vui lòng bấm <strong>⚡ Đăng nhập FBNumber</strong> để tự động làm mới token mới.`;
+        } else if (data.token_days_remaining !== null && data.token_days_remaining !== undefined) {
+          if (data.token_days_remaining <= 3) {
+            tokenBadge.className = 'pill warning';
+            tokenBadge.textContent = `⏳ Còn ${data.token_days_remaining} ngày`;
+          } else {
+            tokenBadge.className = 'pill success';
+            tokenBadge.textContent = `✅ Còn ${data.token_days_remaining} ngày`;
+          }
+          const expDateStr = data.token_expires_at ? new Date(data.token_expires_at).toLocaleString('vi-VN') : '';
+          tokenDetail.innerHTML = `Token hợp lệ đến <strong>${expDateStr}</strong> (${data.token_days_remaining} ngày còn lại). Khi mở Extension hoặc bấm Đăng nhập, token sẽ tự động gia hạn.`;
+        } else {
+          tokenBadge.className = 'pill success';
+          tokenBadge.textContent = '✅ Đã cấu hình';
+          tokenDetail.textContent = 'Token tùy chỉnh không theo định dạng JWT thông thường.';
+        }
+      }
     }
 
     if (workerData) {
@@ -1709,6 +1738,7 @@ class DashboardApp {
 
     if (res) {
       this.showToast('Đã lưu cấu hình FBNumber vào .env thành công!');
+      this.loadSettingsData();
     } else {
       alert('Không thể lưu cấu hình. Vui lòng kiểm tra lại!');
     }

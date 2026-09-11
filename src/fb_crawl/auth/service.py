@@ -9,7 +9,7 @@ from uuid import UUID
 from email_validator import EmailNotValidError, validate_email
 
 from fb_crawl.accounts.models import Account, AccountStatus, DeviceStatus
-from fb_crawl.accounts.repository import AccountRepository
+from fb_crawl.accounts.repository import AccountRepository, InvalidAccountToken
 from fb_crawl.auth.email import EmailDeliveryPort
 from fb_crawl.auth.google import GoogleTokenVerifier, GoogleTokenVerifierPort
 from fb_crawl.auth.passwords import PasswordHasher
@@ -111,12 +111,41 @@ class AccountAuthService:
         return RegistrationResult(account.id, account.display_email)
 
     def verify_email(
-        self, raw_token: str, now: datetime, *, ip_address: str
+        self,
+        raw_token: str,
+        now: datetime,
+        *,
+        ip_address: str,
+        email: str | None = None,
     ) -> Account:
-        self._rate_limiter.check("verify_email", None, None, ip_address, now)
-        return self._repository.verify_email_token(
-            self._token_service.digest_opaque(raw_token), now
-        )
+        normalized_email = None
+        if email:
+            normalized_email, _ = _normalized_email(email)
+        self._rate_limiter.check("verify_email", normalized_email, None, ip_address, now)
+
+        # 1. If email is provided, check hashed code for this specific account
+        if normalized_email:
+            account = self._repository.find_account_by_email(normalized_email)
+            if account is not None:
+                token_digest = self._token_service.digest_opaque(
+                    f"email_verify:{account.id}:{raw_token.strip()}"
+                )
+                return self._repository.verify_email_token(token_digest, now)
+
+        # 2. If raw_token is composite "account_id:code"
+        if ":" in raw_token:
+            parts = raw_token.split(":", 1)
+            if parts[0].isdigit():
+                account_id = int(parts[0])
+                code = parts[1].strip()
+                token_digest = self._token_service.digest_opaque(
+                    f"email_verify:{account_id}:{code}"
+                )
+                return self._repository.verify_email_token(token_digest, now)
+
+        # 3. Direct opaque token lookup (legacy or direct hash)
+        token_digest = self._token_service.digest_opaque(raw_token.strip())
+        return self._repository.verify_email_token(token_digest, now)
 
     def resend_verification(
         self, email: str, now: datetime, *, ip_address: str
@@ -325,16 +354,23 @@ class AccountAuthService:
         return GenericRequestResult()
 
     def _send_verification(self, account: Account, now: datetime) -> None:
-        raw_token = self._token_service.new_opaque_token()
+        code = self._token_service.new_numeric_code(6)
+        token_digest = self._token_service.digest_opaque(
+            f"email_verify:{account.id}:{code}"
+        )
         self._repository.create_account_token(
             account.id,
             "email_verify",
-            self._token_service.digest_opaque(raw_token),
+            token_digest,
             now + EMAIL_VERIFICATION_TTL,
             now,
         )
-        url = f"{self._public_base_url}/verify-email?token={quote(raw_token)}"
-        self._email_delivery.send_verification(account.display_email, url)
+        composite_token = f"{account.id}:{code}"
+        url = f"{self._public_base_url}/verify-email?token={quote(composite_token)}&email={quote(account.display_email)}&code={code}"
+        try:
+            self._email_delivery.send_verification(account.display_email, url, code=code)
+        except TypeError:
+            self._email_delivery.send_verification(account.display_email, url)
 
     def _auth_tokens(
         self,

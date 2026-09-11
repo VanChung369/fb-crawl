@@ -20,8 +20,10 @@ from fb_crawl.api.product_schemas import (
     RegistrationResponse,
     ResetPasswordRequest,
     TokenRequest,
+    VerifyEmailRequest,
 )
 from fb_crawl.auth.service import AccountAuthService, AuthTokens
+from fb_crawl.core.exceptions import ValidationError
 
 
 def create_product_auth_router(
@@ -48,9 +50,17 @@ def create_product_auth_router(
         )
 
     @router.post("/verify-email", response_model=GenericAcceptedResponse)
-    def verify_email(payload: TokenRequest, request: Request) -> GenericAcceptedResponse:
+    def verify_email(
+        payload: VerifyEmailRequest, request: Request
+    ) -> GenericAcceptedResponse:
+        token_or_code = (payload.code or payload.token or "").strip()
+        if not token_or_code:
+            raise ValidationError("A verification code or token is required.")
         auth_service.verify_email(
-            payload.token, clock(), ip_address=_client_ip(request)
+            token_or_code,
+            clock(),
+            ip_address=_client_ip(request),
+            email=payload.email,
         )
         return GenericAcceptedResponse()
 

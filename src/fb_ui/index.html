@@ -382,8 +382,12 @@
                 Tra cứu, lọc danh sách khách hàng và xuất file CSV / JSON
               </p>
             </div>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button class="btn btn-primary" id="btn-open-sync-scans" style="display: inline-flex; align-items: center; gap: 6px;">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap">
+              <button
+                class="btn btn-primary"
+                id="btn-open-sync-scans"
+                style="display: inline-flex; align-items: center; gap: 6px"
+              >
                 <span>📥</span>
                 <span>Nhận Dữ Liệu FBNumber (Get Scans)</span>
               </button>
@@ -1024,42 +1028,124 @@
           </div>
 
           <!-- Row 2: Worker & Anti-Ban Cooldown Settings -->
-          <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-top: 20px;">
+          <div
+            style="
+              display: grid;
+              grid-template-columns: 1.2fr 1fr;
+              gap: 20px;
+              margin-top: 20px;
+            "
+          >
             <!-- Left: Worker Policy Form -->
             <div class="panel">
-              <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding: 16px 20px;">
-                <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary);">🛡️ Cấu Hình Worker & Thời Gian Nghỉ (Anti-Ban Cooldown)</h4>
+              <div
+                class="panel-header"
+                style="
+                  border-bottom: 1px solid var(--border-color);
+                  padding: 16px 20px;
+                "
+              >
+                <h4
+                  style="margin: 0; font-size: 1rem; color: var(--text-primary)"
+                >
+                  🛡️ Cấu Hình Worker & Thời Gian Nghỉ (Anti-Ban Cooldown)
+                </h4>
               </div>
-              <form id="form-update-worker-settings" style="padding: 20px;">
+              <form id="form-update-worker-settings" style="padding: 20px">
                 <div class="form-group">
-                  <label for="cfg-worker-cooldown">Thời gian nghỉ giữa các Jobs (CRAWL_WORKER_COOLDOWN_SECONDS)</label>
-                  <input type="number" id="cfg-worker-cooldown" class="form-control" value="3600" min="0" max="86400" required>
-                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
-                    Nhập <strong>0</strong> để chạy liên tục không nghỉ giữa các Jobs (Mặc định: 3600s = 1 giờ).
+                  <label for="cfg-worker-cooldown"
+                    >Thời gian nghỉ giữa các Jobs
+                    (CRAWL_WORKER_COOLDOWN_SECONDS)</label
+                  >
+                  <input
+                    type="number"
+                    id="cfg-worker-cooldown"
+                    class="form-control"
+                    value="3600"
+                    min="0"
+                    max="86400"
+                    required
+                  />
+                  <div
+                    style="
+                      font-size: 0.75rem;
+                      color: var(--text-muted);
+                      margin-top: 4px;
+                    "
+                  >
+                    Nhập <strong>0</strong> để chạy liên tục không nghỉ giữa các
+                    Jobs (Mặc định: 3600s = 1 giờ).
                   </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 12px;
+                  "
+                >
                   <div class="form-group">
-                    <label for="cfg-worker-nav-delay">Độ trễ cuộn trang (Giây)</label>
-                    <input type="number" id="cfg-worker-nav-delay" class="form-control" value="8" min="8" max="120" required>
-                    <div style="font-size: 0.72rem; color: var(--text-muted);">Tối thiểu 8s</div>
+                    <label for="cfg-worker-nav-delay"
+                      >Độ trễ cuộn trang (Giây)</label
+                    >
+                    <input
+                      type="number"
+                      id="cfg-worker-nav-delay"
+                      class="form-control"
+                      value="8"
+                      min="8"
+                      max="120"
+                      required
+                    />
+                    <div style="font-size: 0.72rem; color: var(--text-muted)">
+                      Tối thiểu 8s
+                    </div>
                   </div>
                   <div class="form-group">
-                    <label for="cfg-worker-timeout">Timeout tối đa 1 Job (Giây)</label>
-                    <input type="number" id="cfg-worker-timeout" class="form-control" value="1800" min="10" max="1800" required>
-                    <div style="font-size: 0.72rem; color: var(--text-muted);">Tối đa 1800s (30 phút)</div>
+                    <label for="cfg-worker-timeout"
+                      >Timeout tối đa 1 Job (Giây)</label
+                    >
+                    <input
+                      type="number"
+                      id="cfg-worker-timeout"
+                      class="form-control"
+                      value="1800"
+                      min="10"
+                      max="1800"
+                      required
+                    />
+                    <div style="font-size: 0.72rem; color: var(--text-muted)">
+                      Tối đa 1800s (30 phút)
+                    </div>
                   </div>
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-worker-ratelimit-cooldown">Thời gian nghỉ khi bị Facebook chặn tạm thời (Giây)</label>
-                  <input type="number" id="cfg-worker-ratelimit-cooldown" class="form-control" value="21600" min="0" max="604800" required>
-                  <div style="font-size: 0.72rem; color: var(--text-muted);">Mặc định: 21600s = 6 giờ nghỉ dưỡng nick khi gặp Rate Limit.</div>
+                  <label for="cfg-worker-ratelimit-cooldown"
+                    >Thời gian nghỉ khi bị Facebook chặn tạm thời (Giây)</label
+                  >
+                  <input
+                    type="number"
+                    id="cfg-worker-ratelimit-cooldown"
+                    class="form-control"
+                    value="21600"
+                    min="0"
+                    max="604800"
+                    required
+                  />
+                  <div style="font-size: 0.72rem; color: var(--text-muted)">
+                    Mặc định: 21600s = 6 giờ nghỉ dưỡng nick khi gặp Rate Limit.
+                  </div>
                 </div>
 
-                <div style="margin-top: 20px;">
-                  <button type="submit" class="btn btn-primary" id="btn-save-worker-settings" style="width: 100%;">
+                <div style="margin-top: 20px">
+                  <button
+                    type="submit"
+                    class="btn btn-primary"
+                    id="btn-save-worker-settings"
+                    style="width: 100%"
+                  >
                     💾 Lưu Cấu Hình Worker (.env)
                   </button>
                 </div>
@@ -1068,25 +1154,74 @@
 
             <!-- Right: Live Account Status & Instant Reset -->
             <div class="panel">
-              <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding: 16px 20px;">
-                <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary);">⚡ Trạng Thái Tài Khoản & Mở Khóa Cooldown</h4>
+              <div
+                class="panel-header"
+                style="
+                  border-bottom: 1px solid var(--border-color);
+                  padding: 16px 20px;
+                "
+              >
+                <h4
+                  style="margin: 0; font-size: 1rem; color: var(--text-primary)"
+                >
+                  ⚡ Trạng Thái Tài Khoản & Mở Khóa Cooldown
+                </h4>
               </div>
-              <div style="padding: 20px;">
-                <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-                  <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px;">Trạng thái tài khoản cào (default account):</div>
-                  <div id="worker-account-status-badge" style="font-size: 1rem; font-weight: 600; margin-bottom: 6px;">
+              <div style="padding: 20px">
+                <div
+                  style="
+                    background: rgba(255, 255, 255, 0.03);
+                    border: 1px solid var(--border-color);
+                    padding: 16px;
+                    border-radius: 8px;
+                    margin-bottom: 16px;
+                  "
+                >
+                  <div
+                    style="
+                      font-size: 0.85rem;
+                      color: var(--text-muted);
+                      margin-bottom: 6px;
+                    "
+                  >
+                    Trạng thái tài khoản cào (default account):
+                  </div>
+                  <div
+                    id="worker-account-status-badge"
+                    style="
+                      font-size: 1rem;
+                      font-weight: 600;
+                      margin-bottom: 6px;
+                    "
+                  >
                     <span class="pill info">Đang kiểm tra...</span>
                   </div>
-                  <div id="worker-account-cooldown-info" style="font-size: 0.8rem; color: var(--text-muted);">
+                  <div
+                    id="worker-account-cooldown-info"
+                    style="font-size: 0.8rem; color: var(--text-muted)"
+                  >
                     -
                   </div>
                 </div>
 
-                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
-                  Nếu bạn muốn cào ngay lập tức mà không phải chờ hết thời gian nghỉ Cooldown, bấm nút bên dưới để giải phóng tài khoản ngay lập tức:
+                <p
+                  style="
+                    font-size: 0.85rem;
+                    color: var(--text-muted);
+                    margin-bottom: 16px;
+                  "
+                >
+                  Nếu bạn muốn cào ngay lập tức mà không phải chờ hết thời gian
+                  nghỉ Cooldown, bấm nút bên dưới để giải phóng tài khoản ngay
+                  lập tức:
                 </p>
 
-                <button type="button" class="btn btn-primary" id="btn-reset-cooldown" style="width: 100%; height: 44px; font-weight: 600;">
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  id="btn-reset-cooldown"
+                  style="width: 100%; height: 44px; font-weight: 600"
+                >
                   ⚡ Mở Khóa / Bỏ Qua Cooldown Ngay
                 </button>
               </div>
@@ -1100,12 +1235,20 @@
             <div>
               <h3>Quản trị tài khoản &amp; license Lead Finder</h3>
               <p class="admin-section-copy">
-                Tạo license, quản lý quyền sử dụng và kiểm tra lịch kích hoạt của khách hàng.
+                Tạo license, quản lý quyền sử dụng và kiểm tra lịch kích hoạt
+                của khách hàng.
               </p>
             </div>
             <div class="admin-session-actions">
-              <span class="pill info" id="product-admin-session-status">Chưa đăng nhập</span>
-              <button class="btn btn-secondary btn-sm" id="btn-product-logout" type="button" hidden>
+              <span class="pill info" id="product-admin-session-status"
+                >Chưa đăng nhập</span
+              >
+              <button
+                class="btn btn-secondary btn-sm"
+                id="btn-product-logout"
+                type="button"
+                hidden
+              >
                 Đăng xuất
               </button>
             </div>
@@ -1114,18 +1257,39 @@
           <div class="panel product-login-panel" id="product-admin-login-panel">
             <div class="product-login-copy">
               <h4>Đăng nhập quản trị</h4>
-              <p>Dùng tài khoản admin Lead Finder. Phiên đăng nhập được bảo vệ bằng cookie và CSRF.</p>
+              <p>
+                Dùng tài khoản admin Lead Finder. Phiên đăng nhập được bảo vệ
+                bằng cookie và CSRF.
+              </p>
             </div>
             <form id="form-product-login" class="product-login-form">
               <div class="form-group">
                 <label for="product-login-email">Email</label>
-                <input class="form-control" id="product-login-email" type="email" autocomplete="username" required />
+                <input
+                  class="form-control"
+                  id="product-login-email"
+                  type="email"
+                  autocomplete="username"
+                  required
+                />
               </div>
               <div class="form-group">
                 <label for="product-login-password">Mật khẩu</label>
-                <input class="form-control" id="product-login-password" type="password" autocomplete="current-password" required />
+                <input
+                  class="form-control"
+                  id="product-login-password"
+                  type="password"
+                  autocomplete="current-password"
+                  required
+                />
               </div>
-              <button class="btn btn-primary" id="btn-product-login" type="submit">Đăng nhập</button>
+              <button
+                class="btn btn-primary"
+                id="btn-product-login"
+                type="submit"
+              >
+                Đăng nhập
+              </button>
             </form>
           </div>
 
@@ -1143,8 +1307,14 @@
                   <div class="setting-card" id="card-duration">
                     <div class="setting-card-header">
                       <div class="setting-card-text">
-                        <label for="license-duration-preset" class="setting-card-title">Thời hạn license</label>
-                        <span class="setting-card-desc">Thời gian hiệu lực của gói bản quyền</span>
+                        <label
+                          for="license-duration-preset"
+                          class="setting-card-title"
+                          >Thời hạn license</label
+                        >
+                        <span class="setting-card-desc"
+                          >Thời gian hiệu lực của gói bản quyền</span
+                        >
                       </div>
                       <label class="switch" title="Cấp quyền sử dụng vĩnh viễn">
                         <input type="checkbox" id="unlimited-duration" />
@@ -1152,27 +1322,48 @@
                         <span class="switch-label">Vĩnh viễn</span>
                       </label>
                     </div>
-                    <select class="form-control setting-input" id="license-duration-preset">
+                    <select
+                      class="form-control setting-input"
+                      id="license-duration-preset"
+                    >
                       <option value="day:1">1 ngày</option>
                       <option value="day:7">7 ngày</option>
                       <option value="month:1" selected>1 tháng</option>
                       <option value="month:3">3 tháng</option>
                       <option value="month:6">6 tháng</option>
                       <option value="month:12">12 tháng (1 năm)</option>
-                      <option value="lifetime">Không giới hạn (Vĩnh viễn)</option>
+                      <option value="lifetime">
+                        Không giới hạn (Vĩnh viễn)
+                      </option>
                       <option value="custom">Tùy chỉnh ngày / tháng...</option>
                     </select>
-                    <div class="admin-form-row custom-duration-row" id="custom-duration-fields" style="display: none; margin-top: 10px;">
-                      <div class="form-group" style="margin-bottom: 0;">
-                        <label for="license-duration-unit" class="sub-label">Đơn vị</label>
+                    <div
+                      class="admin-form-row custom-duration-row"
+                      id="custom-duration-fields"
+                      style="display: none; margin-top: 10px"
+                    >
+                      <div class="form-group" style="margin-bottom: 0">
+                        <label for="license-duration-unit" class="sub-label"
+                          >Đơn vị</label
+                        >
                         <select class="form-control" id="license-duration-unit">
                           <option value="day">Ngày</option>
                           <option value="month" selected>Tháng</option>
                         </select>
                       </div>
-                      <div class="form-group" style="margin-bottom: 0;">
-                        <label for="license-duration-value" class="sub-label">Số lượng</label>
-                        <input class="form-control" id="license-duration-value" type="number" min="1" max="12000" value="1" required />
+                      <div class="form-group" style="margin-bottom: 0">
+                        <label for="license-duration-value" class="sub-label"
+                          >Số lượng</label
+                        >
+                        <input
+                          class="form-control"
+                          id="license-duration-value"
+                          type="number"
+                          min="1"
+                          max="12000"
+                          value="1"
+                          required
+                        />
                       </div>
                     </div>
                   </div>
@@ -1181,18 +1372,39 @@
                   <div class="setting-card" id="card-contact-limit">
                     <div class="setting-card-header">
                       <div class="setting-card-text">
-                        <label for="monthly-contact-limit" class="setting-card-title">Số liên hệ / tháng</label>
-                        <span class="setting-card-desc">Hạn mức tra cứu số điện thoại hàng tháng</span>
+                        <label
+                          for="monthly-contact-limit"
+                          class="setting-card-title"
+                          >Số liên hệ / tháng</label
+                        >
+                        <span class="setting-card-desc"
+                          >Hạn mức tra cứu số điện thoại hàng tháng</span
+                        >
                       </div>
-                      <label class="switch" title="Không giới hạn số lượt tra cứu">
+                      <label
+                        class="switch"
+                        title="Không giới hạn số lượt tra cứu"
+                      >
                         <input type="checkbox" id="unlimited-contact-limit" />
                         <span class="switch-slider"></span>
                         <span class="switch-label">Không giới hạn</span>
                       </label>
                     </div>
                     <div class="setting-input-wrap">
-                      <input class="form-control setting-input" id="monthly-contact-limit" type="number" min="0" max="2147483647" value="1000" required />
-                      <div class="unlimited-badge-view" id="tag-unlimited-contacts" style="display: none;">
+                      <input
+                        class="form-control setting-input"
+                        id="monthly-contact-limit"
+                        type="number"
+                        min="0"
+                        max="2147483647"
+                        value="1000"
+                        required
+                      />
+                      <div
+                        class="unlimited-badge-view"
+                        id="tag-unlimited-contacts"
+                        style="display: none"
+                      >
                         <span class="infinity-icon">∞</span>
                         <span>Không giới hạn số liên hệ</span>
                       </div>
@@ -1203,18 +1415,37 @@
                   <div class="setting-card" id="card-max-devices">
                     <div class="setting-card-header">
                       <div class="setting-card-text">
-                        <label for="max-devices" class="setting-card-title">Số thiết bị tối đa</label>
-                        <span class="setting-card-desc">Số lượng trình duyệt / máy được phép đăng nhập</span>
+                        <label for="max-devices" class="setting-card-title"
+                          >Số thiết bị tối đa</label
+                        >
+                        <span class="setting-card-desc"
+                          >Số lượng trình duyệt / máy được phép đăng nhập</span
+                        >
                       </div>
-                      <label class="switch" title="Không giới hạn số lượng thiết bị cài đặt">
+                      <label
+                        class="switch"
+                        title="Không giới hạn số lượng thiết bị cài đặt"
+                      >
                         <input type="checkbox" id="unlimited-max-devices" />
                         <span class="switch-slider"></span>
                         <span class="switch-label">Không giới hạn</span>
                       </label>
                     </div>
                     <div class="setting-input-wrap">
-                      <input class="form-control setting-input" id="max-devices" type="number" min="1" max="1000000" value="1" required />
-                      <div class="unlimited-badge-view" id="tag-unlimited-devices" style="display: none;">
+                      <input
+                        class="form-control setting-input"
+                        id="max-devices"
+                        type="number"
+                        min="1"
+                        max="1000000"
+                        value="1"
+                        required
+                      />
+                      <div
+                        class="unlimited-badge-view"
+                        id="tag-unlimited-devices"
+                        style="display: none"
+                      >
                         <span class="infinity-icon">∞</span>
                         <span>Không giới hạn thiết bị</span>
                       </div>
@@ -1223,17 +1454,37 @@
 
                   <!-- Permissions Grid -->
                   <div class="admin-permissions-container">
-                    <span class="section-micro-label">Tính năng tự động hóa</span>
+                    <span class="section-micro-label"
+                      >Tính năng tự động hóa</span
+                    >
                     <div class="permission-tiles-grid">
                       <label class="permission-tile">
                         <input id="allow-group-crawl" type="checkbox" />
                         <div class="permission-tile-content">
                           <div class="permission-tile-icon">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            <svg
+                              viewBox="0 0 24 24"
+                              width="16"
+                              height="16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                            >
+                              <path
+                                d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"
+                              />
+                              <circle cx="9" cy="7" r="4" />
+                              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            </svg>
                           </div>
                           <div>
-                            <span class="permission-tile-name">Crawl group</span>
-                            <span class="permission-tile-sub">Tự động quét nhóm</span>
+                            <span class="permission-tile-name"
+                              >Crawl group</span
+                            >
+                            <span class="permission-tile-sub"
+                              >Tự động quét nhóm</span
+                            >
                           </div>
                         </div>
                         <div class="tile-checkbox"></div>
@@ -1242,11 +1493,26 @@
                         <input id="allow-comment-crawl" type="checkbox" />
                         <div class="permission-tile-content">
                           <div class="permission-tile-icon">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            <svg
+                              viewBox="0 0 24 24"
+                              width="16"
+                              height="16"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                            >
+                              <path
+                                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                              />
+                            </svg>
                           </div>
                           <div>
-                            <span class="permission-tile-name">Crawl comment</span>
-                            <span class="permission-tile-sub">Tự động quét bình luận</span>
+                            <span class="permission-tile-name"
+                              >Crawl comment</span
+                            >
+                            <span class="permission-tile-sub"
+                              >Tự động quét bình luận</span
+                            >
                           </div>
                         </div>
                         <div class="tile-checkbox"></div>
@@ -1254,8 +1520,23 @@
                     </div>
                   </div>
 
-                  <button class="btn btn-primary btn-generate-key" id="btn-create-license" type="submit">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1-1l-3 3m5 0l-3-3m-5 5l-7 7a2.828 2.828 0 1 1-4-4l7-7m3 3l2-2m2 2l2-2"/></svg>
+                  <button
+                    class="btn btn-primary btn-generate-key"
+                    id="btn-create-license"
+                    type="submit"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path
+                        d="M21 2l-2 2m-1-1l-3 3m5 0l-3-3m-5 5l-7 7a2.828 2.828 0 1 1-4-4l7-7m3 3l2-2m2 2l2-2"
+                      />
+                    </svg>
                     <span>Tạo license key</span>
                   </button>
                 </form>
@@ -1267,18 +1548,45 @@
                     <h4>License gần đây</h4>
                     <p>Danh sách chỉ hiển thị key đã che.</p>
                   </div>
-                  <button class="btn btn-secondary btn-sm" id="btn-refresh-admin-licenses" type="button">Làm mới</button>
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    id="btn-refresh-admin-licenses"
+                    type="button"
+                  >
+                    Làm mới
+                  </button>
                 </div>
                 <div class="table-container">
                   <table class="custom-table">
-                    <thead><tr><th>Key</th><th>Thời hạn</th><th>Quota</th><th>Thiết bị</th><th>Trạng thái</th><th></th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>Key</th>
+                        <th>Thời hạn</th>
+                        <th>Quota</th>
+                        <th>Thiết bị</th>
+                        <th>Trạng thái</th>
+                        <th></th>
+                      </tr>
+                    </thead>
                     <tbody id="table-admin-license-keys-body"></tbody>
                   </table>
                 </div>
                 <div class="admin-pagination">
-                  <button class="btn btn-secondary btn-sm" id="btn-admin-licenses-previous" type="button">Trang trước</button>
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    id="btn-admin-licenses-previous"
+                    type="button"
+                  >
+                    Trang trước
+                  </button>
                   <span id="admin-licenses-page-status">Trang 1</span>
-                  <button class="btn btn-secondary btn-sm" id="btn-admin-licenses-next" type="button">Trang sau</button>
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    id="btn-admin-licenses-next"
+                    type="button"
+                  >
+                    Trang sau
+                  </button>
                 </div>
               </div>
             </div>
@@ -1287,20 +1595,49 @@
               <div class="panel-header admin-panel-header">
                 <div>
                   <h4>Tài khoản khách hàng</h4>
-                  <p>Xem trạng thái, gói đã gắn và khóa quyền truy cập khi cần.</p>
+                  <p>
+                    Xem trạng thái, gói đã gắn và khóa quyền truy cập khi cần.
+                  </p>
                 </div>
-                <button class="btn btn-secondary btn-sm" id="btn-refresh-admin-accounts" type="button">Làm mới</button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="btn-refresh-admin-accounts"
+                  type="button"
+                >
+                  Làm mới
+                </button>
               </div>
               <div class="table-container">
                 <table class="custom-table">
-                  <thead><tr><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Xác minh</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Vai trò</th>
+                      <th>Trạng thái</th>
+                      <th>Xác minh</th>
+                      <th>Ngày tạo</th>
+                      <th>Thao tác</th>
+                    </tr>
+                  </thead>
                   <tbody id="table-admin-accounts-body"></tbody>
                 </table>
               </div>
               <div class="admin-pagination">
-                <button class="btn btn-secondary btn-sm" id="btn-admin-accounts-previous" type="button">Trang trước</button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="btn-admin-accounts-previous"
+                  type="button"
+                >
+                  Trang trước
+                </button>
                 <span id="admin-accounts-page-status">Trang 1</span>
-                <button class="btn btn-secondary btn-sm" id="btn-admin-accounts-next" type="button">Trang sau</button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="btn-admin-accounts-next"
+                  type="button"
+                >
+                  Trang sau
+                </button>
               </div>
             </div>
 
@@ -1308,20 +1645,48 @@
               <div class="panel-header admin-panel-header">
                 <div>
                   <h4>Nhật ký quản trị</h4>
-                  <p>Theo dõi các thao tác nhạy cảm trên tài khoản và license.</p>
+                  <p>
+                    Theo dõi các thao tác nhạy cảm trên tài khoản và license.
+                  </p>
                 </div>
-                <button class="btn btn-secondary btn-sm" id="btn-refresh-admin-audit" type="button">Làm mới</button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="btn-refresh-admin-audit"
+                  type="button"
+                >
+                  Làm mới
+                </button>
               </div>
               <div class="table-container">
                 <table class="custom-table">
-                  <thead><tr><th>Thao tác</th><th>Đối tượng</th><th>Actor</th><th>Chi tiết</th><th>Thời gian</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Thao tác</th>
+                      <th>Đối tượng</th>
+                      <th>Actor</th>
+                      <th>Chi tiết</th>
+                      <th>Thời gian</th>
+                    </tr>
+                  </thead>
                   <tbody id="table-admin-audit-events-body"></tbody>
                 </table>
               </div>
               <div class="admin-pagination">
-                <button class="btn btn-secondary btn-sm" id="btn-admin-audit-previous" type="button">Trang trước</button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="btn-admin-audit-previous"
+                  type="button"
+                >
+                  Trang trước
+                </button>
                 <span id="admin-audit-page-status">Trang 1</span>
-                <button class="btn btn-secondary btn-sm" id="btn-admin-audit-next" type="button">Trang sau</button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="btn-admin-audit-next"
+                  type="button"
+                >
+                  Trang sau
+                </button>
               </div>
             </div>
           </div>
@@ -1336,11 +1701,25 @@
           <h3>License key vừa tạo</h3>
           <button class="modal-close" data-close>&times;</button>
         </div>
-        <p class="generated-key-warning">Sao chép ngay. Key đầy đủ sẽ không được hiển thị lại.</p>
-        <div class="generated-key-output" id="generated-license-key" aria-live="polite"></div>
+        <p class="generated-key-warning">
+          Sao chép ngay. Key đầy đủ sẽ không được hiển thị lại.
+        </p>
+        <div
+          class="generated-key-output"
+          id="generated-license-key"
+          aria-live="polite"
+        ></div>
         <div class="modal-actions">
-          <button class="btn btn-secondary" id="btn-copy-generated-license" type="button">Sao chép</button>
-          <button class="btn btn-primary" data-close type="button">Đã lưu key</button>
+          <button
+            class="btn btn-secondary"
+            id="btn-copy-generated-license"
+            type="button"
+          >
+            Sao chép
+          </button>
+          <button class="btn btn-primary" data-close type="button">
+            Đã lưu key
+          </button>
         </div>
       </div>
     </div>
@@ -1354,11 +1733,23 @@
         </div>
         <div class="table-container">
           <table class="custom-table">
-            <thead><tr><th>Thời hạn</th><th>Bắt đầu</th><th>Kết thúc</th><th>Trạng thái</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                <th>Thời hạn</th>
+                <th>Bắt đầu</th>
+                <th>Kết thúc</th>
+                <th>Trạng thái</th>
+                <th></th>
+              </tr>
+            </thead>
             <tbody id="table-admin-subscriptions-body"></tbody>
           </table>
         </div>
-        <div class="modal-actions"><button class="btn btn-secondary" data-close type="button">Đóng</button></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" data-close type="button">
+            Đóng
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1371,11 +1762,23 @@
         </div>
         <div class="table-container">
           <table class="custom-table">
-            <thead><tr><th>Tên thiết bị</th><th>Installation ID</th><th>Trạng thái</th><th>Lần cuối</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                <th>Tên thiết bị</th>
+                <th>Installation ID</th>
+                <th>Trạng thái</th>
+                <th>Lần cuối</th>
+                <th></th>
+              </tr>
+            </thead>
             <tbody id="table-admin-devices-body"></tbody>
           </table>
         </div>
-        <div class="modal-actions"><button class="btn btn-secondary" data-close type="button">Đóng</button></div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" data-close type="button">
+            Đóng
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1386,15 +1789,31 @@
           <h3>Xác nhận lại mật khẩu</h3>
           <button class="modal-close" data-close>&times;</button>
         </div>
-        <p class="generated-key-warning">Thao tác nhạy cảm yêu cầu bạn nhập lại mật khẩu quản trị.</p>
+        <p class="generated-key-warning">
+          Thao tác nhạy cảm yêu cầu bạn nhập lại mật khẩu quản trị.
+        </p>
         <form id="form-admin-reauth">
           <div class="form-group">
             <label for="admin-reauth-password">Mật khẩu</label>
-            <input class="form-control" id="admin-reauth-password" type="password" autocomplete="current-password" required />
+            <input
+              class="form-control"
+              id="admin-reauth-password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" data-close type="button">Hủy</button>
-            <button class="btn btn-primary" id="btn-admin-reauth-submit" type="submit">Xác nhận &amp; tiếp tục</button>
+            <button class="btn btn-secondary" data-close type="button">
+              Hủy
+            </button>
+            <button
+              class="btn btn-primary"
+              id="btn-admin-reauth-submit"
+              type="submit"
+            >
+              Xác nhận &amp; tiếp tục
+            </button>
           </div>
         </form>
       </div>
@@ -2420,7 +2839,9 @@
               <option value="cooldown">Nghỉ ngơi (Cooldown)</option>
               <option value="expired">Hết hạn / Lỗi Cookie (Expired)</option>
               <option value="checkpoint">Bị Checkpoint (Checkpoint)</option>
-              <option value="manual_review">Cần xử lý tay (Manual Review)</option>
+              <option value="manual_review">
+                Cần xử lý tay (Manual Review)
+              </option>
               <option value="blocked">Bị khóa/chặn (Blocked)</option>
             </select>
           </div>
@@ -2485,17 +2906,27 @@
 
     <!-- MODAL: SYNC FBNUMBER SCANS -->
     <div class="modal-backdrop" id="modal-sync-fbnumber-scans">
-      <div class="modal" style="max-width: 860px; max-height: 90vh; overflow-y: auto;">
+      <div
+        class="modal"
+        style="max-width: 860px; max-height: 90vh; overflow-y: auto"
+      >
         <div class="modal-header">
           <h3>📥 Đồng Bộ Dữ Liệu Quét Từ FBNumber (Get Scans API)</h3>
           <button class="modal-close" data-close>&times;</button>
         </div>
         <form id="form-sync-fbnumber-scans">
-          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
-            Lấy dữ liệu quét số điện thoại từ API <code>/v1/scans</code> và tự động thêm mới hoặc cập nhật hồ sơ khách hàng vào hệ thống database.
+          <p
+            style="
+              font-size: 0.85rem;
+              color: var(--text-muted);
+              margin-bottom: 16px;
+            "
+          >
+            Lấy dữ liệu quét số điện thoại từ API <code>/v1/scans</code> và tự
+            động thêm mới hoặc cập nhật hồ sơ khách hàng vào hệ thống database.
           </p>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px">
             <div class="form-group">
               <label for="sync-scans-page-number">Trang Số (pageNumber)</label>
               <input
@@ -2508,7 +2939,9 @@
               />
             </div>
             <div class="form-group">
-              <label for="sync-scans-page-size">Số Lượng / Trang (pageSize)</label>
+              <label for="sync-scans-page-size"
+                >Số Lượng / Trang (pageSize)</label
+              >
               <input
                 type="number"
                 id="sync-scans-page-size"
@@ -2519,14 +2952,22 @@
                 placeholder="vd: 100 hoặc 9999"
                 required
               />
-              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">
+              <div
+                style="
+                  font-size: 0.72rem;
+                  color: var(--text-muted);
+                  margin-top: 3px;
+                "
+              >
                 Nhập <strong>9999</strong> để lấy toàn bộ dữ liệu quét.
               </div>
             </div>
           </div>
 
           <div class="form-group">
-            <label for="sync-scans-filter">Bộ Lọc Từ Khóa (filter - Tùy chọn)</label>
+            <label for="sync-scans-filter"
+              >Bộ Lọc Từ Khóa (filter - Tùy chọn)</label
+            >
             <input
               type="text"
               id="sync-scans-filter"
@@ -2536,31 +2977,42 @@
           </div>
 
           <div class="form-group">
-            <label for="sync-scans-token">FB_NUMBER_API_TOKEN (Tùy chọn - mặc định lấy từ Cài Đặt)</label>
-            <div style="position: relative;">
+            <label for="sync-scans-token"
+              >FB_NUMBER_API_TOKEN (Tùy chọn - mặc định lấy từ Cài Đặt)</label
+            >
+            <div style="position: relative">
               <input
                 type="password"
                 id="sync-scans-token"
                 class="form-control"
                 placeholder="Bearer JWT Token..."
-                style="padding-right: 40px; font-family: monospace;"
+                style="padding-right: 40px; font-family: monospace"
               />
               <button
                 type="button"
                 id="btn-toggle-sync-token"
-                style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer;"
+                style="
+                  position: absolute;
+                  right: 10px;
+                  top: 50%;
+                  transform: translateY(-50%);
+                  background: none;
+                  border: none;
+                  color: var(--text-muted);
+                  cursor: pointer;
+                "
               >
                 👁️
               </button>
             </div>
           </div>
 
-          <div style="display: flex; gap: 12px; margin-top: 18px;">
+          <div style="display: flex; gap: 12px; margin-top: 18px">
             <button
               type="button"
               class="btn btn-secondary"
               id="btn-preview-sync-scans"
-              style="flex: 1; height: 42px; font-weight: 600;"
+              style="flex: 1; height: 42px; font-weight: 600"
             >
               🔍 Xem Trước Dữ Liệu (Preview)
             </button>
@@ -2568,18 +3020,32 @@
               type="submit"
               class="btn btn-primary"
               id="btn-submit-sync-scans"
-              style="flex: 1.5; height: 42px; font-weight: 600;"
+              style="flex: 1.5; height: 42px; font-weight: 600"
             >
               🚀 Bắt Đầu Đồng Bộ & Lưu Vào Database
             </button>
           </div>
 
           <!-- Status & Result Area -->
-          <div id="sync-scans-result-container" style="display: none; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-            <div id="sync-scans-status-badge" style="margin-bottom: 12px; font-weight: 600; font-size: 0.9rem;"></div>
-            
-            <div class="table-container" style="max-height: 280px; overflow-y: auto;">
-              <table class="custom-table" style="font-size: 0.8rem;">
+          <div
+            id="sync-scans-result-container"
+            style="
+              display: none;
+              margin-top: 20px;
+              border-top: 1px solid var(--border-color);
+              padding-top: 16px;
+            "
+          >
+            <div
+              id="sync-scans-status-badge"
+              style="margin-bottom: 12px; font-weight: 600; font-size: 0.9rem"
+            ></div>
+
+            <div
+              class="table-container"
+              style="max-height: 280px; overflow-y: auto"
+            >
+              <table class="custom-table" style="font-size: 0.8rem">
                 <thead>
                   <tr>
                     <th>UID / Name</th>

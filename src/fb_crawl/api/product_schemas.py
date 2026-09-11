@@ -27,7 +27,15 @@ class EmailRequest(BaseModel):
 class TokenRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    token: str = Field(min_length=16, max_length=2048)
+    token: str = Field(min_length=1, max_length=2048)
+
+
+class VerifyEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str | None = Field(default=None, min_length=1, max_length=2048)
+    code: str | None = Field(default=None, min_length=1, max_length=32)
+    email: str | None = Field(default=None, min_length=3, max_length=320)
 
 
 class ResetPasswordRequest(TokenRequest):

@@ -123,6 +123,11 @@ class TokenService:
     def new_opaque_token(self) -> str:
         return secrets.token_urlsafe(32)
 
+    def new_numeric_code(self, length: int = 6) -> str:
+        if length <= 0:
+            raise ValueError("length must be positive")
+        return f"{secrets.randbelow(10**length):0{length}d}"
+
     def digest_opaque(self, token: str) -> str:
         if not isinstance(token, str) or not token:
             raise ValueError("opaque token must not be empty")

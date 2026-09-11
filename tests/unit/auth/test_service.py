@@ -256,6 +256,19 @@ def test_register_normalizes_email_hashes_password_and_sends_verification(servic
     assert limiter.calls[0][:2] == ("register", EMAIL)
 
 
+def test_verify_email_with_code_and_email(service_parts) -> None:
+    service, repository, email, _limiter, _tokens = service_parts
+    service.register(EMAIL, PASSWORD, NOW, ip_address="203.0.113.4")
+    query = parse_qs(urlsplit(email.verifications[0][1]).query)
+    code = query["code"][0]
+    assert len(code) == 6
+    assert code.isdigit()
+
+    verified_account = service.verify_email(code, NOW, ip_address="203.0.113.4", email=EMAIL)
+    assert verified_account.email_verified_at == NOW
+    assert verified_account.status == AccountStatus.ACTIVE
+
+
 def test_login_requires_verified_email(service_parts) -> None:
     service, repository, _email, _limiter, _tokens = service_parts
     repository.add_account(verified=False)
