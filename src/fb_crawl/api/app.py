@@ -87,8 +87,10 @@ def create_app(
 
     _install_exception_handlers(app)
     from fb_crawl.api.routes.auth_page import create_auth_page_router
+    from fb_crawl.api.routes.version import create_app_version_router
 
     app.include_router(create_auth_page_router())
+    app.include_router(create_app_version_router())
     from fb_crawl.interaction_sessions.models import SessionError
 
     @app.exception_handler(SessionError)
@@ -383,6 +385,7 @@ def _requires_internal_api_key(path: str) -> bool:
     ):
         return True
     product_prefixes = (
+        "/api/v1/app",
         "/api/v1/auth",
         "/api/v1/account",
         "/api/v1/devices",

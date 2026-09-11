@@ -52,7 +52,10 @@ addopts = "-ra --import-mode=importlib"
 
 [tool.pyright]
 include = ["src", "tests"]
-extraPaths = ["."]
+extraPaths = ["src", "."]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
 
 [project.scripts]
 fb-crawl = "fb_crawl.cli.app:main"

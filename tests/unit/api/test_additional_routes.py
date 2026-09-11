@@ -403,3 +403,23 @@ def test_worker_settings_and_reset_cooldown(tmp_path: Path, monkeypatch: pytest.
     reset_res = client.post("/api/v1/settings/reset-cooldown", headers=HEADERS)
     assert reset_res.status_code == 200
     assert reset_res.json()["status"] == "success"
+
+
+def test_app_version_endpoint(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LATEST_EXTENSION_VERSION", "0.2.0")
+    monkeypatch.setenv("EXTENSION_DOWNLOAD_URL", "https://example.com/lead-finder-0.2.0.zip")
+    monkeypatch.setenv("EXTENSION_RELEASE_NOTES", "New features & bug fixes")
+
+    app, _, _, _ = _create_test_app(tmp_path)
+    client = TestClient(app)
+
+    # Public endpoint - no auth required
+    res = client.get("/api/v1/app/version")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["latest_version"] == "0.2.0"
+    assert body["download_url"] == "https://example.com/lead-finder-0.2.0.zip"
+    assert body["release_notes"] == "New features & bug fixes"
+    assert "min_supported_version" in body
+    assert "release_date" in body
+
