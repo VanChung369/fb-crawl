@@ -50,6 +50,19 @@ def test_create_normalizes_source_and_uses_bearer_account_not_internal_key():
     assert service.calls[0][0] == 7
 
 
+def test_create_friend_session_uses_profile_friends_source():
+    client, service, headers = setup()
+    response = client.post(ROOT, headers=headers, json={
+        'client_session_id': str(uuid4()),
+        'source_url': 'https://www.facebook.com/tuan.anh.663583/friends?locale=vi_VN',
+        'kind': 'friends',
+    })
+    assert response.status_code == 200
+    assert response.json()['kind'] == 'friends'
+    assert response.json()['source_url'] == 'https://www.facebook.com/tuan.anh.663583/friends'
+    assert service.calls[0][0] == 7
+
+
 @pytest.mark.parametrize("method,path,payload", [
     ("get", ROOT, None), ("post", ROOT, {}), ("get", f"{ROOT}/{SID}", None),
     ("put", f"{ROOT}/{SID}/interactions", {"rows": []}),

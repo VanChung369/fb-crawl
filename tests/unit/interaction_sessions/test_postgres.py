@@ -8,6 +8,15 @@ from fb_crawl.interaction_sessions.models import SessionError
 from fb_crawl.interaction_sessions.postgres import PostgresInteractionSessionRepository, validate_batch
 from tests.unit.interaction_sessions.test_models import NOW, row
 
+def test_friend_rows_only_enter_friend_sessions():
+    item = row(kind='friend', text='')
+    assert validate_batch('friends', (item,), {}, 0) == (item,)
+    for kind in ('comments', 'reactions'):
+        with pytest.raises(SessionError, match='session_kind_conflict'):
+            validate_batch(kind, (item,), {}, 0)
+    with pytest.raises(SessionError, match='session_kind_conflict'):
+        validate_batch('friends', (row(),), {}, 0)
+
 
 def test_retry_does_not_count_existing_rows_again_at_cap():
     item = row()

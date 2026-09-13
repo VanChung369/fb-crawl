@@ -61,6 +61,11 @@ Artifacts are written below `LEAD_FINDER_EXPORT_DIR` (default
 
 ### Lead Finder account setup
 
+Profile friend collection requires migration `015_friend_sessions` and an API restart.
+In the extension, open a profile's Friends tab, select **Profile friends** under
+**Collect interactions**, start collection, then scroll the list manually. The
+collector saves friend rows into Scan sessions and stops when leaving that source.
+
 After upgrading the extension's lead status/notes feature, apply migration
 `014_account_leads` using the normal migration command from `fb-crawl`, then restart the API:
 

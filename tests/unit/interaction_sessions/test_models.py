@@ -12,6 +12,20 @@ from fb_crawl.interaction_sessions.models import (
 
 NOW = datetime(2026, 9, 9, tzinfo=UTC)
 
+@pytest.mark.parametrize('url, expected', [
+    ('https://www.facebook.com/tuan.anh.663583/friends?locale=vi_VN', 'https://www.facebook.com/tuan.anh.663583/friends'),
+    ('https://www.facebook.com/profile.php?id=100001&sk=friends', 'https://www.facebook.com/profile.php?id=100001&sk=friends'),
+])
+def test_friend_session_sources(url, expected):
+    assert SessionCreate(uuid4(), url, 'friends').source_url == expected
+    with pytest.raises(ValidationError):
+        SessionCreate(uuid4(), url, 'comments')
+
+@pytest.mark.parametrize('url', ['https://www.facebook.com/groups/friends', 'https://www.facebook.com/one.person', 'https://www.facebook.com/one.person/friends?u=https://evil.test', 'https://www.facebook.com/one.person/posts/123'])
+def test_rejects_other_sources_for_friend_sessions(url):
+    with pytest.raises(ValidationError):
+        SessionCreate(uuid4(), url, 'friends')
+
 
 def row(**changes):
     value = SessionRowInput(
