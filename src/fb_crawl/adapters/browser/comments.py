@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from selenium.common.exceptions import (
     TimeoutException,
+    StaleElementReferenceException,
 )
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import (
@@ -33,12 +34,17 @@ MORE_COMMENTS_TEXTS = (
     "عرض مزيد من التعليقات",
     "Ver más comentarios",
     "Afficher plus de commentaires",
+    "View previous comments",
+    "Xem các bình luận trước",
+    "Xem bình luận trước",
+    "View more replies",
+    "View previous replies",
+    "Xem thêm câu trả lời",
+    "Xem các câu trả lời trước",
 )
 
 MORE_COMMENTS_XPATH = (
-    "//*[self::button "
-    "or self::div "
-    "or self::span]["
+    "//*[self::button or @role='button' or @role='link' or self::span[not(*)]]["
     + " or ".join(
         ("contains(" "normalize-space(.), " f"{text!r}" ")")
         for text in MORE_COMMENTS_TEXTS
@@ -46,16 +52,49 @@ MORE_COMMENTS_XPATH = (
     + "]"
 )
 
+REPLIES_XPATH = (
+    "//*[self::button or @role='button' or @role='link' or self::span[not(*)]]"
+    "[(contains(normalize-space(.), ' replies') or contains(normalize-space(.), ' reply') "
+    "or contains(normalize-space(.), ' phản hồi') or contains(normalize-space(.), ' câu trả lời')) "
+    "and string-length(normalize-space(.)) < 100 "
+    "and (starts-with(normalize-space(.), 'View ') or starts-with(normalize-space(.), 'Xem ') "
+    "or contains('0123456789', substring(normalize-space(.), 1, 1)))]"
+)
+SORT_XPATH = (
+    "//*[self::button or @role='button'][normalize-space(.)='Most relevant' "
+    "or normalize-space(.)='Phù hợp nhất' or normalize-space(.)='Relevant' "
+    "or normalize-space(.)='Newest' or normalize-space(.)='Mới nhất']"
+)
+ALL_COMMENTS_XPATH = (
+    "//*[@role='menuitem' or @role='menuitemradio' or @role='option']"
+    "[normalize-space(.)='All comments' or normalize-space(.)='Tất cả bình luận' "
+    "or .//*[normalize-space(.)='All comments' or normalize-space(.)='Tất cả bình luận']]"
+)
 
-def _first_clickable(browser):
+
+def _first_clickable(browser, *, sort_requested=False, sort_selected=False):
     elements = browser.find_elements(
         By.XPATH,
-        MORE_COMMENTS_XPATH,
+        ' | '.join([ALL_COMMENTS_XPATH] + ([] if sort_requested or sort_selected else [SORT_XPATH]) + [MORE_COMMENTS_XPATH, REPLIES_XPATH]),
     )
 
-    for element in elements:
-        if element.is_displayed() and element.is_enabled():
-            return element
+    def priority(element):
+        try:
+            label = getattr(element, 'text', '').strip()
+            if label.startswith(('All comments', 'Tất cả bình luận')):
+                return 0
+            if label in ('Most relevant', 'Phù hợp nhất', 'Relevant', 'Newest', 'Mới nhất'):
+                return 1
+        except StaleElementReferenceException:
+            pass
+        return 2
+
+    for element in sorted(elements, key=priority):
+        try:
+            if element.is_displayed() and element.is_enabled():
+                return element
+        except StaleElementReferenceException:
+            continue
 
     return False
 
@@ -124,6 +163,8 @@ class CommentsCollector:
             attempts = 0
             natural_complete = False
             wait_exhausted = False
+            sort_requested = False
+            sort_selected = False
 
             while budget.allows(attempts):
                 guard_execution(self._control, browser)
@@ -139,7 +180,7 @@ class CommentsCollector:
                         budget.wait_timeout(
                             self._settings.browser_timeout_seconds
                         ),
-                    ).until(_first_clickable)
+                    ).until(lambda driver: _first_clickable(driver, sort_requested=sort_requested, sort_selected=sort_selected))
 
                 except TimeoutException:
                     wait_exhausted = budget.exhausted(attempts)
@@ -151,7 +192,15 @@ class CommentsCollector:
                     break
 
                 guard_execution(self._control, browser)
-                candidate.click()
+                try:
+                    label = getattr(candidate, 'text', '').strip()
+                    candidate.click()
+                    if label in ('Most relevant', 'Phù hợp nhất', 'Relevant', 'Newest', 'Mới nhất'):
+                        sort_requested = True
+                    elif label.startswith(('All comments', 'Tất cả bình luận')):
+                        sort_selected = True
+                except StaleElementReferenceException:
+                    continue
 
                 if delay_seconds:
                     if not cooperative_wait(

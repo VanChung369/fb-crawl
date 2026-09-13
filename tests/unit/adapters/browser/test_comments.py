@@ -1,5 +1,43 @@
 import pytest
 
+
+def test_selects_all_comments_before_expanding_replies():
+    from fb_crawl.adapters.browser.comments import SORT_XPATH
+
+    class NamedCandidate(Candidate):
+        def __init__(self, text):
+            super().__init__()
+            self.text = text
+
+    sort = NamedCandidate('Phù hợp nhất')
+    all_comments = NamedCandidate('Tất cả bình luận')
+    replies = NamedCandidate('8 phản hồi')
+    more = NamedCandidate('Xem thêm bình luận')
+
+    class UpdatingBrowser(Browser):
+        def find_elements(self, by, value):
+            if not sort.clicks:
+                return [replies, sort]
+            if not all_comments.clicks:
+                assert SORT_XPATH not in value
+                return [replies, all_comments]
+            if not replies.clicks:
+                return [replies]
+            if not more.clicks:
+                return [more]
+            return []
+
+    class Wait:
+        def __init__(self, browser, timeout): self.browser = browser
+        def until(self, predicate): return predicate(self.browser)
+
+    browser = UpdatingBrowser([])
+    result = CommentsCollector(BrowserSettings(), ready_func=lambda *_: None,
+        wait_factory=Wait).collect(browser, browser.current_url, steps=10, delay_seconds=0)
+    assert [sort.clicks, all_comments.clicks, replies.clicks, more.clicks] == [1, 1, 1, 1]
+    assert result.attempts == 5
+    assert not result.budget_exhausted
+
 from fb_crawl.adapters.browser.comments import (
     CommentsCollector,
     MORE_COMMENTS_TEXTS,
