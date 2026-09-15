@@ -28,6 +28,14 @@ class AdminLicenseServiceFake(LicenseServiceFake):
     def list_keys(self, *, limit: int = 100, cursor: int | None = None):
         return (self.key,)
 
+    def reveal_key(self, key_id, actor_account_id, now):
+        from fb_crawl.licenses.repository import InvalidLicenseKey, LicenseKeyRevealUnavailable
+        if key_id == 999:
+            raise InvalidLicenseKey("License key not found.")
+        if key_id == 998:
+            raise LicenseKeyRevealUnavailable("License key cannot be revealed.")
+        return "LF-REAL-PLAINTEXT-ABCD"
+
     def revoke_key(self, key_id: int, actor_account_id: int, now):
         return replace(self.key, status=self.key.status.REVOKED, revoked_at=now)
 
@@ -86,6 +94,39 @@ def test_user_cannot_create_license() -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_only_admin_can_reveal_key_and_response_is_not_cached() -> None:
+    for admin, expected in ((False, 403), (True, 200)):
+        client, _, _, access = _client(admin=admin)
+        response = client.post("/api/v1/admin/license-keys/11/reveal", headers=_headers(access))
+        assert response.status_code == expected
+        if admin:
+            assert response.json() == {"key": "LF-REAL-PLAINTEXT-ABCD"}
+            assert response.headers["cache-control"] == "no-store"
+
+
+def test_reveal_returns_clear_errors_for_missing_and_legacy_keys() -> None:
+    client, _, _, access = _client(admin=True)
+    for key_id, status in ((999, 404), (998, 409)):
+        response = client.post(f"/api/v1/admin/license-keys/{key_id}/reveal", headers=_headers(access))
+        assert response.status_code == status
+
+
+def test_list_exposes_reveal_availability_but_neither_ciphertext_nor_plaintext() -> None:
+    client, _, licenses, access = _client(admin=True)
+    licenses.key = replace(licenses.key, encrypted_key="private-ciphertext")
+    response = client.get("/api/v1/admin/license-keys", headers=_headers(access))
+    assert response.status_code == 200
+    assert response.json()["items"][0]["can_reveal"] is True
+    assert "private-ciphertext" not in response.text
+    assert "LF-REAL-PLAINTEXT-ABCD" not in response.text
+
+
+def test_unauthenticated_client_cannot_reveal_keys() -> None:
+    client, _, _, _ = _client(admin=True)
+    response = client.post("/api/v1/admin/license-keys/11/reveal")
+    assert response.status_code == 401
 
 
 def test_created_key_plaintext_is_not_returned_by_list() -> None:

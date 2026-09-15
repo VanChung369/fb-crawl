@@ -1223,3 +1223,19 @@ body {
     overflow-y: auto;
   }
 }
+/* Keep long revealed license keys inside the table cell. */
+.admin-license-key-text {
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
+
+.admin-license-key button {
+  margin-left: 8px;
+  vertical-align: middle;
+  padding: 5px;
+}
+
+.admin-license-key button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

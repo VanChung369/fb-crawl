@@ -20,6 +20,10 @@ class LicenseAlreadyRedeemed(LicenseError):
     code = "license_already_redeemed"
 
 
+class LicenseKeyRevealUnavailable(LicenseError):
+    code = "license_key_reveal_unavailable"
+
+
 class LicenseScheduleError(LicenseError):
     code = "license_schedule_error"
 
@@ -34,7 +38,10 @@ class LicenseRepository(Protocol):
         grant: LicenseGrant,
         created_by_account_id: int | None,
         now: datetime,
+        encrypted_key: str | None = None,
     ) -> LicenseKey: ...
+
+    def get_key(self, key_id: int) -> LicenseKey: ...
 
     def redeem(
         self, account_id: int, key_digest: str, now: datetime

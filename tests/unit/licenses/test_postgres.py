@@ -40,6 +40,7 @@ def key_row(
         NOW if status == "redeemed" else None,
         NOW,
         None,
+        None,
     )
 
 

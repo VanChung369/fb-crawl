@@ -207,6 +207,7 @@ class LicenseKeyResponse(BaseModel):
 
     id: int
     masked_key: str
+    can_reveal: bool = False
     key_version: int
     duration: LicenseDurationRequest
     monthly_contact_limit: int
@@ -219,6 +220,10 @@ class LicenseKeyResponse(BaseModel):
     redeemed_at: datetime | None
     created_at: datetime
     revoked_at: datetime | None
+
+
+class RevealedLicenseKeyResponse(BaseModel):
+    key: str
 
 
 class CreatedLicenseKeyResponse(LicenseKeyResponse):

@@ -19,6 +19,8 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "012_provider_health",
         "013_interaction_sessions",
         "014_account_leads",
+        "015_friend_sessions",
+        "016_license_key_encryption",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql

@@ -85,7 +85,13 @@ Production product routes require independent JWT, token-HMAC, and license-HMAC
 secrets, an HTTPS `LEAD_FINDER_PUBLIC_BASE_URL`, SMTP settings, and
 `LEAD_FINDER_TIMEZONE` (default `Asia/Ho_Chi_Minh`). Configure the versioned
 license keyring as `LEAD_FINDER_LICENSE_HMAC_KEYS=1:<base64-32-byte-secret>` and
-set `LEAD_FINDER_LICENSE_HMAC_ACTIVE_VERSION=1`. Keep older versions in the
+set `LEAD_FINDER_LICENSE_HMAC_ACTIVE_VERSION=1`. New license keys also store a
+Fernet-encrypted copy, using a domain-separated HKDF key derived from that
+version's secret. The admin license list stays masked; its eye button reveals
+the key through an admin-only, rate-limited, audited endpoint. Keys created
+before migration `016_license_key_encryption` cannot be revealed. Install the
+updated dependencies and restart the API to apply the migration automatically.
+Keep older versions in the
 comma-separated keyring while their licenses may still be redeemed. See
 `.env.example` for all variable names. Never reuse `FB_CRAWL_API_KEY` as a
 product secret and never place passwords or license keys in command arguments.

@@ -74,6 +74,8 @@ class LicenseKey:
     created_at: datetime
     revoked_at: datetime | None
 
+    encrypted_key: str | None = field(default=None, repr=False)
+
     def __post_init__(self) -> None:
         if self.id <= 0 or self.key_version <= 0:
             raise ValueError("license key identifiers must be positive")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fb_crawl.licenses.config import LicenseKeyRing
 from fb_crawl.licenses.keys import LicenseKeyService
+import pytest
 
 
 def test_generated_license_plaintext_is_high_entropy_human_format_and_hash_only() -> None:
@@ -41,3 +42,25 @@ def test_candidate_digests_cover_active_and_historical_key_versions() -> None:
 
     assert set(candidates) == {1, 2}
     assert candidates[1] != candidates[2]
+
+
+def test_encrypted_key_round_trip_survives_rotation_and_is_randomized() -> None:
+    old = LicenseKeyService(LicenseKeyRing(1, {1: b"a" * 32}))
+    generated = old.generate()
+    encrypted = old.encrypt(generated.plaintext, generated.key_version)
+    rotated = LicenseKeyService(LicenseKeyRing(2, {1: b"a" * 32, 2: b"b" * 32}))
+    assert generated.plaintext not in encrypted
+    assert old.encrypt(generated.plaintext, 1) != encrypted
+    assert rotated.decrypt(encrypted, 1) == generated.plaintext
+
+
+def test_encrypted_key_rejects_tampering_and_wrong_secret() -> None:
+    from cryptography.fernet import InvalidToken
+
+    keys = LicenseKeyService(LicenseKeyRing(1, {1: b"a" * 32}))
+    encrypted = keys.encrypt(keys.generate().plaintext, 1)
+    wrong = LicenseKeyService(LicenseKeyRing(1, {1: b"b" * 32}))
+    with pytest.raises(InvalidToken):
+        wrong.decrypt(encrypted, 1)
+    with pytest.raises(InvalidToken):
+        keys.decrypt(encrypted[:20] + "!!!!" + encrypted[24:], 1)

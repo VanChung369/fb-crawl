@@ -14,6 +14,7 @@ from fb_crawl.api.product_schemas import (
     AdminAuditEventListResponse,
     AdminAuditEventResponse,
     CreatedLicenseKeyResponse,
+    RevealedLicenseKeyResponse,
     DeviceRevokedResponse,
     DeviceListResponse,
     DeviceResponse,
@@ -27,6 +28,7 @@ from fb_crawl.api.product_schemas import (
 from fb_crawl.api.routes.licenses import _subscription_response
 from fb_crawl.licenses.models import LicenseDuration, LicenseGrant, LicenseKey
 from fb_crawl.licenses.service import LicenseService
+from fb_crawl.licenses.repository import InvalidLicenseKey, LicenseKeyRevealUnavailable
 from fb_crawl.auth.rate_limit import RateLimitService
 
 
@@ -75,6 +77,27 @@ def create_product_admin_router(
         return CreatedLicenseKeyResponse(
             **_license_response(key).model_dump(), key=plaintext
         )
+
+    @router.post("/license-keys/{key_id}/reveal", response_model=RevealedLicenseKeyResponse)
+    def reveal_license_key(
+        request: Request,
+        response: Response,
+        key_id: int = Path(gt=0),
+        current: CurrentAccount = Depends(require_admin),
+    ) -> RevealedLicenseKeyResponse:
+        now = clock()
+        _limit_admin(rate_limiter, "admin_license_reveal", current, request, now)
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            plaintext = licenses.reveal_key(key_id, current.account.id, now)
+        except InvalidLicenseKey:
+            raise HTTPException(status_code=404, detail="License key not found.") from None
+        except LicenseKeyRevealUnavailable:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể xem lại key này. Key cũ không lưu bản mã hóa hoặc khóa giải mã không còn khả dụng.",
+            ) from None
+        return RevealedLicenseKeyResponse(key=plaintext)
 
     @router.get("/license-keys", response_model=LicenseKeyListResponse)
     def list_license_keys(
@@ -280,6 +303,7 @@ def _license_response(value: LicenseKey) -> LicenseKeyResponse:
     return LicenseKeyResponse(
         id=value.id,
         masked_key=value.masked_key,
+        can_reveal=bool(value.encrypted_key),
         key_version=value.key_version,
         duration=LicenseDurationRequest(
             unit=value.grant.duration.unit, value=value.grant.duration.value

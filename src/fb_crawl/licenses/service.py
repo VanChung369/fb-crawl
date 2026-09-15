@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hmac
+
+from cryptography.fernet import InvalidToken
 
 from fb_crawl.licenses.keys import LicenseKeyService
 from fb_crawl.licenses.models import AdminAuditEvent, LicenseGrant, LicenseKey, Subscription
 from fb_crawl.licenses.postgres import PostgresLicenseRepository
-from fb_crawl.licenses.repository import InvalidLicenseKey, LicenseError
+from fb_crawl.licenses.repository import InvalidLicenseKey, LicenseError, LicenseKeyRevealUnavailable
 
 
 class LicenseService:
@@ -31,8 +34,26 @@ class LicenseService:
             grant=grant,
             created_by_account_id=actor_account_id,
             now=now,
+            encrypted_key=self.key_service.encrypt(generated.plaintext, generated.key_version),
         )
         return key, generated.plaintext
+
+    def reveal_key(self, key_id: int, actor_account_id: int, now: datetime) -> str:
+        key = self.repository.get_key(key_id)
+        if not key.encrypted_key:
+            raise LicenseKeyRevealUnavailable("License key cannot be revealed.")
+        try:
+            plaintext = self.key_service.decrypt(key.encrypted_key, key.key_version)
+            digest = self.key_service.candidate_digests(plaintext)[key.key_version]
+            if not hmac.compare_digest(digest, key.key_digest):
+                raise ValueError("License key digest mismatch")
+        except (InvalidToken, KeyError, ValueError):
+            raise LicenseKeyRevealUnavailable("License key cannot be revealed.") from None
+        self.repository.write_audit(
+            actor_account_id=actor_account_id, action="license_key_revealed",
+            target_type="license_key", target_id=str(key_id), details={}, now=now,
+        )
+        return plaintext
 
     def redeem(
         self, account_id: int, plaintext: str, now: datetime

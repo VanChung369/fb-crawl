@@ -6,6 +6,10 @@ import hashlib
 import hmac
 import secrets
 
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
 from fb_crawl.licenses.config import LicenseKeyRing
 
 
@@ -39,6 +43,20 @@ class LicenseKeyService:
         return self._digest_for_version(
             plaintext, self._keyring.active_version
         )
+
+    def _cipher(self, version: int) -> Fernet:
+        # Domain separation keeps the encryption key distinct from redemption HMACs.
+        derived = HKDF(
+            algorithm=hashes.SHA256(), length=32, salt=None,
+            info=b"lead-finder/license-key-encryption/v1",
+        ).derive(self._keyring.secrets[version])
+        return Fernet(base64.urlsafe_b64encode(derived))
+
+    def encrypt(self, plaintext: str, version: int) -> str:
+        return self._cipher(version).encrypt(plaintext.encode("ascii")).decode("ascii")
+
+    def decrypt(self, encrypted: str, version: int) -> str:
+        return self._cipher(version).decrypt(encrypted.encode("ascii")).decode("ascii")
 
     def candidate_digests(self, plaintext: str) -> dict[int, str]:
         return {

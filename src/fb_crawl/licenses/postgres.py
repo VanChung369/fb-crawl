@@ -31,7 +31,7 @@ _KEY_COLUMNS = """
     id, key_digest, key_version, masked_key, duration_unit, duration_value,
     monthly_contact_limit, max_devices, allow_group_crawl,
     allow_comment_crawl, status, created_by_account_id,
-    redeemed_by_account_id, redeemed_at, created_at, revoked_at
+    redeemed_by_account_id, redeemed_at, created_at, revoked_at, encrypted_key
 """
 _SUBSCRIPTION_COLUMNS = """
     id, account_id, license_key_id, duration_unit, duration_value,
@@ -76,6 +76,7 @@ class PostgresLicenseRepository:
         grant: LicenseGrant,
         created_by_account_id: int | None,
         now: datetime,
+        encrypted_key: str | None = None,
     ) -> LicenseKey:
         with self._connect() as cursor:
             cursor.execute(
@@ -84,8 +85,8 @@ class PostgresLicenseRepository:
                     key_digest, key_version, masked_key,
                     duration_unit, duration_value, monthly_contact_limit,
                     max_devices, allow_group_crawl, allow_comment_crawl,
-                    created_by_account_id, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    created_by_account_id, created_at, encrypted_key
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_KEY_COLUMNS}
                 """,
                 (
@@ -100,6 +101,7 @@ class PostgresLicenseRepository:
                     grant.allow_comment_crawl,
                     created_by_account_id,
                     now,
+                    encrypted_key,
                 ),
             )
             row = cursor.fetchone()
@@ -403,6 +405,17 @@ class PostgresLicenseRepository:
             )
         return tuple(shifted)
 
+    def get_key(self, key_id: int) -> LicenseKey:
+        with self._connect() as cursor:
+            cursor.execute(
+                f"SELECT {_KEY_COLUMNS} FROM license_keys WHERE id = %s",
+                (key_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise InvalidLicenseKey("License key not found.")
+        return self._key(row)
+
     def write_audit(
         self,
         *,
@@ -521,6 +534,7 @@ class PostgresLicenseRepository:
             redeemed_at=row[13],
             created_at=row[14],
             revoked_at=row[15],
+            encrypted_key=row[16],
         )
 
     @staticmethod

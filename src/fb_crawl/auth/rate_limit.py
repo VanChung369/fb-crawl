@@ -34,6 +34,7 @@ DEFAULT_AUTH_POLICIES = {
     "contact_poll": RateLimitPolicy(1200, 60),
     "export_create": RateLimitPolicy(10, 60),
     "admin_license_create": RateLimitPolicy(10, 60 * 60),
+    "admin_license_reveal": RateLimitPolicy(60, 60),
     "admin_license_revoke": RateLimitPolicy(30, 60 * 60),
     "admin_account_suspend": RateLimitPolicy(20, 60 * 60),
     "admin_device_revoke": RateLimitPolicy(30, 60 * 60),

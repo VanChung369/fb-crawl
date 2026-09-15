@@ -68,3 +68,50 @@ def test_redeem_returns_same_generic_error_for_malformed_and_unknown_keys(
 
     with pytest.raises(InvalidLicenseKey, match="License key is invalid"):
         LicenseService(repository, keys).redeem(7, plaintext, NOW)
+
+
+def test_create_stores_encrypted_key_and_reveal_audits_without_plaintext() -> None:
+    from fb_crawl.licenses.postgres import PostgresLicenseRepository
+    from tests.unit.licenses.test_postgres import ScriptedCursor, connect, key_row
+
+    keys = _keys()
+    cursor = ScriptedCursor([key_row(11, "unused")])
+    repository = PostgresLicenseRepository("postgresql://hidden", connect_factory=connect(cursor))
+    service = LicenseService(repository, keys)
+    _, plaintext = service.create_key(GRANT, 7, NOW)
+    _, params = next(command for command in cursor.commands if "INSERT INTO license_keys" in command[0])
+    encrypted = params[-1]
+    assert keys.decrypt(encrypted, 2) == plaintext
+    assert plaintext not in repr(cursor.commands)
+
+    row = list(key_row(11, keys.digest(plaintext)))
+    row[2] = 2
+    row[16] = encrypted
+    cursor.one.append(tuple(row))
+    assert service.reveal_key(11, 7, NOW) == plaintext
+    assert any(params and "license_key_revealed" in params for _, params in cursor.commands)
+    assert plaintext not in repr(cursor.commands)
+
+
+@pytest.mark.parametrize("mode", ["legacy", "tampered", "swapped", "missing-version"])
+def test_reveal_fails_closed_for_unrecoverable_keys(mode: str) -> None:
+    from fb_crawl.licenses.postgres import PostgresLicenseRepository
+    from fb_crawl.licenses.repository import LicenseKeyRevealUnavailable
+    from tests.unit.licenses.test_postgres import ScriptedCursor, connect, key_row
+
+    keys = _keys()
+    generated = keys.generate()
+    row = list(key_row(11, generated.digest))
+    row[2] = 2
+    if mode == "tampered":
+        row[16] = "not-valid-ciphertext"
+    elif mode == "swapped":
+        row[16] = keys.encrypt(keys.generate().plaintext, 2)
+    elif mode == "missing-version":
+        row[16] = keys.encrypt(generated.plaintext, 2)
+        row[2] = 99
+    cursor = ScriptedCursor([tuple(row)])
+    repository = PostgresLicenseRepository("postgresql://hidden", connect_factory=connect(cursor))
+    with pytest.raises(LicenseKeyRevealUnavailable):
+        LicenseService(repository, keys).reveal_key(11, 7, NOW)
+    assert not any("INSERT INTO admin_audit_events" in sql for sql, _ in cursor.commands)

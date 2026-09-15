@@ -123,3 +123,22 @@ def test_two_connection_redeem_race_has_exactly_one_winner() -> None:
         results = tuple(executor.map(redeem, account_ids))
 
     assert sorted(results) == ["already_redeemed", "redeemed"]
+
+
+def test_encrypted_license_survives_repository_reload_and_can_be_redeemed() -> None:
+    from fb_crawl.licenses.config import LicenseKeyRing
+    from fb_crawl.licenses.keys import LicenseKeyService
+    from fb_crawl.licenses.service import LicenseService
+
+    accounts = PostgresAccountRepository(TEST_DATABASE_URL)
+    account = accounts.create_account("reveal@example.com", "reveal@example.com", "hash")
+    keys = LicenseKeyService(LicenseKeyRing(1, {1: b"t" * 32}))
+    service = LicenseService(PostgresLicenseRepository(TEST_DATABASE_URL), keys)
+    key, plaintext = service.create_key(
+        LicenseGrant(LicenseDuration("day", 7), 100, 1, False, False), account.id, NOW,
+    )
+    reloaded = LicenseService(PostgresLicenseRepository(TEST_DATABASE_URL), keys)
+    stored = reloaded.repository.get_key(key.id)
+    assert stored.encrypted_key and stored.encrypted_key != plaintext
+    assert reloaded.reveal_key(key.id, account.id, NOW) == plaintext
+    assert reloaded.redeem(account.id, plaintext, NOW).license_key_id == key.id
