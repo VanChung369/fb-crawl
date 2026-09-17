@@ -12,6 +12,16 @@ from fb_crawl.interaction_sessions.models import (
 
 NOW = datetime(2026, 9, 9, tzinfo=UTC)
 
+@pytest.mark.parametrize('path', ['members', 'members/recently_joined'])
+def test_member_session_source_and_rows(path):
+    url = f'https://www.facebook.com/groups/12345/{path}?locale=vi_VN'
+    assert SessionCreate(uuid4(), url, 'members').source_url == url.split('?')[0]
+    assert row(kind='member').kind == 'member'
+    with pytest.raises(ValidationError):
+        SessionCreate(uuid4(), url, 'friends')
+    with pytest.raises(ValidationError):
+        SessionCreate(uuid4(), 'https://www.facebook.com/person.one/friends', 'members')
+
 @pytest.mark.parametrize('url, expected', [
     ('https://www.facebook.com/tuan.anh.663583/friends?locale=vi_VN', 'https://www.facebook.com/tuan.anh.663583/friends'),
     ('https://www.facebook.com/profile.php?id=100001&sk=friends', 'https://www.facebook.com/profile.php?id=100001&sk=friends'),

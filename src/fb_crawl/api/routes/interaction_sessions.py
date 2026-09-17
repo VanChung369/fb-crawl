@@ -22,7 +22,7 @@ class StrictPayload(BaseModel):
 class CreatePayload(StrictPayload):
     client_session_id: UUID
     source_url: str = Field(max_length=2048)
-    kind: Literal["comments", "reactions", "friends"]
+    kind: Literal["comments", "reactions", "friends", "members"]
 
 
 class IdentityPayload(StrictPayload):
@@ -38,7 +38,7 @@ class RowPayload(StrictPayload):
     interaction_id: str = Field(min_length=1, max_length=512)
     synthetic: bool = Field(strict=True)
     parent_id: str = Field(default="", max_length=512)
-    kind: Literal["comment", "reply", "reaction", "friend"]
+    kind: Literal["comment", "reply", "reaction", "friend", "member"]
     identity: IdentityPayload
     text: str = Field(max_length=10000)
     observed_at: datetime

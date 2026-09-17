@@ -28,7 +28,7 @@ def validate_batch(kind, rows, existing, total) -> tuple[SessionRowInput, ...]:
         raise SessionError("session_limit_reached")
     changed = []
     for item in rows:
-        if item.kind not in {'comments': ('comment', 'reply'), 'reactions': ('reaction',), 'friends': ('friend',)}.get(kind, ()):
+        if item.kind not in {'comments': ('comment', 'reply'), 'reactions': ('reaction',), 'friends': ('friend',), 'members': ('member',)}.get(kind, ()):
             raise SessionError("session_kind_conflict", 422)
         old = existing.get(item.client_row_id)
         if old is not None:

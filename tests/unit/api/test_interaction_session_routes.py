@@ -63,6 +63,18 @@ def test_create_friend_session_uses_profile_friends_source():
     assert service.calls[0][0] == 7
 
 
+def test_create_group_member_session():
+    client, service, headers = setup()
+    response = client.post(ROOT, headers=headers, json={
+        'client_session_id': str(uuid4()),
+        'source_url': 'https://www.facebook.com/groups/12345/members?locale=vi_VN',
+        'kind': 'members',
+    })
+    assert response.status_code == 200
+    assert response.json()['kind'] == 'members'
+    assert service.calls[0][1].source_url == 'https://www.facebook.com/groups/12345/members'
+
+
 @pytest.mark.parametrize("method,path,payload", [
     ("get", ROOT, None), ("post", ROOT, {}), ("get", f"{ROOT}/{SID}", None),
     ("put", f"{ROOT}/{SID}/interactions", {"rows": []}),

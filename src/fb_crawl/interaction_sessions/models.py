@@ -58,6 +58,20 @@ def friends_url(value: str) -> str | None:
     return None
 
 
+def members_url(value: str) -> str | None:
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme != 'https' or parsed.hostname not in FACEBOOK_HOSTS or parsed.username or parsed.password or parsed.port not in (None, 443):
+            return None
+        if any(key in parse_qs(parsed.query) for key in ('next', 'redirect', 'redirect_uri', 'u', 'url')):
+            return None
+        if re.fullmatch(r'/groups/[a-zA-Z0-9.]+/members(?:/recently_joined)?/?', parsed.path):
+            return 'https://www.facebook.com' + parsed.path.rstrip('/')
+    except ValueError:
+        pass
+    return None
+
+
 def source_url(value: str) -> str:
     require_text(value, 2048, blank=False)
     try:
@@ -65,7 +79,7 @@ def source_url(value: str) -> str:
         valid = parsed.scheme == "https" and parsed.hostname in FACEBOOK_HOSTS and not parsed.username and not parsed.password and parsed.port in (None, 443)
     except ValueError:
         valid = False
-    normalized = (friends_url(value) or normalize_comments_url(value)) if valid else None
+    normalized = (friends_url(value) or members_url(value) or normalize_comments_url(value)) if valid else None
     if not normalized:
         raise ValidationError("A supported Facebook post URL is required.")
     return normalized
@@ -120,8 +134,10 @@ class SessionCreate:
     def __post_init__(self):
         require_uuid(self.client_session_id)
         object.__setattr__(self, "source_url", source_url(self.source_url))
-        if self.kind not in ("comments", "reactions", "friends"):
+        if self.kind not in ("comments", "reactions", "friends", "members"):
             raise ValidationError("Invalid session kind.")
+        if (self.kind == 'members') != bool(members_url(self.source_url)):
+            raise ValidationError('Session kind does not match the source URL.')
         if (self.kind == 'friends') != bool(friends_url(self.source_url)):
             raise ValidationError('Session kind does not match the source URL.')
 
@@ -142,7 +158,7 @@ class SessionRowInput:
         require_uuid(self.client_row_id)
         if type(self.row_revision) is not int or not 1 <= self.row_revision <= 2147483647:
             raise ValidationError("Invalid interaction revision.")
-        if type(self.synthetic) is not bool or self.kind not in ("comment", "reply", "reaction", "friend") or not isinstance(self.identity, SessionIdentity):
+        if type(self.synthetic) is not bool or self.kind not in ("comment", "reply", "reaction", "friend", "member") or not isinstance(self.identity, SessionIdentity):
             raise ValidationError("Invalid interaction.")
         require_text(self.interaction_id, 512, blank=False)
         require_text(self.parent_id, 512)
@@ -222,7 +238,7 @@ class RowFilters:
         for value in (self.author, self.text):
             if value is not None:
                 require_text(value, 512)
-        if self.kind is not None and self.kind not in ("comment", "reply", "reaction", "friend"):
+        if self.kind is not None and self.kind not in ("comment", "reply", "reaction", "friend", "member"):
             raise ValidationError("Invalid interaction kind filter.")
         if self.outcome is not None and self.outcome not in ("not_looked_up", "processing", "found", "not_found", "failed", "quota_exceeded", "unavailable"):
             raise ValidationError("Invalid lookup outcome filter.")
