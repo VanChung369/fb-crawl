@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from fb_crawl.accounts.models import DeviceStatus
 from fb_crawl.contacts.service import ContactLookupRequest as DomainContactLookupRequest
 
 
@@ -122,7 +123,7 @@ class DeviceResponse(BaseModel):
     id: int
     installation_id: UUID
     display_name: str
-    status: Literal["active", "revoked"]
+    status: DeviceStatus | Literal["active", "revoked"]
     first_seen_at: datetime
     last_seen_at: datetime
     current: bool
@@ -168,6 +169,7 @@ class LicenseGrantRequest(BaseModel):
     max_devices: int = Field(ge=1, le=1_000_000)
     allow_group_crawl: bool
     allow_comment_crawl: bool
+    features: dict[str, bool] = Field(default_factory=dict)
 
 
 class EntitlementsResponse(BaseModel):
@@ -181,6 +183,7 @@ class EntitlementsResponse(BaseModel):
     allow_auto_group_crawl: bool
     allow_auto_comment_crawl: bool
     max_auto_crawl_identities: int
+    features: dict[str, bool] = Field(default_factory=dict)
     subscription_id: int | None
     starts_at: datetime | None
     ends_at: datetime | None
@@ -197,6 +200,7 @@ class SubscriptionResponse(BaseModel):
     max_devices: int
     allow_group_crawl: bool
     allow_comment_crawl: bool
+    features: dict[str, bool] = Field(default_factory=dict)
     starts_at: datetime
     ends_at: datetime
     status: Literal["valid", "revoked"]
@@ -214,6 +218,7 @@ class LicenseKeyResponse(BaseModel):
     max_devices: int
     allow_group_crawl: bool
     allow_comment_crawl: bool
+    features: dict[str, bool] = Field(default_factory=dict)
     status: Literal["available", "redeemed", "revoked"]
     created_by_account_id: int | None
     redeemed_by_account_id: int | None

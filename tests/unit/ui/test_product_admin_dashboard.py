@@ -36,15 +36,15 @@ def test_admin_workspace_has_explicit_duration_and_entitlement_controls() -> Non
 
 def test_admin_auth_uses_cookie_transport_csrf_and_device_binding() -> None:
     assert "/api/v1/auth/login" in SCRIPT
-    assert "transport: 'web'" in SCRIPT
-    assert "credentials: 'include'" in SCRIPT
+    assert "transport: 'web'" in SCRIPT or 'transport: "web"' in SCRIPT
+    assert "credentials: 'include'" in SCRIPT or 'credentials: "include"' in SCRIPT
     assert "X-Installation-ID" in SCRIPT
     assert "lead_finder_csrf" in SCRIPT
 
 
 def test_generated_key_is_text_only_and_cleared_on_close_or_navigation() -> None:
     assert "generatedKeyOutput.textContent = plaintext" in SCRIPT
-    assert "generatedKeyOutput.textContent = ''" in SCRIPT
+    assert "generatedKeyOutput.textContent = ''" in SCRIPT or 'generatedKeyOutput.textContent = ""' in SCRIPT
     assert "clearGeneratedLicenseKey()" in SCRIPT
 
 
@@ -59,7 +59,7 @@ def test_admin_api_data_is_rendered_with_dom_text_nodes_not_html_templates() -> 
     assert "createElement" in body
     assert "innerHTML" not in body
     assert "appendAdminTextCell" in body
-    assert "cell.textContent = String(value ?? '—')" in SCRIPT
+    assert "cell.textContent = String(value ?? '—')" in SCRIPT or 'cell.textContent = String(value ?? "—")' in SCRIPT
 
 
 def test_admin_workspace_wires_license_account_and_subscription_actions() -> None:
@@ -86,7 +86,7 @@ def test_sensitive_admin_actions_reauthenticate_with_password_then_retry_once() 
     assert 'id="admin-reauth-password"' in INDEX
     assert "/api/v1/auth/reauthenticate" in SCRIPT
     assert "pendingAdminAction" in SCRIPT
-    assert "passwordInput.value = ''" in SCRIPT
+    assert "passwordInput.value = ''" in SCRIPT or 'passwordInput.value = ""' in SCRIPT
 
 
 def test_admin_workspace_exposes_device_audit_and_cursor_navigation() -> None:

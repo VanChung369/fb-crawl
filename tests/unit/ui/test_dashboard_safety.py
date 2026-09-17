@@ -33,7 +33,7 @@ def test_dashboard_login_flow_does_not_collect_facebook_password() -> None:
     assert "extract-2fa" not in html
     assert "/api/v1/sessions/extract" not in script
     assert "password: passwordInput.value" in script
-    assert "device_name: 'Lead Finder Admin Dashboard'" in script
+    assert "device_name: 'Lead Finder Admin Dashboard'" in script or 'device_name: "Lead Finder Admin Dashboard"' in script
     assert "two_factor_code" not in script
     assert "launch-login" in script
 
@@ -43,7 +43,7 @@ def test_dashboard_keeps_settings_token_editable_and_proxy_credentials_hidden() 
 
     script = APP_JS_PATH.read_text(encoding="utf-8")
 
-    assert "tokenInput.value = data.api_token || ''" in script
+    assert "tokenInput.value = data.api_token || ''" in script or 'tokenInput.value = data.api_token || ""' in script
     assert "api_token: tokenValue || null" in script
     assert "p.raw_url}</span>" not in script
     assert "p.display_url" in script
@@ -89,7 +89,7 @@ def test_dashboard_does_not_send_max_users_for_profile_jobs() -> None:
 
     assert "max_users:" not in script
     assert "options.max_users =" in script
-    assert "['members', 'friends', 'followers'].includes(action)" in script
+    assert "['members', 'friends', 'followers'].includes(action)" in script or '["members", "friends", "followers"].includes(action)' in script
 
 
 def test_dashboard_error_toasts_render_above_open_modals() -> None:
@@ -114,8 +114,8 @@ def test_dashboard_session_pool_does_not_paint_unknown_accounts_green() -> None:
     html = INDEX_PATH.read_text(encoding="utf-8")
     script = APP_JS_PATH.read_text(encoding="utf-8")
 
-    assert "['unknown', 'cooldown'].includes(s.status)" in script
-    assert "s.status === 'healthy'" in script
+    assert "['unknown', 'cooldown'].includes(s.status)" in script or '["unknown", "cooldown"].includes(s.status)' in script
+    assert "s.status === 'healthy'" in script or 's.status === "healthy"' in script
     assert "manual_review" in script
     assert '<option value="unknown">' in html
     assert '<option value="manual_review">' in html
@@ -144,9 +144,8 @@ def test_dashboard_settings_controls_have_distinct_save_button_ids() -> None:
 
     assert duplicated_ids == set()
     assert 'id="btn-save-fbnumber-settings"' in html
-    assert 'document.getElementById(\'btn-save-fbnumber-settings\')' in APP_JS_PATH.read_text(
-        encoding="utf-8"
-    )
+    script_text = APP_JS_PATH.read_text(encoding="utf-8")
+    assert "document.getElementById('btn-save-fbnumber-settings')" in script_text or 'document.getElementById("btn-save-fbnumber-settings")' in script_text
 
 
 def test_dashboard_never_persists_plaintext_license_or_product_password() -> None:

@@ -29,6 +29,7 @@ class LicenseGrant:
     max_devices: int
     allow_group_crawl: bool
     allow_comment_crawl: bool
+    features: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if (
@@ -47,6 +48,8 @@ class LicenseGrant:
             self.allow_comment_crawl, bool
         ):
             raise ValueError("crawl permissions must be booleans")
+        if not isinstance(self.features, dict):
+            raise ValueError("features must be a dictionary")
 
 
 class SubscriptionStatus(StrEnum):

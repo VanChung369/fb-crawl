@@ -41,6 +41,7 @@ def key_row(
         NOW,
         None,
         None,
+        {},
     )
 
 
@@ -64,6 +65,7 @@ def subscription_row(
         "valid",
         None,
         NOW,
+        {},
     )
 
 

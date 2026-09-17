@@ -235,6 +235,40 @@ class DashboardApp {
         this.handleCreateLicense(event),
       );
     }
+    document.querySelectorAll(".btn-check-all").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const targetGroup = e.currentTarget.dataset.targetGroup;
+        const card = document.querySelector(
+          `.permission-group-card[data-group-id="${targetGroup}"]`,
+        );
+        if (!card) return;
+        const checkboxes = card.querySelectorAll('input[type="checkbox"]');
+        const allChecked = Array.from(checkboxes).every((cb) => cb.checked);
+        checkboxes.forEach((cb) => {
+          cb.checked = !allChecked;
+          cb.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        this.updateCheckAllButtonState(e.currentTarget, !allChecked);
+      });
+    });
+    document.querySelectorAll(".permission-group-card").forEach((card) => {
+      const groupId = card.dataset.groupId;
+      const btn = card.querySelector(
+        `.btn-check-all[data-target-group="${groupId}"]`,
+      );
+      if (!btn) return;
+      card.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.addEventListener("change", () => {
+          const checkboxes = card.querySelectorAll('input[type="checkbox"]');
+          const allChecked = Array.from(checkboxes).every((c) => c.checked);
+          this.updateCheckAllButtonState(btn, allChecked);
+        });
+      });
+      const checkboxes = card.querySelectorAll('input[type="checkbox"]');
+      const allChecked =
+        checkboxes.length > 0 && Array.from(checkboxes).every((c) => c.checked);
+      this.updateCheckAllButtonState(btn, allChecked);
+    });
     if (this.formAdminReauth) {
       this.formAdminReauth.addEventListener("submit", (event) =>
         this.handleAdminReauthentication(event),
@@ -2684,6 +2718,17 @@ class DashboardApp {
     }
   }
 
+  updateCheckAllButtonState(button, allChecked) {
+    if (!button) return;
+    if (allChecked) {
+      button.textContent = "Bỏ chọn";
+      button.classList.add("checked-all");
+    } else {
+      button.textContent = "Chọn tất cả";
+      button.classList.remove("checked-all");
+    }
+  }
+
   async handleCreateLicense(event) {
     event.preventDefault();
     const durationUnit = document.getElementById("license-duration-unit");
@@ -2692,6 +2737,14 @@ class DashboardApp {
     const maxDevices = document.getElementById("max-devices");
     const groupCrawl = document.getElementById("allow-group-crawl");
     const commentCrawl = document.getElementById("allow-comment-crawl");
+    const quickComments = document.getElementById("allow-quick-comments");
+    const quickReactions = document.getElementById("allow-quick-reactions");
+    const quickMembers = document.getElementById("allow-quick-members");
+    const quickFriends = document.getElementById("allow-quick-friends");
+    const scrollComments = document.getElementById("allow-scroll-comments");
+    const scrollReactions = document.getElementById("allow-scroll-reactions");
+    const scrollMembers = document.getElementById("allow-scroll-members");
+    const scrollFriends = document.getElementById("allow-scroll-friends");
     const submitButton = document.getElementById("btn-create-license");
     submitButton.disabled = true;
 
@@ -2713,6 +2766,19 @@ class DashboardApp {
       ? 1000000
       : Number(maxDevices?.value || 1);
 
+    const features = {
+      auto_group_crawl: !!groupCrawl?.checked,
+      auto_comment_crawl: !!commentCrawl?.checked,
+      quick_comments: !!quickComments?.checked,
+      quick_reactions: !!quickReactions?.checked,
+      quick_members: !!quickMembers?.checked,
+      quick_friends: !!quickFriends?.checked,
+      scroll_comments: !!scrollComments?.checked,
+      scroll_reactions: !!scrollReactions?.checked,
+      scroll_members: !!scrollMembers?.checked,
+      scroll_friends: !!scrollFriends?.checked,
+    };
+
     try {
       const created = await this.fetchProductApi("/api/v1/admin/license-keys", {
         method: "POST",
@@ -2720,8 +2786,9 @@ class DashboardApp {
           duration: { unit, value: val },
           monthly_contact_limit: limit,
           max_devices: devices,
-          allow_group_crawl: groupCrawl.checked,
-          allow_comment_crawl: commentCrawl.checked,
+          allow_group_crawl: !!groupCrawl?.checked,
+          allow_comment_crawl: !!commentCrawl?.checked,
+          features,
         }),
       });
       this.showGeneratedLicenseKey(created.key);

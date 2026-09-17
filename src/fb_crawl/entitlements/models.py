@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -13,6 +13,7 @@ class Entitlements:
     subscription_id: int | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
+    features: dict[str, bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.monthly_contact_limit < 0:
@@ -22,10 +23,14 @@ class Entitlements:
 
     @property
     def allow_auto_group_crawl(self) -> bool:
+        if "auto_group_crawl" in self.features:
+            return bool(self.features["auto_group_crawl"])
         return self.allow_group_crawl
 
     @property
     def allow_auto_comment_crawl(self) -> bool:
+        if "auto_comment_crawl" in self.features:
+            return bool(self.features["auto_comment_crawl"])
         return self.allow_comment_crawl
 
     @property

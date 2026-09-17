@@ -31,12 +31,14 @@ _KEY_COLUMNS = """
     id, key_digest, key_version, masked_key, duration_unit, duration_value,
     monthly_contact_limit, max_devices, allow_group_crawl,
     allow_comment_crawl, status, created_by_account_id,
-    redeemed_by_account_id, redeemed_at, created_at, revoked_at, encrypted_key
+    redeemed_by_account_id, redeemed_at, created_at, revoked_at, encrypted_key,
+    features
 """
 _SUBSCRIPTION_COLUMNS = """
     id, account_id, license_key_id, duration_unit, duration_value,
     monthly_contact_limit, max_devices, allow_group_crawl,
-    allow_comment_crawl, starts_at, ends_at, status, revoked_at, created_at
+    allow_comment_crawl, starts_at, ends_at, status, revoked_at, created_at,
+    features
 """
 
 
@@ -85,8 +87,8 @@ class PostgresLicenseRepository:
                     key_digest, key_version, masked_key,
                     duration_unit, duration_value, monthly_contact_limit,
                     max_devices, allow_group_crawl, allow_comment_crawl,
-                    created_by_account_id, created_at, encrypted_key
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    features, created_by_account_id, created_at, encrypted_key
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
                 RETURNING {_KEY_COLUMNS}
                 """,
                 (
@@ -99,6 +101,7 @@ class PostgresLicenseRepository:
                     grant.max_devices,
                     grant.allow_group_crawl,
                     grant.allow_comment_crawl,
+                    json.dumps(grant.features, sort_keys=True),
                     created_by_account_id,
                     now,
                     encrypted_key,
@@ -119,6 +122,7 @@ class PostgresLicenseRepository:
                         "max_devices": grant.max_devices,
                         "allow_group_crawl": grant.allow_group_crawl,
                         "allow_comment_crawl": grant.allow_comment_crawl,
+                        "features": grant.features,
                     },
                     now=now,
                 )
@@ -166,8 +170,8 @@ class PostgresLicenseRepository:
                 INSERT INTO account_subscriptions (
                     account_id, license_key_id, duration_unit, duration_value,
                     monthly_contact_limit, max_devices, allow_group_crawl,
-                    allow_comment_crawl, starts_at, ends_at, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    allow_comment_crawl, starts_at, ends_at, created_at, features
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                 RETURNING {_SUBSCRIPTION_COLUMNS}
                 """,
                 (
@@ -182,6 +186,7 @@ class PostgresLicenseRepository:
                     starts_at,
                     ends_at,
                     now,
+                    json.dumps(key.grant.features, sort_keys=True),
                 ),
             )
             subscription_row = cursor.fetchone()
@@ -235,6 +240,7 @@ class PostgresLicenseRepository:
                     allow_comment_crawl=(
                         subscription.grant.allow_comment_crawl
                     ),
+                    features=subscription.grant.features,
                     subscription_id=subscription.id,
                     starts_at=subscription.starts_at,
                     ends_at=subscription.ends_at,
@@ -516,6 +522,14 @@ class PostgresLicenseRepository:
 
     @staticmethod
     def _key(row: tuple[Any, ...]) -> LicenseKey:
+        features = row[17] if len(row) > 17 and row[17] is not None else {}
+        if isinstance(features, str):
+            try:
+                features = json.loads(features)
+            except Exception:
+                features = {}
+        if not isinstance(features, dict):
+            features = {}
         return LicenseKey(
             id=row[0],
             key_digest=row[1],
@@ -527,6 +541,7 @@ class PostgresLicenseRepository:
                 row[7],
                 row[8],
                 row[9],
+                features,
             ),
             status=LicenseKeyStatus(row[10]),
             created_by_account_id=row[11],
@@ -539,6 +554,14 @@ class PostgresLicenseRepository:
 
     @staticmethod
     def _subscription(row: tuple[Any, ...]) -> Subscription:
+        features = row[14] if len(row) > 14 and row[14] is not None else {}
+        if isinstance(features, str):
+            try:
+                features = json.loads(features)
+            except Exception:
+                features = {}
+        if not isinstance(features, dict):
+            features = {}
         return Subscription(
             id=row[0],
             account_id=row[1],
@@ -549,6 +572,7 @@ class PostgresLicenseRepository:
                 row[6],
                 row[7],
                 row[8],
+                features,
             ),
             starts_at=row[9],
             ends_at=row[10],

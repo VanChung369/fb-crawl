@@ -71,6 +71,7 @@ def create_product_admin_router(
             payload.max_devices,
             payload.allow_group_crawl,
             payload.allow_comment_crawl,
+            payload.features,
         )
         key, plaintext = licenses.create_key(grant, current.account.id, now)
         response.headers["Cache-Control"] = "no-store"
@@ -312,6 +313,7 @@ def _license_response(value: LicenseKey) -> LicenseKeyResponse:
         max_devices=value.grant.max_devices,
         allow_group_crawl=value.grant.allow_group_crawl,
         allow_comment_crawl=value.grant.allow_comment_crawl,
+        features=value.grant.features,
         status=value.status,
         created_by_account_id=value.created_by_account_id,
         redeemed_by_account_id=value.redeemed_by_account_id,
