@@ -18,6 +18,7 @@ from fb_data_pipeline.core.models import (
     ProviderStatus,
 )
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
+from fb_data_pipeline.detectors.vietnamese import infer_profile_attributes
 
 
 def _selected_data(payload: Any) -> Mapping[str, Any] | None:
@@ -37,8 +38,10 @@ def _extract_profile_data(payload: Any, checked_at: datetime) -> tuple[ProfileDa
     location = str(data.get("location") or data.get("address") or data.get("city") or data.get("current_city") or "").strip()
     name = str(data.get("name") or data.get("display_name") or data.get("fullname") or "").strip()
 
+    address, gender = infer_profile_attributes(name, location, gender)
+
     profile = ProfileData(
-        address=location,
+        address=address,
         birth_date=birthday,
         gender=gender,
         source_url="external:fbnumber",

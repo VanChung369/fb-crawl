@@ -380,3 +380,26 @@ def test_fbnumber_does_not_retry_rate_limit_with_retry_after() -> None:
     assert result.retry_after == checked_at + timedelta(minutes=2)
     assert calls == 1
     assert sleeps == []
+
+
+def test_fbnumber_infers_masked_address_and_gender() -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search",
+        api_token="secret",
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={
+                "status": "success",
+                "data": {
+                    "uid": "100099999",
+                    "fullname": "Dương Ngọc Toàn",
+                    "number": "0988888888",
+                    "gender": "*",
+                    "location": "Thá********",
+                },
+            }),
+        )),
+    )
+    result = provider.search(FacebookIdentity(uid="100099999"))
+    assert result.status is ProviderStatus.FOUND
+    assert result.profile.address == "Thái Bình"
+    assert result.profile.gender == "Nam"

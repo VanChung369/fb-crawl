@@ -18,6 +18,7 @@ from fb_data_pipeline.core.models import (
     canonical_profile_url,
 )
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
+from fb_data_pipeline.detectors.vietnamese import infer_profile_attributes
 from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 from fb_data_pipeline.services.pipeline import EnrichedUser
 
@@ -157,8 +158,10 @@ def import_scan_item(
         except InvalidPhoneNumber:
             pass
 
+    address, gender = infer_profile_attributes(name, location, gender)
+
     profile = ProfileData(
-        address=location,
+        address=address,
         birth_date=birthday,
         gender=gender,
         source_url="external:fbnumber",

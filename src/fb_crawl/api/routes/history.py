@@ -23,6 +23,7 @@ from fb_crawl.entitlements.quota import ContactQuotaService
 from fb_crawl.history.models import AccountHistoryQuery, HistoryItem
 from fb_crawl.history.repository import HistoryRepository
 from fb_crawl.history.service import HistoryService
+from fb_data_pipeline.detectors.vietnamese import infer_profile_attributes
 
 
 def create_history_router(
@@ -163,6 +164,7 @@ def _query(account_id: int, **values: object) -> AccountHistoryQuery:
 
 
 def history_item_response(value: HistoryItem) -> HistoryItemResponse:
+    address, gender = infer_profile_attributes(value.name, value.address, value.gender)
     return HistoryItemResponse(
         id=value.id,
         device_id=value.device_id,
@@ -172,8 +174,8 @@ def history_item_response(value: HistoryItem) -> HistoryItemResponse:
             username=value.username,
             name=value.name,
             profile_url=value.profile_url,
-            gender=value.gender,
-            address=value.address,
+            gender=gender,
+            address=address,
             birth_date=value.birth_date,
         ),
         phone=value.phone,
@@ -188,8 +190,8 @@ def history_item_response(value: HistoryItem) -> HistoryItemResponse:
         source_type=value.source_type,
         source_url=value.source_url,
         product_crawl_job_id=value.product_crawl_job_id,
-        gender=value.gender,
-        address=value.address,
+        gender=gender,
+        address=address,
         birth_date=value.birth_date,
     )
 
