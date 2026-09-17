@@ -182,6 +182,8 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Top Header */
@@ -241,11 +243,15 @@ body {
 .content-body {
   padding: 32px;
   flex: 1;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .view-section {
   display: none;
   animation: fadeIn 0.25s ease;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .view-section.active {
@@ -261,7 +267,9 @@ body {
 .section-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
   margin-bottom: 24px;
 }
 
@@ -373,6 +381,13 @@ body {
   gap: 24px;
 }
 
+@media (max-width: 1280px) {
+  .admin-grid {
+    grid-template-columns: 1fr !important;
+    gap: 24px;
+  }
+}
+
 @media (max-width: 1100px) {
   .dashboard-columns {
     grid-template-columns: 1fr;
@@ -394,6 +409,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 18px;
 }
 
@@ -409,10 +426,34 @@ body {
 .table-container {
   overflow-x: auto;
   flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-container::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-full);
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-full);
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .custom-table {
   width: 100%;
+  min-width: 600px;
   border-collapse: collapse;
   font-size: 0.88rem;
   text-align: left;
@@ -707,6 +748,7 @@ body {
   border-top: 1px solid var(--border-color);
   color: var(--text-muted);
   font-size: 0.82rem;
+  margin-top: auto;
 }
 
 .admin-pagination button:disabled {
@@ -730,14 +772,38 @@ body {
 
 .admin-grid {
   display: grid;
-  grid-template-columns: minmax(310px, 0.8fr) minmax(560px, 1.7fr);
+  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
   gap: 20px;
+  min-width: 0;
+  width: 100%;
+  align-items: stretch;
 }
 
 .admin-license-builder,
 .admin-license-list,
-.admin-accounts-panel {
+.admin-accounts-panel,
+.admin-audit-panel {
   min-width: 0;
+  max-width: 100%;
+}
+
+.admin-license-builder,
+.admin-license-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.admin-license-list .table-container {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.admin-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .admin-accounts-panel,
@@ -1281,6 +1347,10 @@ body {
   }
 }
 /* Keep long revealed license keys inside the table cell. */
+.admin-license-key {
+  white-space: nowrap;
+}
+
 .admin-license-key-text {
   overflow-wrap: anywhere;
   font-family: monospace;
@@ -1295,4 +1365,21 @@ body {
 .admin-license-key button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+@media (max-width: 520px) {
+  .permission-tiles-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .setting-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .admin-pagination {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
 }
