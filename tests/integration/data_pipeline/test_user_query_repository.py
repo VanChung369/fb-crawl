@@ -73,7 +73,7 @@ def clean_database() -> None:
                     facebook_user_profiles,
                     phone_numbers,
                     facebook_users
-                RESTART IDENTITY
+                RESTART IDENTITY CASCADE
                 """
             )
 
@@ -188,6 +188,57 @@ def seed_attempt(user_id: int, *, checked_at: datetime, status: str, error_code:
             row = cursor.fetchone()
             assert row is not None
             return int(row[0])
+
+
+def test_bulk_delete_preserves_both_phone_origins_and_cascades_related_data() -> None:
+    from uuid import uuid4
+    from psycopg.types.json import Jsonb
+
+    now = datetime.now(UTC)
+    ids = [seed_user(uid=str(100001 + i), username=f"bulk.user{i}", name="Bulk",
+                     created_at=now, updated_at=now, address="Hanoi") for i in range(3)]
+    seed_evidence(ids[1], phone="+84901111111", origin="fbnumber", captured_at=now)
+    seed_evidence(ids[2], phone="+84902222222", origin="fb_crawl", captured_at=now)
+    seed_attempt(ids[0], checked_at=now, status="not_found")
+    session_id, person_id, lead_id = uuid4(), uuid4(), uuid4()
+    email = f"{uuid4()}@example.test"
+    with psycopg.connect(TEST_DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("""INSERT INTO accounts (normalized_email, display_email, password_hash)
+                VALUES (%s, %s, 'test') RETURNING id""", (email, email))
+            account_id = cursor.fetchone()[0]
+            cursor.execute("""INSERT INTO lookup_events (account_id, facebook_user_id, requested_uid)
+                VALUES (%s, %s, '100001') RETURNING id""", (account_id, ids[0]))
+            event_id = cursor.fetchone()[0]
+            cursor.execute("""INSERT INTO account_leads (id, account_id, facebook_uid)
+                VALUES (%s, %s, '100001')""", (lead_id, account_id))
+            cursor.execute("""INSERT INTO interaction_sessions
+                (id, account_id, client_session_id, source_url, kind, created_at, updated_at)
+                VALUES (%s, %s, %s, 'https://www.facebook.com/test/posts/123456', 'comments', %s, %s)
+                """, (session_id, account_id, uuid4(), now, now))
+            cursor.execute("""INSERT INTO session_people
+                (id, session_id, identity_key, identity, lookup_event_id, created_at, updated_at)
+                VALUES (%s, %s, 'uid:100001', %s, %s, %s, %s)""",
+                (person_id, session_id, Jsonb({"facebook_uid": "100001"}), event_id, now, now))
+    try:
+        repository = UserQueryRepository(TEST_DATABASE_URL)
+        assert repository.delete_users_without_phone() == 1
+        assert repository.get_user(ids[0]) is None
+        assert repository.get_user(ids[1]).phone_1 == "+84901111111"
+        assert repository.get_user(ids[2]).phone_2 == "+84902222222"
+        assert repository.delete_users_without_phone() == 0
+        with psycopg.connect(TEST_DATABASE_URL) as connection:
+            with connection.cursor() as cursor:
+                for table in ("facebook_user_profiles", "enrichment_attempts", "lookup_events"):
+                    cursor.execute(f"SELECT count(*) FROM {table} WHERE facebook_user_id = %s", (ids[0],))
+                    assert cursor.fetchone()[0] == 0
+                cursor.execute("SELECT count(*) FROM session_people WHERE id = %s", (person_id,))
+                assert cursor.fetchone()[0] == 0
+                cursor.execute("SELECT count(*) FROM account_leads WHERE id = %s", (lead_id,))
+                assert cursor.fetchone()[0] == 0
+    finally:
+        with psycopg.connect(TEST_DATABASE_URL) as connection:
+            connection.execute("DELETE FROM accounts WHERE id = %s", (account_id,))
 
 
 def test_search_filters_return_documented_user_summaries_without_duplicates() -> None:

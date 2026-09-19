@@ -316,12 +316,6 @@ class UserQueryRepository:
         )
         return Page(items, next_cursor)
 
-    def delete_user(self, user_id: int) -> bool:
-        user_id = self._user_id(user_id)
-        with self._connect() as cursor:
-            cursor.execute("DELETE FROM facebook_users WHERE id = %s", (user_id,))
-            return bool(cursor.rowcount and cursor.rowcount > 0)
-
     def update_user(
         self,
         user_id: int,
@@ -433,6 +427,55 @@ class UserQueryRepository:
                 (user_id,),
             )
             return bool(cursor.rowcount and cursor.rowcount > 0)
+
+    def delete_users_without_phone(self) -> int:
+        """Delete phone-less users and their related records in one transaction."""
+        with self._connect() as cursor:
+            # Prevent enrichment from adding a phone between selection and deletion.
+            cursor.execute("LOCK TABLE facebook_users, user_phone_evidence, account_contact_reveals, lookup_events IN SHARE ROW EXCLUSIVE MODE")
+            cursor.execute("""
+                CREATE TEMP TABLE users_to_delete ON COMMIT DROP AS
+                SELECT u.id, u.facebook_uid, u.facebook_username
+                FROM facebook_users u
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM user_phone_evidence e WHERE e.facebook_user_id = u.id
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM account_contact_reveals r WHERE r.facebook_user_id = u.id
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM lookup_events e WHERE e.facebook_user_id = u.id
+                    AND e.revealed_phone_number_id IS NOT NULL
+                )
+            """)
+            cursor.execute("""
+                DELETE FROM session_people p USING users_to_delete u
+                WHERE p.identity->>'facebook_uid' = u.facebook_uid
+                   OR ((NULLIF(p.identity->>'facebook_uid', '') IS NULL OR u.facebook_uid IS NULL)
+                       AND lower(p.identity->>'username') = lower(u.facebook_username))
+                   OR p.lookup_event_id IN (
+                       SELECT id FROM lookup_events WHERE facebook_user_id = u.id
+                   )
+            """)
+            cursor.execute("""
+                DELETE FROM account_leads l USING users_to_delete u
+                WHERE l.facebook_uid = u.facebook_uid
+                   OR ((l.facebook_uid IS NULL OR u.facebook_uid IS NULL)
+                       AND lower(l.username) = lower(u.facebook_username))
+            """)
+            cursor.execute("""
+                DELETE FROM account_contact_reveals r USING users_to_delete u
+                WHERE r.facebook_user_id = u.id
+            """)
+            cursor.execute("""
+                DELETE FROM lookup_events e USING users_to_delete u
+                WHERE e.facebook_user_id = u.id
+            """)
+            # Profiles, evidence, attempts, provider state and leases cascade.
+            cursor.execute("""
+                DELETE FROM facebook_users f USING users_to_delete u WHERE f.id = u.id
+            """)
+            return cursor.rowcount
 
     @staticmethod
     def _user_id(value: object) -> int:

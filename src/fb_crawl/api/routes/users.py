@@ -332,6 +332,15 @@ def create_users_router(
             next_cursor=page.next_cursor,
         )
 
+    @router.delete("/without-phone", responses=error_responses)
+    def delete_users_without_phone(
+        confirm: Annotated[bool, Query()] = False,
+    ) -> dict[str, object]:
+        if not confirm:
+            raise HTTPException(status_code=400, detail="Confirm bulk deletion with confirm=true.")
+        deleted = user_repository.delete_users_without_phone()
+        return {"status": "success", "deleted_count": deleted}
+
     @router.get(
         "/{user_id}/phone-evidence",
         response_model=PhoneEvidencePageResponse,

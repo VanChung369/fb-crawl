@@ -473,6 +473,9 @@ class DashboardApp {
     }
 
     // Pagination Listeners: Leads
+    document.getElementById("btn-delete-without-phone")?.addEventListener("click", () => {
+      this.deleteUsersWithoutPhone();
+    });
     const leadsLimit = document.getElementById("leads-page-limit");
     if (leadsLimit) {
       leadsLimit.addEventListener("change", (e) => {
@@ -1498,6 +1501,27 @@ class DashboardApp {
       this.loadLeadsData();
     } else {
       alert("Không thể sửa khách hàng. Kiểm tra dữ liệu nhập hoặc log API.");
+    }
+  }
+
+  async deleteUsersWithoutPhone() {
+    const button = document.getElementById("btn-delete-without-phone");
+    if (button?.disabled) return;
+    if (!confirm("Xóa vĩnh viễn TẤT CẢ khách hàng không có số điện thoại trong cơ sở dữ liệu, cùng hồ sơ, lịch sử tra cứu, ghi chú và dữ liệu quét liên quan? Thao tác áp dụng toàn bộ dữ liệu, không chỉ trang hoặc bộ lọc hiện tại, và không thể hoàn tác.")) return;
+    if (button) button.disabled = true;
+    try {
+      const result = await this.fetchApi("/api/v1/users/without-phone?confirm=true", { method: "DELETE" });
+      if (!result) {
+        alert("Không thể xóa dữ liệu. Vui lòng thử lại hoặc kiểm tra log API.");
+        return;
+      }
+      this.showToast(`Đã xóa ${result.deleted_count} khách hàng không có SĐT và dữ liệu liên quan.`);
+      this.leadsPagination.pageIndex = 0;
+      this.leadsPagination.cursorHistory = [null];
+      this.leadsPagination.nextCursor = null;
+      await this.loadLeadsData();
+    } finally {
+      if (button) button.disabled = false;
     }
   }
 

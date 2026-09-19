@@ -34,6 +34,25 @@ except ModuleNotFoundError as error:
 else:
     FASTAPI_AVAILABLE = True
 
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI unavailable")
+def test_bulk_delete_requires_auth_and_confirmation() -> None:
+    class Repository(RecordingUserRepository):
+        def delete_users_without_phone(self):
+            self.calls.append(("bulk_delete", None))
+            return 12
+
+    repository = Repository(_user())
+    client = _client(repository)
+    path = "/api/v1/users/without-phone"
+    assert client.delete(path + "?confirm=true").status_code == 401
+    assert client.delete(path, headers=_headers()).status_code == 400
+    assert not repository.calls
+    response = client.delete(path + "?confirm=true", headers=_headers())
+    assert response.status_code == 200
+    assert response.json() == {"status": "success", "deleted_count": 12}
+    assert repository.calls == [("bulk_delete", None)]
+
 if FASTAPI_AVAILABLE:
     from fastapi.testclient import TestClient
 
