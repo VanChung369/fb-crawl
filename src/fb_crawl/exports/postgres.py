@@ -190,6 +190,18 @@ class PostgresExportRepository:
             row = cursor.fetchone()
         return None if row is None else self._job(row)
 
+    def renew_lease(self, job_id: UUID, owner: str, now: datetime) -> bool:
+        self._job_id(job_id)
+        self._owner(owner)
+        with self._connect() as cursor:
+            cursor.execute(
+                """UPDATE export_jobs SET leased_until = %s, updated_at = %s
+                WHERE id = %s AND owner_token = %s AND status = 'running'
+                  AND leased_until > %s RETURNING id""",
+                (now + self.lease_duration, now, job_id, owner, now),
+            )
+            return cursor.fetchone() is not None
+
     def touch_worker(self, worker_id: str, now: datetime) -> None:
         self._owner(worker_id)
         with self._connect() as cursor:

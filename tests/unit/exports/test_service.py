@@ -221,3 +221,43 @@ def test_worker_health_returns_safe_availability_and_last_seen_time() -> None:
 
     assert health.available is True
     assert health.last_seen_at == NOW
+
+
+@pytest.mark.parametrize("renewed", [True, False])
+def test_export_heartbeat_continues_while_writer_is_blocked(renewed):
+    from threading import Event
+    heartbeat_seen = Event()
+    repository = Repository(job())
+    renewals = []
+
+    def renew(job_id, owner, now):
+        renewals.append((job_id, owner, now))
+        if not renewed:
+            heartbeat_seen.set()
+        return renewed
+
+    original_touch = repository.touch_worker
+    def touch(worker_id, now):
+        original_touch(worker_id, now)
+        if renewals:
+            heartbeat_seen.set()
+
+    repository.renew_lease = renew
+    repository.touch_worker = touch
+
+    class BlockingWriter(ArtifactStore):
+        def write_history(self, *args):
+            assert heartbeat_seen.wait(2), "heartbeat stopped during export"
+            return super().write_history(*args)
+
+    artifacts = BlockingWriter()
+    worker = ExportWorker(repository, History(), artifacts, worker_id="worker-1",
+                          clock=lambda: NOW, heartbeat_interval=0.01)
+    assert worker.run_once()
+    assert renewals[0] == (JOB_ID, "worker-1", NOW)
+    if renewed:
+        assert repository.completed
+        assert len([event for event in repository.events if event[0] == "touch_worker"]) >= 2
+    else:
+        assert not repository.completed
+        assert artifacts.deleted == [f"{JOB_ID.hex}.csv"]

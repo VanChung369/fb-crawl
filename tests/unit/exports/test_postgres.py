@@ -216,3 +216,14 @@ def test_delete_is_tenant_scoped_and_returns_artifact_for_cleanup() -> None:
     sql, params = command(cursor, "DELETE FROM export_jobs")
     assert "account_id = %s AND id = %s" in sql
     assert params == (7, JOB_ID)
+
+
+@pytest.mark.parametrize("owned", [True, False])
+def test_renew_export_lease_requires_current_unexpired_owner(owned):
+    cursor = Cursor([(JOB_ID,)] if owned else [])
+    assert repository(cursor).renew_lease(JOB_ID, "worker-1", NOW) is owned
+    sql, params = command(cursor, "UPDATE export_jobs")
+    assert "owner_token = %s" in sql
+    assert "status = 'running'" in sql
+    assert "leased_until > %s" in sql
+    assert params == (NOW + timedelta(minutes=15), NOW, JOB_ID, "worker-1", NOW)

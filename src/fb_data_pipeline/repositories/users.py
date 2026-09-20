@@ -178,10 +178,12 @@ class UserQueryRepository:
         self.connect_factory = connect_factory
 
     @contextmanager
-    def _connect(self) -> Iterator[Any]:
+    def _connect(self, *, snapshot: bool = False) -> Iterator[Any]:
         try:
             with self.connect_factory(self.database_url) as connection:
                 with connection.cursor() as cursor:
+                    if snapshot:
+                        cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                     cursor.execute(
                         "SELECT set_config('statement_timeout', %s, true)",
                         (f"{self.statement_timeout_ms}ms",),
@@ -193,16 +195,25 @@ class UserQueryRepository:
             raise DatabaseError("Database operation failed.") from error
 
     def list_users(self, query: UserQuery) -> Page[UserSummary]:
+        with self._connect() as cursor:
+            return self._list_users(query, cursor)
+
+    @contextmanager
+    def export_snapshot(self):
+        repository = self
+        with self._connect(snapshot=True) as cursor:
+            class Snapshot:
+                def list_users(self, query):
+                    return repository._list_users(query, cursor)
+            yield Snapshot()
+
+    def _list_users(self, query: UserQuery, cursor) -> Page[UserSummary]:
         if not isinstance(query, UserQuery):
             raise ValidationError("Invalid user query.")
         cursor_values = _decode_page_cursor(query.cursor) if query.cursor else None
         where, params = self._user_filters(query, cursor_values)
-        with self._connect() as cursor:
-            cursor.execute(
-                self._list_users_sql(where),
-                (*params, query.limit + 1),
-            )
-            rows = cursor.fetchall()
+        cursor.execute(self._list_users_sql(where), (*params, query.limit + 1))
+        rows = cursor.fetchall()
         items = tuple(self._user_from_row(row) for row in rows[:query.limit])
         next_cursor = (
             encode_cursor(KeysetCursor(items[-1].updated_at, items[-1].id))
@@ -338,14 +349,21 @@ class UserQueryRepository:
                 params.append(name.strip())
             if username is not None:
                 updates.append("facebook_username = %s")
-                params.append(username.strip())
+                params.append(username.strip() or None)
+                updates.append("normalized_username = %s")
+                params.append(username.strip().casefold() or None)
             if updates:
                 updates.append("updated_at = now()")
                 params.append(user_id)
-                cursor.execute(
-                    f"UPDATE facebook_users SET {', '.join(updates)} WHERE id = %s",
-                    tuple(params),
-                )
+                try:
+                    cursor.execute(
+                        f"UPDATE facebook_users SET {', '.join(updates)} WHERE id = %s",
+                        tuple(params),
+                    )
+                except psycopg.errors.UniqueViolation as error:
+                    if error.diag.constraint_name == "facebook_users_normalized_username_key":
+                        raise ValidationError("Username is already assigned to another user.") from error
+                    raise
 
             # Update facebook_user_profiles
             if address is not None or gender is not None or birth_date is not None:

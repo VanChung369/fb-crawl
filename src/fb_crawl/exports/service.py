@@ -4,6 +4,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Thread
 from typing import Callable, Protocol
 
 from fb_crawl.contacts.models import LookupOutcome
@@ -206,6 +207,8 @@ class ExportService:
 
 
 class ExportWorkerRepository(Protocol):
+    def renew_lease(self, job_id, owner: str, now: datetime) -> bool: ...
+
     def touch_worker(self, worker_id: str, now: datetime) -> None: ...
 
     def expire_completed(self, now: datetime) -> tuple[str, ...]: ...
@@ -254,6 +257,7 @@ class ExportWorker:
         worker_id: str,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         artifact_ttl: timedelta = timedelta(hours=24),
+        heartbeat_interval: float = 5.0,
     ) -> None:
         self.repository = repository
         self.history = history
@@ -261,6 +265,7 @@ class ExportWorker:
         self.worker_id = worker_id
         self.clock = clock
         self.artifact_ttl = artifact_ttl
+        self.heartbeat_interval = max(0.01, min(heartbeat_interval, 5.0))
 
     def run_once(self) -> bool:
         now = self.clock()
@@ -276,11 +281,30 @@ class ExportWorker:
         if job is None:
             return False
         artifact_path = ""
+        stop = Event()
+        lost_lease = Event()
+
+        def heartbeat():
+            while not stop.wait(self.heartbeat_interval):
+                try:
+                    now = self.clock()
+                    if not self.repository.renew_lease(job.id, self.worker_id, now):
+                        lost_lease.set()
+                        return
+                    self.repository.touch_worker(self.worker_id, now)
+                except Exception:
+                    lost_lease.set()
+                    return
+
+        thread = Thread(target=heartbeat, name="export-heartbeat", daemon=True)
+        thread.start()
         try:
             rows = self.history.iter_export(job.account_id, job.filter_snapshot)
             artifact_path = self.artifacts.write_history(
                 job.id, job.format, rows
             )
+            if lost_lease.is_set():
+                raise RuntimeError("Export lease heartbeat failed.")
             completed_at = self.clock()
             completed = self.repository.complete(
                 job.id,
@@ -300,4 +324,7 @@ class ExportWorker:
                 "export_generation_failed",
                 self.clock(),
             )
+        finally:
+            stop.set()
+            thread.join()
         return True

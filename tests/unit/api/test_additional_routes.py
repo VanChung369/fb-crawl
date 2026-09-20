@@ -39,6 +39,7 @@ def _create_test_app(tmp_path: Path):
         created_at="2026-08-20T10:00:00Z",
         updated_at="2026-08-20T10:00:00Z",
     )
+    user_repo.export_snapshot.return_value.__enter__.return_value = user_repo
     user_repo.list_users.return_value = Page(items=[user_sample], next_cursor=None)
 
     job_repo = MagicMock()
@@ -359,6 +360,55 @@ def test_export_users_csv_and_json(tmp_path: Path) -> None:
     assert json_json[0]["username"] == "user1"
 
 
+@pytest.mark.parametrize("format", ["csv", "json"])
+def test_export_all_pages_preserves_filters_and_requires_auth(tmp_path: Path, format):
+    from dataclasses import replace
+    from datetime import UTC, datetime
+    from fb_crawl.core.jobs import KeysetCursor, encode_cursor
+    import csv
+    import io
+
+    app, _, _, repository = _create_test_app(tmp_path)
+    sample = repository.list_users.return_value.items[0]
+    cursor = encode_cursor(KeysetCursor(datetime(2026, 8, 20, tzinfo=UTC), 100))
+    repository.list_users.side_effect = [
+        Page(tuple(replace(sample, id=i) for i in range(1, 101)), cursor),
+        Page((replace(sample, id=101, name="=1+1", address=" \t@SUM(1,1)"),), None),
+    ]
+    client = TestClient(app)
+    url = f"/api/v1/export/users?format={format}&q=User&has_phone=true&phone_origin=fbnumber"
+    assert client.get(url).status_code == 401
+    assert repository.list_users.call_count == 0
+    response = client.get(url, headers=HEADERS)
+    assert response.status_code == 200
+    assert repository.list_users.call_count == 2
+    queries = [call.args[0] for call in repository.list_users.call_args_list]
+    assert [query.cursor for query in queries] == [None, cursor]
+    assert all(query.q == "user" and query.has_phone is True and query.phone_origin == "fbnumber" for query in queries)
+    if format == "json":
+        assert len(response.json()) == 101
+        assert response.json()[-1]["name"] == "=1+1"
+    else:
+        rows = list(csv.DictReader(io.StringIO(response.text.lstrip("\ufeff"))))
+        assert len(rows) == 101
+        assert rows[-1]["name"] == "'=1+1"
+        assert rows[-1]["address"] == "' \t@SUM(1,1)"
+
+
+def test_export_failure_does_not_return_a_partial_file(tmp_path: Path):
+    from datetime import UTC, datetime
+    from fb_crawl.core.jobs import KeysetCursor, encode_cursor
+    from fb_data_pipeline.repositories.errors import DatabaseError
+
+    app, _, _, repository = _create_test_app(tmp_path)
+    first = repository.list_users.return_value
+    cursor = encode_cursor(KeysetCursor(datetime(2026, 8, 20, tzinfo=UTC), 1))
+    repository.list_users.side_effect = [Page(first.items, cursor), DatabaseError("Database operation failed.")]
+    response = TestClient(app).get("/api/v1/export/users", headers=HEADERS)
+    assert response.status_code >= 400
+    assert "content-disposition" not in response.headers
+
+
 def test_dashboard_static_page_served(tmp_path: Path) -> None:
     app, _, _, _ = _create_test_app(tmp_path)
     client = TestClient(app)
@@ -422,4 +472,3 @@ def test_app_version_endpoint(tmp_path: Path, monkeypatch) -> None:
     assert body["release_notes"] == "New features & bug fixes"
     assert "min_supported_version" in body
     assert "release_date" in body
-

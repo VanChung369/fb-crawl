@@ -241,6 +241,18 @@ def test_detail_pages_map_only_documented_stored_fields() -> None:
     assert attempt_params is not None and attempt_params[-1] == 6
 
 
+@pytest.mark.parametrize("username,expected", [(" New.User ", ("New.User", "new.user")), ("", (None, None))])
+def test_update_username_keeps_search_identity_in_sync(username, expected):
+    cursor = RecordingCursor([user_row()])
+    repository = UserQueryRepository("postgresql://hidden",
+        connect_factory=connection_factory(RecordingConnection(cursor)))
+    repository.update_user(7, username=username)
+    sql, params = next((sql, params) for sql, params in cursor.commands if "UPDATE facebook_users" in sql)
+    assert "facebook_username = %s" in sql
+    assert "normalized_username = %s" in sql
+    assert params == (*expected, 7)
+
+
 def test_update_user_normalizes_manual_phone_numbers_before_writing_slots() -> None:
     """Break caught: dashboard edit writes raw 091... into E.164-only phone key."""
 
@@ -319,3 +331,17 @@ def test_database_errors_are_mapped_to_a_safe_message(error: BaseException) -> N
     assert captured.value.safe_message == "Database operation failed."
     assert "password" not in captured.value.safe_message
     assert "secret" not in captured.value.safe_message
+
+
+def test_export_pages_share_one_repeatable_read_transaction():
+    from unittest.mock import Mock
+    cursor = RecordingCursor([user_row()])
+    connect = Mock(return_value=RecordingConnection(cursor))
+    repository = UserQueryRepository("unused", connect_factory=connect)
+    with repository.export_snapshot() as snapshot:
+        first = snapshot.list_users(UserQuery(limit=1))
+        snapshot.list_users(UserQuery(limit=1))
+    assert len(first.items) == 1
+    connect.assert_called_once()
+    assert cursor.commands[0][0] == "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    assert sum("SELECT set_config" in sql for sql, _ in cursor.commands) == 1

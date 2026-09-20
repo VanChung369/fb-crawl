@@ -32,12 +32,14 @@ class GoogleTokenVerifier:
         timeout_seconds: float = 10.0,
     ) -> None:
         self._allowed_client_ids = (
-            set(allowed_client_ids) if allowed_client_ids else None
+            {value.strip() for value in (allowed_client_ids or ()) if value.strip()}
         )
         self._tokeninfo_url = tokeninfo_url
         self._timeout_seconds = timeout_seconds
 
     def verify_id_token(self, id_token: str) -> GoogleUserInfo:
+        if not self._allowed_client_ids:
+            raise GoogleAuthError("Google sign-in is not configured.")
         try:
             with httpx.Client(timeout=self._timeout_seconds) as client:
                 response = client.get(
@@ -63,7 +65,7 @@ class GoogleTokenVerifier:
             raise GoogleAuthError("Google email is not verified.")
 
         aud = data.get("aud")
-        if self._allowed_client_ids and aud not in self._allowed_client_ids:
+        if aud not in self._allowed_client_ids:
             raise GoogleAuthError("Google token audience mismatch.")
 
         return GoogleUserInfo(

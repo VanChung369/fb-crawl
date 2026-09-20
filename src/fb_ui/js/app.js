@@ -1541,10 +1541,36 @@ class DashboardApp {
     }
   }
 
-  exportLeads(format) {
-    const url = `${this.baseUrl}/api/v1/export/users?format=${format}&limit=100`;
-    window.open(url, "_blank");
-    this.showToast(`Đang xuất tệp ${format.toUpperCase()}...`);
+  async exportLeads(format) {
+    if (this.exportingLeads || !["csv", "json"].includes(format)) return;
+    this.exportingLeads = true;
+    const buttons = [this.btnExportCsv, this.btnExportJson].filter(Boolean);
+    buttons.forEach(button => { button.disabled = true; });
+    let objectUrl;
+    try {
+      this.showToast("Đang xuất toàn bộ khách hàng theo bộ lọc hiện tại...");
+      const params = new URLSearchParams({ ...this.leadsPagination.filters, format });
+      const response = await fetch(`${this.baseUrl}/api/v1/export/users?${params}`, {
+        headers: { "X-API-Key": this.apiKey }, cache: "no-store",
+      });
+      if (!response.ok) throw new Error(response.status === 401
+        ? "API key không hợp lệ. Vui lòng kiểm tra cấu hình."
+        : "Không thể xuất dữ liệu. Vui lòng thử lại.");
+      objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `users_export.${format}`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      this.showToast(`Đã tạo tệp ${format.toUpperCase()} theo bộ lọc hiện tại.`);
+    } catch (error) {
+      alert(error.message || "Không thể xuất dữ liệu.");
+    } finally {
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      buttons.forEach(button => { button.disabled = false; });
+      this.exportingLeads = false;
+    }
   }
 
   // ==========================================
