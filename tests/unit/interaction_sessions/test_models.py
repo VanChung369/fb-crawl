@@ -92,3 +92,10 @@ def test_filter_validation():
         RowFilters(outcome="invented")
     with pytest.raises(ValidationError):
         SessionFilters(created_from=NOW, created_to=NOW.replace(year=2025))
+
+
+def test_observed_phone_must_be_present_in_comment_text():
+    assert row(text="Call 0981 234 567", observed_phone="0981234567").observed_phone == "0981234567"
+    assert row(text="Call +84 981 234 567", observed_phone="0981234567").observed_phone == "0981234567"
+    with pytest.raises(ValidationError):
+        row(observed_phone="0981234567")

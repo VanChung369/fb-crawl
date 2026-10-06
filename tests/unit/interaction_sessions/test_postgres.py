@@ -85,3 +85,15 @@ def test_stale_resume_cannot_reopen_stopped_session():
     with pytest.raises(SessionError, match="session_revision_conflict"):
         repo.transition(7, uuid4(), "running", 1, NOW)
     assert len(repo.cursor.calls) == 1
+
+
+@pytest.mark.parametrize("changed", [True, False])
+def test_attach_existing_lookup_is_owned_and_idempotent(changed):
+    repo = Repository([{"id": uuid4(), "revision": 4}, {"id": uuid4()} if changed else None])
+    session, person = uuid4(), uuid4()
+    assert repo.attach_result(7, session, person, 71, NOW) == 4 + int(changed)
+    sql, params = repo.cursor.calls[1]
+    assert "e.account_id=%s" in sql and "IS DISTINCT FROM" in sql and "lookup_event_id=e.id" in sql
+    assert "p.lookup_event_id IS NULL OR p.lookup_event_id<=e.id" in sql
+    assert params == (NOW, session, person, 71, 7)
+    assert len(repo.cursor.calls) == 2 + int(changed)

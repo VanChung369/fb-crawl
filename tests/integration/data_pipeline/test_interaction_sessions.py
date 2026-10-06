@@ -113,3 +113,25 @@ def test_concurrent_person_requests_bind_one_event_and_recover_interrupted_attem
     repo.record_result(owner, session.id, person_id, retried.id, "failed", NOW)
     assert repo.get(owner, session.id) is None
     assert contacts.get_lookup_event(owner, retried.id) is not None
+
+
+def test_observed_phone_roundtrips_and_existing_event_can_be_attached_without_lookup(store):
+    repo, owner, other = store
+    session = repo.create(owner, SessionCreate(uuid4(), "https://www.facebook.com/sample.user/posts/123456", "comments"), NOW)
+    observed = row(text="Call 0981 234 567", observed_phone="0981234567")
+    ack = repo.upsert_rows(owner, session.id, (observed,), NOW)
+    stored = repo.list_rows(owner, session.id, RowFilters()).items[0]
+    assert stored.observed_phone == "0981234567"
+    contacts = PostgresContactRepository(URL)
+    requested = FacebookIdentity(uid="100123", username="sample.user")
+    contact = contacts.resolve_identity(requested)
+    # Reuse a result owned by the account from another session; attaching must not create a new event.
+    event, _ = contacts.claim_session_event(owner, None, contact, requested, NOW, LookupScanContext(), ack.accepted[0].person_id,
+                                            False, timedelta(seconds=90))
+    second = repo.create(owner, SessionCreate(uuid4(), session.source_url, "comments"), NOW)
+    person = repo.upsert_rows(owner, second.id, (row(),), NOW).accepted[0].person_id
+    revision = repo.attach_result(owner, second.id, person, event.id, NOW)
+    assert repo.list_rows(owner, second.id, RowFilters()).items[0].lookup_event_id == event.id
+    assert repo.attach_result(owner, second.id, person, event.id, NOW) == revision
+    with pytest.raises(SessionError):
+        repo.attach_result(other, second.id, person, event.id, NOW)

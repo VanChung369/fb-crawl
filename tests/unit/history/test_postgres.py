@@ -71,6 +71,7 @@ def row(account_id: int = 5):
         "comment_author",
         "https://www.facebook.com/groups/123/posts/456",
         UUID("11111111-1111-4111-8111-111111111111"),
+        "", "", "", 1,
     )
 
 
@@ -111,6 +112,31 @@ def test_history_list_binds_account_before_every_filter() -> None:
     assert "events.source_type" in query[0]
     assert "events.source_url" in query[0]
     assert "events.product_crawl_job_id" in query[0]
+
+
+def test_history_count_uses_the_same_latest_person_filters_before_the_cursor() -> None:
+    from fb_crawl.core.jobs import KeysetCursor, encode_cursor
+
+    cursor = Cursor([(*row()[:24], 115)])
+    repository = PostgresHistoryRepository("postgresql://hidden", connect_factory=lambda _url: Connection(cursor))
+    page = repository.list(AccountHistoryQuery(account_id=5, uid="100", only_with_phone=True,
+        cursor=encode_cursor(KeysetCursor(NOW, 71)), limit=10))
+    assert page.total_count == 115
+    assert len(page.items) == 1
+    sql, params = cursor.commands[-1]
+    assert "COUNT(*)" in sql
+    assert "numbers.normalized_phone" in sql
+    assert params[0] == 5
+    assert params[-1] == 11
+
+
+def test_history_empty_page_still_returns_the_filtered_total() -> None:
+    cursor = Cursor([(None,) * 24 + (0,)])
+    repository = PostgresHistoryRepository("postgresql://hidden", connect_factory=lambda _url: Connection(cursor))
+    page = repository.list(AccountHistoryQuery(account_id=5))
+    assert page.total_count == 0
+    assert page.items == ()
+    assert page.next_cursor is None
 
 
 def test_history_list_keeps_only_the_newest_event_for_each_person() -> None:

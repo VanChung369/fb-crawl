@@ -13,8 +13,8 @@ from fb_crawl.contacts.models import (
     LookupSourceType,
 )
 from fb_crawl.core.exceptions import ValidationError
-from fb_crawl.core.jobs import KeysetCursor, Page, decode_cursor, encode_cursor
-from fb_crawl.history.models import AccountHistoryQuery, HistoryItem
+from fb_crawl.core.jobs import KeysetCursor, decode_cursor, encode_cursor
+from fb_crawl.history.models import AccountHistoryQuery, HistoryItem, HistoryPage
 from fb_data_pipeline.repositories.errors import DatabaseError
 
 
@@ -63,14 +63,20 @@ class PostgresHistoryRepository:
         except (psycopg.Error, OSError) as error:
             raise DatabaseError("Database operation failed.") from error
 
-    def list(self, query: AccountHistoryQuery) -> Page[HistoryItem]:
+    def list(self, query: AccountHistoryQuery) -> HistoryPage:
         self._require_query(query)
         where, params = self._filters(
             query,
-            include_cursor=True,
+            include_cursor=False,
             include_account=False,
             latest_only=True,
         )
+        page_where = ""
+        page_params: tuple[object, ...] = ()
+        if query.cursor is not None:
+            position = decode_cursor(query.cursor)
+            page_where = "WHERE (events.created_at, events.id) < (%s, %s)"
+            page_params = (position.sort_at, position.row_id)
         with self._connect() as cursor:
             cursor.execute(
                 f"""
@@ -83,29 +89,45 @@ class PostgresHistoryRepository:
                            ) AS person_rank
                     FROM lookup_events AS events
                     WHERE events.account_id = %s
+                ), matching_events AS (
+                    SELECT events.*
+                    FROM ranked_events AS events
+                    JOIN facebook_users AS users
+                      ON users.id = events.facebook_user_id
+                    LEFT JOIN phone_numbers AS numbers
+                      ON numbers.id = events.revealed_phone_number_id
+                    {where}
+                ), history_count AS (
+                    SELECT COUNT(*) AS total_count FROM matching_events
                 )
-                SELECT {_COLUMNS}
-                FROM ranked_events AS events
-                JOIN facebook_users AS users
+                SELECT {_COLUMNS}, history_count.total_count
+                FROM history_count
+                LEFT JOIN LATERAL (
+                    SELECT * FROM matching_events AS events
+                    {page_where}
+                    ORDER BY events.created_at DESC, events.id DESC
+                    LIMIT %s
+                ) AS events ON TRUE
+                LEFT JOIN facebook_users AS users
                   ON users.id = events.facebook_user_id
                 LEFT JOIN phone_numbers AS numbers
                   ON numbers.id = events.revealed_phone_number_id
                 LEFT JOIN facebook_user_profiles AS profiles
                   ON profiles.facebook_user_id = users.id
-                {where}
                 ORDER BY events.created_at DESC, events.id DESC
-                LIMIT %s
                 """,
-                (query.account_id, *params, query.limit + 1),
+                (query.account_id, *params, *page_params, query.limit + 1),
             )
             rows = cursor.fetchall()
-        items = tuple(self._item(row) for row in rows[: query.limit])
+        total_count = int(rows[0][24]) if rows else 0
+        values = [row for row in rows if row[0] is not None]
+        items = tuple(self._item(row) for row in values[: query.limit])
         next_cursor = (
             encode_cursor(KeysetCursor(items[-1].created_at, items[-1].id))
-            if len(rows) > query.limit
+            if len(values) > query.limit
             else None
         )
-        return Page(items, next_cursor)
+        return HistoryPage(items, next_cursor, total_count)
 
     def get(self, account_id: int, event_id: int) -> HistoryItem | None:
         self._ids(account_id, event_id)
@@ -161,7 +183,7 @@ class PostgresHistoryRepository:
         if any((query.name, query.uid, query.username)):
             using.append("facebook_users AS users")
             join_clauses.append("users.id = events.facebook_user_id")
-        if query.phone is not None:
+        if query.phone is not None or query.only_with_phone:
             using.append("phone_numbers AS numbers")
             join_clauses.append(
                 "numbers.id = events.revealed_phone_number_id"
@@ -220,6 +242,8 @@ class PostgresHistoryRepository:
         if query.phone is not None:
             clauses.append("numbers.normalized_phone = %s")
             params.append(query.phone)
+        if query.only_with_phone:
+            clauses.append("NULLIF(TRIM(numbers.normalized_phone), '') IS NOT NULL")
         if query.created_from is not None:
             clauses.append("events.created_at >= %s")
             params.append(query.created_from)

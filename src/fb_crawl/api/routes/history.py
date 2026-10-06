@@ -57,6 +57,7 @@ def create_history_router(
         created_to: datetime | None = None,
         cursor: str | None = Query(default=None, max_length=1024),
         limit: int = Query(default=20, ge=1, le=100),
+        only_with_phone: bool = False,
         current: CurrentAccount = Depends(require_bearer_account),
     ):
         if not current.device_allowed:
@@ -73,11 +74,13 @@ def create_history_router(
                 created_to=created_to,
                 cursor=cursor,
                 limit=limit,
+                only_with_phone=only_with_phone,
             )
         )
         return HistoryPageResponse(
             items=[history_item_response(value) for value in page.items],
             next_cursor=page.next_cursor,
+            total_count=page.total_count,
         )
 
     @router.get(

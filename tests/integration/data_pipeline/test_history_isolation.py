@@ -119,8 +119,11 @@ def test_history_is_tenant_private_and_deletion_preserves_quota() -> None:
             )
 
     repository = PostgresHistoryRepository(TEST_DATABASE_URL)
-    assert len(repository.list(AccountHistoryQuery(account_ids[0])).items) == 1
-    assert repository.list(AccountHistoryQuery(account_ids[1])).items == ()
+    page = repository.list(AccountHistoryQuery(account_ids[0], only_with_phone=True))
+    assert len(page.items) == page.total_count == 1
+    empty = repository.list(AccountHistoryQuery(account_ids[1]))
+    assert empty.items == ()
+    assert empty.total_count == 0
     assert repository.delete_one(account_ids[1], event_id) is False
     assert repository.delete_one(account_ids[0], event_id) is True
 

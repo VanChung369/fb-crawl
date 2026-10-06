@@ -1,4 +1,4 @@
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from fb_crawl.core.jobs import Page
 from fb_crawl.history.service import HistoryService
@@ -21,7 +21,29 @@ class InteractionSessionService:
         return result
 
     def upsert_rows(self, account_id, session_id, rows, now):
-        return self.repository.upsert_rows(account_id, session_id, rows, now)
+        events = {}
+        for row in rows:
+            if row.lookup_event_id is None:
+                continue
+            # Associate an existing owned result. Saving never invokes a provider or reserves quota.
+            event = self.history.repository.get(account_id, row.lookup_event_id)
+            identity = row.identity
+            matches = event is not None and event.account_id == account_id and (
+                (bool(identity.facebook_uid) and identity.facebook_uid == event.facebook_uid) or
+                (not identity.facebook_uid and bool(identity.username) and identity.username == event.username.lower())
+            )
+            if not matches:
+                raise SessionError("session_lookup_event_conflict", 422)
+            events[row.client_row_id] = event
+        ack = self.repository.upsert_rows(account_id, session_id, rows, now)
+        revision = ack.revision
+        attached = set()
+        for accepted in ack.accepted:
+            event = events.get(accepted.client_row_id)
+            if event is not None and (accepted.person_id, event.id) not in attached:
+                attached.add((accepted.person_id, event.id))
+                revision = max(revision, self.repository.attach_result(account_id, session_id, accepted.person_id, event.id, now))
+        return replace(ack, revision=revision)
 
     def transition(self, account_id, session_id, status, revision, now):
         return self.repository.transition(account_id, session_id, status, revision, now)
@@ -32,13 +54,18 @@ class InteractionSessionService:
     def list_sessions(self, account_id, filters, cursor, limit):
         return self.repository.list_sessions(account_id, filters, cursor, limit)
 
-    def list_rows(self, account_id, session_id, filters, cursor, limit):
+    def list_rows(self, account_id, session_id, filters, cursor, limit, include_contact=True):
         page = self.repository.list_rows(account_id, session_id, filters, cursor, limit)
         contacts = {}
         result = []
         for row in page.items:
             value = asdict(row)
             event_id = value.pop("lookup_event_id")
+            if not include_contact:
+                value["lookup_event_id"] = event_id
+                value["contact"] = None
+                result.append(value)
+                continue
             if event_id is not None and event_id not in contacts:
                 item = self.history.get(account_id, event_id)
                 contacts[event_id] = self._contact(account_id, item) if item else None

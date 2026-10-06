@@ -115,6 +115,19 @@ def test_history_get_and_delete_hide_foreign_or_missing_event() -> None:
     assert fetched.status_code == deleted.status_code == 404
 
 
+def test_history_list_returns_total_and_passes_phone_filter_to_repository() -> None:
+    from fb_crawl.history.models import HistoryPage
+
+    history = HistoryRepositoryFake()
+    history.list = lambda query: (history.queries.append(query) or HistoryPage((history.item,), "next-token", 115))
+    client, _repository, _auth, access = product_client(history_repository=history, quota_service=QuotaFake())
+    response = client.get("/api/v1/history/lookups?only_with_phone=true&limit=10", headers=headers(access))
+    assert response.status_code == 200
+    assert response.json()["total_count"] == 115
+    assert history.queries[0].only_with_phone is True
+    assert history.queries[0].limit == 10
+
+
 def test_filtered_history_delete_requires_explicit_confirmation() -> None:
     history = HistoryRepositoryFake()
     client, _repository, _auth, access = product_client(

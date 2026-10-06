@@ -70,7 +70,7 @@ def _summary(row) -> SessionSummary:
 def _input(row) -> SessionRowInput:
     return SessionRowInput(**{key: row[key] for key in (
         "client_row_id", "row_revision", "interaction_id", "synthetic", "parent_id", "kind", "text", "observed_at"
-    )}, identity=SessionIdentity(**row["identity"]))
+    )}, identity=SessionIdentity(**row["identity"]), observed_phone=row.get("observed_phone", ""))
 
 
 class PostgresInteractionSessionRepository:
@@ -147,12 +147,12 @@ class PostgresInteractionSessionRepository:
                 if known.username and item.identity.username and known.username != item.identity.username:
                     raise SessionError("session_identity_conflict")
                 cursor.execute("""INSERT INTO session_interactions
-                    (session_id,client_row_id,row_revision,interaction_id,synthetic,parent_id,kind,person_id,identity,text,observed_at,ingested_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (session_id,client_row_id,row_revision,interaction_id,synthetic,parent_id,kind,person_id,identity,text,observed_at,ingested_at,observed_phone)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (session_id,client_row_id) DO UPDATE SET row_revision=EXCLUDED.row_revision,
-                    text=EXCLUDED.text, observed_at=EXCLUDED.observed_at""",
+                    text=EXCLUDED.text, observed_at=EXCLUDED.observed_at, observed_phone=EXCLUDED.observed_phone""",
                     (session_id,item.client_row_id,item.row_revision,item.interaction_id,item.synthetic,item.parent_id,item.kind,
-                     person["id"],Jsonb(asdict(item.identity)),item.text,item.observed_at,now))
+                     person["id"],Jsonb(asdict(item.identity)),item.text,item.observed_at,now,item.observed_phone))
             if changed:
                 cursor.execute("UPDATE interaction_sessions SET revision=revision+1, updated_at=%s WHERE id=%s", (now, session_id))
             cursor.execute("SELECT client_row_id,row_revision,person_id FROM session_interactions WHERE session_id=%s AND client_row_id=ANY(%s)", (session_id, [r.client_row_id for r in rows]))
@@ -190,6 +190,20 @@ class PostgresInteractionSessionRepository:
             if row is None:
                 raise SessionError("interaction_session_not_found", 404)
             return SessionIdentity(**row["identity"])
+
+    def attach_result(self, account_id, session_id, person_id, event_id, now):
+        require_time(now)
+        with self._connect() as cursor:
+            session = self._lock(cursor, account_id, session_id)
+            cursor.execute("""UPDATE session_people p SET lookup_event_id=e.id,lookup_state=e.outcome,updated_at=%s
+                FROM lookup_events e WHERE p.session_id=%s AND p.id=%s AND e.id=%s AND e.account_id=%s
+                AND (p.lookup_event_id IS NULL OR p.lookup_event_id<=e.id)
+                AND (p.lookup_event_id IS DISTINCT FROM e.id OR p.lookup_state IS DISTINCT FROM e.outcome)
+                RETURNING p.id""", (now, session_id, person_id, event_id, account_id))
+            changed = cursor.fetchone() is not None
+            if changed:
+                cursor.execute("UPDATE interaction_sessions SET revision=revision+1,updated_at=%s WHERE id=%s", (now, session_id))
+            return session["revision"] + int(changed)
 
     def record_result(self, account_id, session_id, person_id, event_id, state, now):
         with self._connect() as cursor:
@@ -254,7 +268,7 @@ class PostgresInteractionSessionRepository:
                 LEFT JOIN lookup_events e ON e.id=p.lookup_event_id AND e.account_id=%s WHERE """ +
                 " AND ".join(where) + " ORDER BY i.ingested_at DESC,i.client_row_id DESC LIMIT %s", (account_id, *params, limit + 1))
             rows = db.fetchall()
-        items = tuple(SessionRow(**{**asdict(_input(r)), "identity": SessionIdentity(**r["identity"])},
-                                 person_id=r["person_id"], lookup_event_id=r["lookup_event_id"]) for r in rows[:limit])
+        items = tuple(SessionRow(**{**asdict(_input(r)), "identity": SessionIdentity(**r["identity"]), "lookup_event_id": r["lookup_event_id"]},
+                                 person_id=r["person_id"]) for r in rows[:limit])
         token = encode_page_cursor(rows[limit-1]["ingested_at"], items[-1].client_row_id, scope, filters) if len(rows) > limit else None
         return Page(items, token)

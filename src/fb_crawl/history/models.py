@@ -11,7 +11,7 @@ from fb_crawl.contacts.models import (
     LookupSourceType,
 )
 from fb_crawl.core.exceptions import ValidationError
-from fb_crawl.core.jobs import decode_cursor
+from fb_crawl.core.jobs import Page, decode_cursor
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
 
 
@@ -28,8 +28,11 @@ class AccountHistoryQuery:
     created_to: datetime | None = None
     cursor: str | None = None
     limit: int = 20
+    only_with_phone: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.only_with_phone, bool):
+            raise ValidationError("Invalid history phone availability filter.")
         if (
             isinstance(self.account_id, bool)
             or not isinstance(self.account_id, int)
@@ -116,3 +119,10 @@ class HistoryItem:
             )
         except ValueError as error:
             raise ValidationError("Invalid history scan context.") from error
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryPage(Page[HistoryItem]):
+    """Count of matching latest-per-person history before the page cursor."""
+
+    total_count: int | None = None

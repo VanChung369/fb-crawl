@@ -4,7 +4,7 @@ import base64
 import binascii
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from hashlib import sha256
 from urllib.parse import parse_qs, urlparse
@@ -153,6 +153,8 @@ class SessionRowInput:
     identity: SessionIdentity
     text: str
     observed_at: datetime
+    observed_phone: str = field(default="", kw_only=True)
+    lookup_event_id: int | None = field(default=None, kw_only=True, compare=False)
 
     def __post_init__(self):
         require_uuid(self.client_row_id)
@@ -164,6 +166,15 @@ class SessionRowInput:
         require_text(self.parent_id, 512)
         require_text(self.text, 10000)
         require_time(self.observed_at)
+        require_text(self.observed_phone, 32)
+        if self.observed_phone:
+            # Publicly observed numbers must actually occur in the submitted text.
+            normalized = lambda value: re.sub(r"[.\s-]", "", value).removeprefix("+")
+            phone = normalized(self.observed_phone)
+            if not re.fullmatch(r"[0-9]{9,15}", phone) or not any(value in normalized(self.text) for value in (phone, "84" + phone[1:] if phone.startswith("0") else phone)):
+                raise ValidationError("Observed phone must be present in the comment text.")
+        if self.lookup_event_id is not None and (type(self.lookup_event_id) is not int or self.lookup_event_id <= 0):
+            raise ValidationError("Invalid lookup event identifier.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +215,6 @@ class BatchAck:
 @dataclass(frozen=True, slots=True)
 class SessionRow(SessionRowInput):
     person_id: UUID
-    lookup_event_id: int | None = None
     contact: object | None = None
 
 

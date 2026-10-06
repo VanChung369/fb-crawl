@@ -61,6 +61,10 @@ Artifacts are written below `LEAD_FINDER_EXPORT_DIR` (default
 
 ### Lead Finder account setup
 
+Scan history auto-save requires migration `019_session_observed_phone` and an API restart.
+Apply packaged migrations with `.\.venv\Scripts\python.exe -m fb_crawl pipeline migrate`.
+Saving attaches existing owned phone lookup events and preserves phone numbers observed in comments; it never starts a phone lookup.
+
 Profile friend collection requires migration `015_friend_sessions` and an API restart.
 
 Group member collection requires migration `017_member_sessions` and an API restart.
@@ -83,6 +87,11 @@ server export jobs or require the export worker. Existing server export APIs rem
 available for older clients. Save edited notes before exporting; unsaved drafts are
 not included. If another device edits the same lead, refresh notes and explicitly
 choose the saved version before retrying a conflicting change.
+
+Lookup history pages now include `total_count`, counted after latest-per-person
+and search filters, before the cursor. `only_with_phone=true` filters recorded
+phones in the database; phone reveal authorization still applies to returned rows.
+Restart the API and reload the extension to enable on-demand history pagination.
 
 Production product routes require independent JWT, token-HMAC, and license-HMAC
 secrets, an HTTPS `LEAD_FINDER_PUBLIC_BASE_URL`, SMTP settings, and

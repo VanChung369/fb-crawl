@@ -521,6 +521,7 @@ class HistoryPageResponse(BaseModel):
 
     items: list[HistoryItemResponse]
     next_cursor: str | None
+    total_count: int | None = Field(default=None, ge=0)
 
 
 class HistoryDeleteRequest(BaseModel):

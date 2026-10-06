@@ -4,9 +4,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Callable
 
-from fb_crawl.core.jobs import Page
 from fb_crawl.entitlements.quota import ContactQuotaService
-from fb_crawl.history.models import AccountHistoryQuery, HistoryItem
+from fb_crawl.history.models import AccountHistoryQuery, HistoryItem, HistoryPage
 from fb_crawl.history.repository import HistoryRepository
 from fb_data_pipeline.repositories.errors import DatabaseError
 
@@ -23,15 +22,16 @@ class HistoryService:
         self.quota = quota
         self.clock = clock
 
-    def list(self, query: AccountHistoryQuery) -> Page[HistoryItem]:
+    def list(self, query: AccountHistoryQuery) -> HistoryPage:
         page = self.repository.list(query)
         now = self.clock()
-        return Page(
+        return HistoryPage(
             tuple(
                 self._authorize_phone(query.account_id, item, now)
                 for item in page.items
             ),
             page.next_cursor,
+            getattr(page, "total_count", None),
         )
 
     def get(self, account_id: int, event_id: int) -> HistoryItem | None:

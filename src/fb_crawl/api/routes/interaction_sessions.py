@@ -42,6 +42,8 @@ class RowPayload(StrictPayload):
     identity: IdentityPayload
     text: str = Field(max_length=10000)
     observed_at: datetime
+    observed_phone: str = Field(default="", max_length=32)
+    lookup_event_id: int | None = Field(default=None, strict=True, gt=0)
 
     def to_domain(self):
         return SessionRowInput(**{**self.model_dump(), "identity": SessionIdentity(**self.identity.model_dump())})
@@ -111,8 +113,8 @@ def create_interaction_sessions_router(service, current_account_dependency, *, l
     @router.get("/{session_id}/interactions")
     def rows(session_id: UUID, author: str | None = Query(None, max_length=512), text: str | None = Query(None, max_length=512),
              kind: str | None = None, outcome: str | None = None, cursor: str | None = Query(None, max_length=1024),
-             limit: int = Query(100, ge=1, le=100), current=Depends(account)):
-        return service.list_rows(current.account.id, session_id, RowFilters(author, text, kind, outcome), cursor, limit)
+             limit: int = Query(100, ge=1, le=100), include_contact: bool = True, current=Depends(account)):
+        return service.list_rows(current.account.id, session_id, RowFilters(author, text, kind, outcome), cursor, limit, include_contact)
 
     @router.post("/{session_id}/people/{person_id}/lookup")
     def lookup(session_id: UUID, person_id: UUID, payload: LookupPayload, request: Request, current=Depends(account)):
