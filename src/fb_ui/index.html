@@ -1297,6 +1297,32 @@
           </div>
 
           <div id="product-admin-workspace" hidden>
+            <section class="panel maintenance-panel" aria-labelledby="maintenance-title">
+              <div class="panel-header">
+                <div><h4 id="maintenance-title">Bảo trì hệ thống</h4><p class="admin-section-copy">Tạm dừng quét mới, tiếp tục quét và tra số. Khách hàng vẫn xem và xuất được dữ liệu đã thu thập.</p></div>
+                <span class="pill info" id="maintenance-state">Đang tải…</span>
+              </div>
+              <form id="form-maintenance" class="maintenance-form">
+                <label class="maintenance-toggle"><input id="maintenance-enabled" type="checkbox"> Bật chế độ bảo trì</label>
+                <div class="form-group">
+                  <label for="maintenance-preset">Thông báo mẫu</label>
+                  <select id="maintenance-preset" class="form-control">
+                    <option value="general">Hệ thống đang bảo trì</option>
+                    <option value="upgrade">Đang nâng cấp hệ thống</option>
+                    <option value="phone">Dịch vụ tra số đang bảo trì</option>
+                    <option value="incident">Đang khắc phục sự cố</option>
+                    <option value="custom">Nội dung tùy chỉnh</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="maintenance-message">Nội dung hiển thị cho khách hàng</label>
+                  <textarea id="maintenance-message" class="form-control" rows="3" maxlength="1000" required></textarea>
+                </div>
+                <div class="maintenance-preview" role="status"><strong>Xem trước thông báo</strong><p id="maintenance-preview-message"></p></div>
+                <p id="maintenance-error" role="alert" hidden></p>
+                <button id="btn-save-maintenance" class="btn btn-primary" type="submit" disabled>Lưu chế độ bảo trì</button>
+              </form>
+            </section>
             <div class="admin-grid">
               <div class="panel admin-license-builder">
                 <div class="panel-header admin-panel-header">

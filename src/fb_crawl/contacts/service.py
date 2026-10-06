@@ -26,6 +26,7 @@ from fb_data_pipeline.core.models import (
     UserBundle,
 )
 from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
+from fb_crawl.maintenance import MaintenanceError, MaintenanceStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,8 +121,10 @@ class ContactLookupService:
         manual_refresh_interval: timedelta = timedelta(hours=24),
         found_ttl: timedelta = timedelta(days=30),
         clock: Callable[[], datetime] | None = None,
+        maintenance_store: MaintenanceStore | None = None,
     ) -> None:
         self.entitlements = entitlements
+        self.maintenance_store = maintenance_store
         self.quota = quota
         self.contacts = contacts
         self.pipeline = pipeline
@@ -364,6 +367,10 @@ class ContactLookupService:
         session_person_id: UUID | None = None,
         retry_failed: bool = False,
     ) -> ContactLookupResult:
+        if self.maintenance_store is not None:
+            maintenance = self.maintenance_store.read()
+            if maintenance.enabled:
+                raise MaintenanceError(maintenance.message)
         self._require_access(account, device)
         self.entitlements.for_account(account.id, now)
         requested = request.identity

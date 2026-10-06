@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError as PayloadError
 from starlette.concurrency import run_in_threadpool
@@ -103,7 +104,11 @@ def create_interaction_sessions_router(service, current_account_dependency, *, l
         return await run_in_threadpool(service.upsert_rows, current.account.id, session_id, rows, clock())
 
     @router.patch("/{session_id}")
-    def transition(session_id: UUID, payload: TransitionPayload, current=Depends(account)):
+    def transition(session_id: UUID, payload: TransitionPayload, request: Request, current=Depends(account)):
+        if payload.status == "running":
+            maintenance = request.app.state.maintenance_store.read()
+            if maintenance.enabled:
+                return JSONResponse(status_code=503, content={"code": "maintenance", "message": maintenance.message})
         return service.transition(current.account.id, session_id, payload.status, payload.revision, clock())
 
     @router.delete("/{session_id}", status_code=204)

@@ -34,6 +34,9 @@ from fb_crawl.core.proxy_pool import ProxyPool
 from fb_crawl.core.exceptions import FbCrawlError, ValidationError
 from fb_crawl.api.safe_logging import log_unexpected_api_error
 from fb_crawl.api.correlation import correlate_request
+from fb_crawl.maintenance import MaintenanceError, MaintenanceStore, blocks_new_work
+from fb_crawl.api.routes.maintenance import create_maintenance_router
+from starlette.concurrency import run_in_threadpool
 from fb_crawl.core.jobs import IdempotencyConflict, JobConflict, JobNotFound
 from pathlib import Path
 from fb_crawl.composition.product import ProductServices
@@ -84,8 +87,22 @@ def create_app(
     app.state.proxy_pool = resolved_proxy_pool
     app.state.session_pool = resolved_session_pool
     app.state.product_services = product_services
+    app.state.maintenance_store = MaintenanceStore()
+
+    @app.middleware("http")
+    async def enforce_maintenance(request: Request, call_next):
+        if blocks_new_work(request.method, request.url.path):
+            maintenance = await run_in_threadpool(app.state.maintenance_store.read)
+            if maintenance.enabled:
+                return JSONResponse(status_code=503, content={"code": "maintenance", "message": maintenance.message},
+                                    headers={"Retry-After": "30", "Cache-Control": "no-store"})
+        return await call_next(request)
 
     _install_exception_handlers(app)
+    @app.exception_handler(MaintenanceError)
+    async def maintenance_error(_request: Request, error: MaintenanceError):
+        return JSONResponse(status_code=503, content={"code": "maintenance", "message": str(error)},
+                            headers={"Retry-After": "30", "Cache-Control": "no-store"})
     from fb_crawl.api.routes.auth_page import create_auth_page_router
     from fb_crawl.api.routes.version import create_app_version_router
 
@@ -133,6 +150,7 @@ def create_app(
             entitlement_service=product_services.entitlement_service,
             clock=clock,
         )
+        app.include_router(create_maintenance_router(product_auth))
         if product_services.interaction_session_service is not None:
             from fb_crawl.api.routes.interaction_sessions import create_interaction_sessions_router
             app.include_router(create_interaction_sessions_router(
@@ -275,6 +293,9 @@ def create_app(
                     clock=clock,
                 )
             )
+
+    if product_services is None:
+        app.include_router(create_maintenance_router())
 
     _install_api_authentication(app, auth)
     app.middleware("http")(correlate_request)

@@ -3,6 +3,18 @@
    Aesthetic: Deep Slate / Neon Indigo & Emerald Accent / Glassmorphism
    ========================================================================== */
 
+.maintenance-panel { margin-bottom: 24px; }
+.maintenance-panel .panel-header { gap: 16px; align-items: flex-start; }
+.maintenance-panel h4 { margin: 0 0 6px; }
+.maintenance-form { padding: 20px; display: grid; gap: 16px; }
+.maintenance-form .form-group { margin: 0; }
+.maintenance-toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.maintenance-toggle input { width: 18px; height: 18px; accent-color: var(--accent-primary); }
+.maintenance-preview { padding: 14px; background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.35); border-radius: 10px; }
+.maintenance-preview p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#maintenance-error { color: var(--danger); margin: 0; }
+.maintenance-form > button { justify-self: start; }
+
 :root {
   /* Color Palette */
   --bg-base: #0a0d14;

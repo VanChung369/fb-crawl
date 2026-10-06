@@ -11,6 +11,7 @@ from fb_crawl.contacts.models import (
     LookupSourceType,
 )
 from fb_crawl.contacts.service import ContactLookupRequest
+from fb_crawl.maintenance import MaintenanceError
 from fb_crawl.core.models import AuthenticatedAction, UserRecord
 
 
@@ -55,24 +56,27 @@ class ProductJobResultSink:
             if not uid and not username or key in seen:
                 continue
             seen.add(key)
-            result = self.contacts.lookup(
-                account,
-                device,
-                ContactLookupRequest(
-                    facebook_uid=uid,
-                    username=username,
-                    name=record.name or "",
-                    profile_url=record.profile_url,
-                ),
-                now,
-                force_refresh=False,
-                scan_context=LookupScanContext(
-                    mode="automatic",
-                    source_type=source_type,
-                    source_url=record.source_url,
-                    product_crawl_job_id=owner.product_job_id,
-                ),
-            )
+            try:
+                result = self.contacts.lookup(
+                    account,
+                    device,
+                    ContactLookupRequest(
+                        facebook_uid=uid,
+                        username=username,
+                        name=record.name or "",
+                        profile_url=record.profile_url,
+                    ),
+                    now,
+                    force_refresh=False,
+                    scan_context=LookupScanContext(
+                        mode="automatic",
+                        source_type=source_type,
+                        source_url=record.source_url,
+                        product_crawl_job_id=owner.product_job_id,
+                    ),
+                )
+            except MaintenanceError:
+                break
             processed += 1
             found += result.state is LookupOutcome.FOUND
             not_found += result.state is LookupOutcome.NOT_FOUND

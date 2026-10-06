@@ -28,6 +28,30 @@ class DashboardApp {
   }
 
   initElements() {
+    this.maintenanceDirty = false;
+    this.maintenanceRevision = 0;
+    this.maintenancePresets = {
+      general: "Hệ thống đang bảo trì. Vui lòng thử lại sau. Bạn vẫn có thể xem và xuất dữ liệu đã thu thập.",
+      upgrade: "Hệ thống đang được nâng cấp để hoạt động ổn định hơn. Tính năng quét và tra số sẽ sớm trở lại.",
+      phone: "Dịch vụ tra số điện thoại đang bảo trì. Quét mới và tra số tạm dừng; dữ liệu đã thu thập vẫn được giữ nguyên.",
+      incident: "Hệ thống đang khắc phục sự cố. Vui lòng quay lại sau. Bạn vẫn có thể xem và xuất dữ liệu đã thu thập.",
+    };
+    document.getElementById("form-maintenance")?.addEventListener("submit", event => {
+      event.preventDefault();
+      void this.saveMaintenance();
+    });
+    document.getElementById("maintenance-preset")?.addEventListener("change", event => {
+      this.maintenanceDirty = true;
+      const message = this.maintenancePresets[event.target.value];
+      if (message) document.getElementById("maintenance-message").value = message;
+      this.previewMaintenance();
+    });
+    document.getElementById("maintenance-message")?.addEventListener("input", () => {
+      this.maintenanceDirty = true;
+      document.getElementById("maintenance-preset").value = "custom";
+      this.previewMaintenance();
+    });
+    document.getElementById("maintenance-enabled")?.addEventListener("change", () => {this.maintenanceDirty = true;});
     // Topbar
     this.statusIndicator = document.getElementById("status-indicator");
     this.statusText = document.getElementById("status-text");
@@ -2669,10 +2693,70 @@ class DashboardApp {
     this.setProductAdminAuthState();
     if (this.productAccount?.role !== "admin") return;
     await Promise.all([
+      this.loadMaintenance(),
       this.loadAdminLicenses(true),
       this.loadAdminAccounts(true),
       this.loadAdminAuditEvents(true),
     ]);
+  }
+
+  previewMaintenance() {
+    document.getElementById("maintenance-preview-message").textContent = document.getElementById("maintenance-message").value;
+  }
+
+  renderMaintenance(value, preserveDraft = false) {
+    if (!preserveDraft) {
+      document.getElementById("maintenance-enabled").checked = value.enabled;
+      document.getElementById("maintenance-message").value = value.message;
+      document.getElementById("maintenance-preset").value = Object.keys(this.maintenancePresets).find(key => this.maintenancePresets[key] === value.message) || "custom";
+    }
+    const status = document.getElementById("maintenance-state");
+    status.textContent = value.enabled ? "Đang bảo trì" : "Hoạt động bình thường";
+    status.className = `pill ${value.enabled ? "warning" : "success"}`;
+    this.previewMaintenance();
+  }
+
+  async loadMaintenance() {
+    const revision = this.maintenanceRevision;
+    const error = document.getElementById("maintenance-error");
+    const button = document.getElementById("btn-save-maintenance");
+    try {
+      const value = await this.fetchProductApi("/api/v1/app/maintenance");
+      if (revision !== this.maintenanceRevision) return;
+      this.renderMaintenance(value, this.maintenanceDirty);
+      error.hidden = true;
+      button.disabled = false;
+    } catch (reason) {
+      error.textContent = reason.message || "Không thể tải trạng thái bảo trì.";
+      error.hidden = false;
+    }
+  }
+
+  async saveMaintenance() {
+    const button = document.getElementById("btn-save-maintenance");
+    if (button.disabled) return;
+    this.maintenanceRevision++;
+    const error = document.getElementById("maintenance-error");
+    button.disabled = true;
+    button.textContent = "Đang lưu…";
+    error.hidden = true;
+    try {
+      const value = await this.fetchProductApi("/api/v1/admin/maintenance", {
+        method: "POST", body: JSON.stringify({
+          enabled: document.getElementById("maintenance-enabled").checked,
+          message: document.getElementById("maintenance-message").value.trim(),
+        }),
+      });
+      this.renderMaintenance(value);
+      this.maintenanceDirty = false;
+      this.showToast(value.enabled ? "Đã bật chế độ bảo trì." : "Đã tắt chế độ bảo trì.", "success");
+    } catch (reason) {
+      error.textContent = reason.message || "Không thể lưu chế độ bảo trì.";
+      error.hidden = false;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Lưu chế độ bảo trì";
+    }
   }
 
   applyLicenseDurationPreset() {

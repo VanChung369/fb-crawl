@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from fb_crawl.accounts.postgres import PostgresAccountRepository
+from fb_crawl.maintenance import MaintenanceStore
 from fb_crawl.accounts.repository import AccountRepository
 from fb_crawl.auth.config import AuthSettings
 from fb_crawl.auth.email import SmtpEmailDelivery
@@ -186,6 +187,7 @@ def compose_product_services(
                 statement_timeout_seconds=statement_timeout_seconds,
             ),
             EnrichmentPipeline(provider),
+            maintenance_store=MaintenanceStore(),
         )
     export_repository = PostgresExportRepository(
         database_url,
