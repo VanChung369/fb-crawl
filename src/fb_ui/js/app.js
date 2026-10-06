@@ -1510,7 +1510,7 @@ class DashboardApp {
     if (!confirm("Xóa vĩnh viễn TẤT CẢ khách hàng không có số điện thoại trong cơ sở dữ liệu, cùng hồ sơ, lịch sử tra cứu, ghi chú và dữ liệu quét liên quan? Thao tác áp dụng toàn bộ dữ liệu, không chỉ trang hoặc bộ lọc hiện tại, và không thể hoàn tác.")) return;
     if (button) button.disabled = true;
     try {
-      const result = await this.fetchApi("/api/v1/users/without-phone?confirm=true", { method: "DELETE" });
+      const result = await this.fetchApi("/api/v1/users/without-phone?confirm=true", { method: "DELETE", throwOnError: true });
       if (!result) {
         alert("Không thể xóa dữ liệu. Vui lòng thử lại hoặc kiểm tra log API.");
         return;
@@ -1520,6 +1520,8 @@ class DashboardApp {
       this.leadsPagination.cursorHistory = [null];
       this.leadsPagination.nextCursor = null;
       await this.loadLeadsData();
+    } catch (error) {
+      alert(error.message || "Không thể xóa dữ liệu. Vui lòng kiểm tra log API.");
     } finally {
       if (button) button.disabled = false;
     }

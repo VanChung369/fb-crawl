@@ -53,6 +53,42 @@ def test_bulk_delete_requires_auth_and_confirmation() -> None:
     assert response.json() == {"status": "success", "deleted_count": 12}
     assert repository.calls == [("bulk_delete", None)]
 
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI unavailable")
+@pytest.mark.parametrize("error_class,code,status", [
+    ("QueryCanceled", "database_timeout", 503),
+    ("LockNotAvailable", "database_busy", 503),
+    ("DeadlockDetected", "database_busy", 503),
+    ("UndefinedTable", "database_schema_outdated", 503),
+    ("UndefinedColumn", "database_schema_outdated", 503),
+    ("ForeignKeyViolation", "database_delete_conflict", 409),
+    ("OperationalError", "database_error", 500),
+])
+def test_bulk_delete_reports_safe_database_failure(error_class, code, status, caplog) -> None:
+    import logging
+    import psycopg
+    from fb_data_pipeline.repositories.errors import DatabaseError
+
+    class Repository(RecordingUserRepository):
+        def delete_users_without_phone(self):
+            try:
+                raise getattr(psycopg.errors, error_class)("dsn=postgresql://user:private@host/db customer-private-data")
+            except psycopg.Error as cause:
+                raise DatabaseError("Database operation failed.") from cause
+
+    with caplog.at_level(logging.WARNING):
+        response = _client(Repository(_user())).delete("/api/v1/users/without-phone?confirm=true", headers=_headers())
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    if code != "database_error":
+        assert "No data was deleted" in response.json()["message"]
+    assert "private" not in response.text
+    records = [record for record in caplog.records if "Bulk user deletion failed" in record.getMessage()]
+    assert len(records) == 1
+    assert (getattr(getattr(psycopg.errors, error_class), "sqlstate") or "unknown") in records[0].getMessage()
+    assert "private" not in records[0].getMessage()
+    assert records[0].exc_info is None
+
 if FASTAPI_AVAILABLE:
     from fastapi.testclient import TestClient
 

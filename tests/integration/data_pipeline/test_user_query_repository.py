@@ -201,6 +201,8 @@ def test_bulk_delete_preserves_both_phone_origins_and_cascades_related_data() ->
     seed_evidence(ids[2], phone="+84902222222", origin="fb_crawl", captured_at=now)
     seed_attempt(ids[0], checked_at=now, status="not_found")
     session_id, person_id, lead_id = uuid4(), uuid4(), uuid4()
+    username_person, event_person, protected_person = uuid4(), uuid4(), uuid4()
+    username_lead, protected_lead = uuid4(), uuid4()
     email = f"{uuid4()}@example.test"
     with psycopg.connect(TEST_DATABASE_URL) as connection:
         with connection.cursor() as cursor:
@@ -220,6 +222,19 @@ def test_bulk_delete_preserves_both_phone_origins_and_cascades_related_data() ->
                 (id, session_id, identity_key, identity, lookup_event_id, created_at, updated_at)
                 VALUES (%s, %s, 'uid:100001', %s, %s, %s, %s)""",
                 (person_id, session_id, Jsonb({"facebook_uid": "100001"}), event_id, now, now))
+            for person, identity, lookup in (
+                (username_person, {"username": "Bulk.User0"}, None),
+                (event_person, {"facebook_uid": "another.uid"}, event_id),
+                (protected_person, {"facebook_uid": "100002", "username": "bulk.user0"}, None),
+            ):
+                cursor.execute("""INSERT INTO session_people
+                    (id, session_id, identity_key, identity, lookup_event_id, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (person, session_id, str(person), Jsonb(identity), lookup, now, now))
+            cursor.execute("""INSERT INTO account_leads (id, account_id, username)
+                VALUES (%s, %s, 'Bulk.User0')""", (username_lead, account_id))
+            cursor.execute("""INSERT INTO account_leads (id, account_id, facebook_uid, username)
+                VALUES (%s, %s, '100002', 'bulk.user0')""", (protected_lead, account_id))
     try:
         repository = UserQueryRepository(TEST_DATABASE_URL)
         assert repository.delete_users_without_phone() == 1
@@ -236,6 +251,15 @@ def test_bulk_delete_preserves_both_phone_origins_and_cascades_related_data() ->
                 assert cursor.fetchone()[0] == 0
                 cursor.execute("SELECT count(*) FROM account_leads WHERE id = %s", (lead_id,))
                 assert cursor.fetchone()[0] == 0
+                for deleted_person in (username_person, event_person):
+                    cursor.execute("SELECT count(*) FROM session_people WHERE id = %s", (deleted_person,))
+                    assert cursor.fetchone()[0] == 0
+                cursor.execute("SELECT count(*) FROM account_leads WHERE id = %s", (username_lead,))
+                assert cursor.fetchone()[0] == 0
+                cursor.execute("SELECT count(*) FROM session_people WHERE id = %s", (protected_person,))
+                assert cursor.fetchone()[0] == 1
+                cursor.execute("SELECT count(*) FROM account_leads WHERE id = %s", (protected_lead,))
+                assert cursor.fetchone()[0] == 1
     finally:
         with psycopg.connect(TEST_DATABASE_URL) as connection:
             connection.execute("DELETE FROM accounts WHERE id = %s", (account_id,))

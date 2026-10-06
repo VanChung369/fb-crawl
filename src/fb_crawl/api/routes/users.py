@@ -1,9 +1,12 @@
 """Bounded persisted-user query routes and transport-independent input helpers."""
 
+import logging
+import re
 from typing import TYPE_CHECKING
 
 from fb_crawl.core.exceptions import ValidationError
 from fb_crawl.core.jobs import Page
+from fb_data_pipeline.repositories.errors import DatabaseError
 from fb_data_pipeline.repositories.users import (
     EnrichmentAttemptView,
     PhoneEvidenceView,
@@ -16,6 +19,9 @@ if TYPE_CHECKING:
     from fastapi import APIRouter
 
     from fb_crawl.api.dependencies import ApiKeyAuth
+
+
+logger = logging.getLogger(__name__)
 
 
 class UserNotFound(ValidationError):
@@ -165,6 +171,7 @@ def create_users_router(
     from typing import Annotated
 
     from fastapi import APIRouter, Depends, Path, Query
+    from fastapi.responses import JSONResponse
 
     from fb_crawl.api.schemas import (
         ApiErrorResponse,
@@ -332,13 +339,32 @@ def create_users_router(
             next_cursor=page.next_cursor,
         )
 
-    @router.delete("/without-phone", responses=error_responses)
+    @router.delete("/without-phone", response_model=None, responses={
+        **error_responses,
+        409: {"model": ApiErrorResponse},
+        500: {"model": ApiErrorResponse},
+        503: {"model": ApiErrorResponse},
+    })
     def delete_users_without_phone(
         confirm: Annotated[bool, Query()] = False,
-    ) -> dict[str, object]:
+    ) -> dict[str, object] | JSONResponse:
         if not confirm:
             raise HTTPException(status_code=400, detail="Confirm bulk deletion with confirm=true.")
-        deleted = user_repository.delete_users_without_phone()
+        try:
+            deleted = user_repository.delete_users_without_phone()
+        except DatabaseError as error:
+            state = getattr(error.__cause__, "sqlstate", None)
+            state = state if isinstance(state, str) and re.fullmatch(r"[A-Z0-9]{5}", state) else "unknown"
+            logger.warning("Bulk user deletion failed (sqlstate=%s).", state)
+            code, message, http_status = {
+                "57014": ("database_timeout", "Bulk deletion timed out. No data was deleted. Try again when scans are stopped.", 503),
+                "55P03": ("database_busy", "The database is busy. No data was deleted. Try again after active scans finish.", 503),
+                "40P01": ("database_busy", "The database is busy. No data was deleted. Try again after active scans finish.", 503),
+                "42P01": ("database_schema_outdated", "Database schema is outdated. No data was deleted. Run database migrations and restart the API.", 503),
+                "42703": ("database_schema_outdated", "Database schema is outdated. No data was deleted. Run database migrations and restart the API.", 503),
+                "23503": ("database_delete_conflict", "Related records prevent deletion. No data was deleted. Check database migrations and API logs.", 409),
+            }.get(state, ("database_error", "Bulk deletion failed. Check API logs.", 500))
+            return JSONResponse(status_code=http_status, content={"code": code, "message": message})
         return {"status": "success", "deleted_count": deleted}
 
     @router.get(

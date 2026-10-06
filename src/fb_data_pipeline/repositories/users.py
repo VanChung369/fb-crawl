@@ -466,20 +466,28 @@ class UserQueryRepository:
                     AND e.revealed_phone_number_id IS NOT NULL
                 )
             """)
+            cursor.execute("CREATE UNIQUE INDEX ON users_to_delete (id)")
+            cursor.execute("ANALYZE users_to_delete")
             cursor.execute("""
-                DELETE FROM session_people p USING users_to_delete u
-                WHERE p.identity->>'facebook_uid' = u.facebook_uid
-                   OR ((NULLIF(p.identity->>'facebook_uid', '') IS NULL OR u.facebook_uid IS NULL)
-                       AND lower(p.identity->>'username') = lower(u.facebook_username))
+                DELETE FROM session_people p
+                WHERE p.identity->>'facebook_uid' IN (SELECT facebook_uid FROM users_to_delete)
+                   OR (NULLIF(p.identity->>'facebook_uid', '') IS NULL
+                       AND lower(p.identity->>'username') IN (SELECT lower(facebook_username) FROM users_to_delete))
+                   OR lower(p.identity->>'username') IN (
+                       SELECT lower(facebook_username) FROM users_to_delete WHERE facebook_uid IS NULL
+                   )
                    OR p.lookup_event_id IN (
-                       SELECT id FROM lookup_events WHERE facebook_user_id = u.id
+                       SELECT e.id FROM lookup_events e JOIN users_to_delete u ON e.facebook_user_id = u.id
                    )
             """)
             cursor.execute("""
-                DELETE FROM account_leads l USING users_to_delete u
-                WHERE l.facebook_uid = u.facebook_uid
-                   OR ((l.facebook_uid IS NULL OR u.facebook_uid IS NULL)
-                       AND lower(l.username) = lower(u.facebook_username))
+                DELETE FROM account_leads l
+                WHERE l.facebook_uid IN (SELECT facebook_uid FROM users_to_delete)
+                   OR (l.facebook_uid IS NULL
+                       AND lower(l.username) IN (SELECT lower(facebook_username) FROM users_to_delete))
+                   OR lower(l.username) IN (
+                       SELECT lower(facebook_username) FROM users_to_delete WHERE facebook_uid IS NULL
+                   )
             """)
             cursor.execute("""
                 DELETE FROM account_contact_reveals r USING users_to_delete u
