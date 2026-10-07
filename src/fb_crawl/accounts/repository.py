@@ -80,6 +80,14 @@ class AccountRepository(Protocol):
 
     def verify_email_token(self, token_digest: str, now: datetime) -> Account: ...
 
+    def create_password_reset_code(
+        self, account_id: int, digest: str, expires_at: datetime, now: datetime
+    ) -> None: ...
+
+    def exchange_password_reset_code(
+        self, account_id: int, digest: str, reset_digest: str, expires_at: datetime, now: datetime
+    ) -> bool: ...
+
     def verify_account_email_directly(
         self, account_id: int, now: datetime
     ) -> Account: ...

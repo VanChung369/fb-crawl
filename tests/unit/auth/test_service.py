@@ -42,6 +42,7 @@ class FakeRepository:
         self.sessions: dict[UUID, tuple[AuthSession, str]] = {}
         self.revoked_accounts: list[int] = []
         self.password_updates: list[str] = []
+        self.reset_codes = {}
 
     def add_account(self, *, verified: bool, status: AccountStatus | None = None) -> Account:
         account_status = status or (
@@ -103,12 +104,31 @@ class FakeRepository:
         return self.account
 
     def consume_password_reset_token(self, token_digest: str, now: datetime) -> Account:
+        if token_digest not in self.tokens:
+            raise InvalidAccountToken('invalid')
         purpose, account_id, expires_at, consumed = self.tokens[token_digest]
         if purpose != "password_reset" or consumed or expires_at <= now:
             raise InvalidAccountToken("invalid")
         self.tokens[token_digest] = (purpose, account_id, expires_at, True)
         assert self.account is not None
         return self.account
+
+    def create_password_reset_code(self, account_id, digest, expires_at, now):
+        self.reset_codes[account_id] = [digest, expires_at, 0, False]
+        for key, (purpose, owner, expiry, used) in tuple(self.tokens.items()):
+            if purpose == 'password_reset' and owner == account_id:
+                self.tokens[key] = (purpose, owner, expiry, True)
+
+    def exchange_password_reset_code(self, account_id, digest, reset_digest, expires_at, now):
+        code = self.reset_codes.get(account_id)
+        if not code or code[1] <= now or code[2] >= 5 or code[3]:
+            return False
+        if code[0] != digest:
+            code[2] += 1
+            return False
+        code[3] = True
+        self.create_account_token(account_id, 'password_reset', reset_digest, expires_at, now)
+        return True
 
     def update_password(self, account_id: int, password_hash: str, now: datetime) -> Account:
         assert self.account is not None and self.account.id == account_id
@@ -214,6 +234,9 @@ class FakeEmail:
 
     def send_password_reset(self, email: str, url: str) -> None:
         self.resets.append((email, url))
+
+    def send_password_reset_code(self, email: str, code: str) -> None:
+        self.resets.append((email, code))
 
 
 class FakeLimiter:
@@ -376,7 +399,7 @@ def test_password_reset_revokes_all_sessions(service_parts) -> None:
         ip_address="203.0.113.4",
     )
     service.forgot_password(EMAIL, NOW, ip_address="203.0.113.4")
-    raw_token = _token_from_url(email.resets[-1][1])
+    raw_token = service.verify_password_reset_code(EMAIL, email.resets[-1][1], NOW, ip_address='203.0.113.4').reset_token
 
     service.reset_password(
         raw_token,

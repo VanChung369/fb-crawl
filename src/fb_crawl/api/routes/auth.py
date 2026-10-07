@@ -20,6 +20,8 @@ from fb_crawl.api.product_schemas import (
     RegisterRequest,
     RegistrationResponse,
     ResetPasswordRequest,
+    VerifyPasswordResetCodeRequest,
+    PasswordResetVerificationResponse,
     TokenRequest,
     VerifyEmailRequest,
 )
@@ -153,6 +155,12 @@ def create_product_auth_router(
             payload.email, clock(), ip_address=_client_ip(request)
         )
         return GenericAcceptedResponse()
+
+    @router.post('/verify-reset-code', response_model=PasswordResetVerificationResponse)
+    def verify_reset_code(payload: VerifyPasswordResetCodeRequest, request: Request, response: Response) -> PasswordResetVerificationResponse:
+        result = auth_service.verify_password_reset_code(payload.email, payload.code, clock(), ip_address=_client_ip(request))
+        response.headers['Cache-Control'] = 'no-store'
+        return PasswordResetVerificationResponse(reset_token=result.reset_token, expires_in=result.expires_in)
 
     @router.post("/reset-password", response_model=GenericAcceptedResponse)
     def reset_password(

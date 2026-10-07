@@ -22,6 +22,17 @@ API_KEY = "a" * 32
 WEB_ORIGIN = "https://leads.example.com"
 
 
+def test_reset_code_exchange_returns_only_a_temporary_non_cached_grant():
+    client, _, service, _ = product_client()
+    response=client.post('/api/v1/auth/verify-reset-code',json={'email':'person@example.com','code':'123456'})
+    assert response.status_code==200
+    assert response.headers['cache-control']=='no-store'
+    assert response.json()=={'reset_token':'temporary-reset-token','expires_in':600}
+    assert service.calls==[('verify_password_reset_code','person@example.com','123456')]
+    for code in ['12345','1234567','abc123','１２３４５６']:
+        assert client.post('/api/v1/auth/verify-reset-code',json={'email':'person@example.com','code':code}).status_code==400
+
+
 def product_client(
     *,
     license_service=None,

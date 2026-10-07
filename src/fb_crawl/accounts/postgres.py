@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -248,6 +250,55 @@ class PostgresAccountRepository:
                 (account_id, purpose, token_digest, expires_at, now),
             )
 
+    def create_password_reset_code(
+        self, account_id: int, digest: str, expires_at: datetime, now: datetime
+    ) -> None:
+        with self._connect() as cursor:
+            cursor.execute("SELECT id FROM accounts WHERE id = %s AND status IN ('active', 'pending') FOR UPDATE", (account_id,))
+            if cursor.fetchone() is None:
+                raise InvalidAccountToken('Reset code is invalid or expired.')
+            cursor.execute("""
+                UPDATE account_tokens SET consumed_at = %s
+                WHERE account_id = %s AND purpose = 'password_reset' AND consumed_at IS NULL
+            """, (now, account_id))
+            cursor.execute("""
+                INSERT INTO password_reset_codes (account_id, code_hash, expires_at, created_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (account_id) DO UPDATE SET code_hash = EXCLUDED.code_hash,
+                    expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at,
+                    attempts = 0, consumed_at = NULL
+            """, (account_id, digest, expires_at, now))
+
+    def exchange_password_reset_code(
+        self, account_id: int, digest: str, reset_digest: str, expires_at: datetime, now: datetime
+    ) -> bool:
+        # Lock the account first, matching password changes and code replacement.
+        # Return failed attempts normally so the counter commits instead of rolling back.
+        with self._connect() as cursor:
+            cursor.execute("SELECT id FROM accounts WHERE id = %s AND status IN ('active', 'pending') FOR UPDATE", (account_id,))
+            if cursor.fetchone() is None:
+                return False
+            cursor.execute("""
+                SELECT code_hash, expires_at, attempts, consumed_at
+                FROM password_reset_codes WHERE account_id = %s FOR UPDATE
+            """, (account_id,))
+            code = cursor.fetchone()
+            if code is None or code[1] <= now or code[2] >= 5 or code[3] is not None:
+                return False
+            if not hmac.compare_digest(code[0], digest):
+                cursor.execute("UPDATE password_reset_codes SET attempts = attempts + 1 WHERE account_id = %s", (account_id,))
+                return False
+            cursor.execute("UPDATE password_reset_codes SET consumed_at = %s WHERE account_id = %s", (now, account_id))
+            cursor.execute("""
+                UPDATE account_tokens SET consumed_at = %s
+                WHERE account_id = %s AND purpose = 'password_reset' AND consumed_at IS NULL
+            """, (now, account_id))
+            cursor.execute("""
+                INSERT INTO account_tokens (account_id, purpose, token_hash, expires_at, created_at)
+                VALUES (%s, 'password_reset', %s, %s, %s)
+            """, (account_id, reset_digest, expires_at, now))
+        return True
+
     def verify_email_token(self, token_digest: str, now: datetime) -> Account:
         with self._connect() as cursor:
             token = self._lock_account_token(
@@ -365,6 +416,7 @@ class PostgresAccountRepository:
                 """,
                 (now, account_id),
             )
+            cursor.execute("UPDATE password_reset_codes SET consumed_at = %s WHERE account_id = %s AND consumed_at IS NULL", (now, account_id))
         return True
 
     def create_device(

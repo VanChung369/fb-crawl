@@ -16,6 +16,8 @@ class EmailDeliveryPort(Protocol):
 
     def send_password_reset(self, email: str, url: str) -> None: ...
 
+    def send_password_reset_code(self, email: str, code: str) -> None: ...
+
 
 class SmtpEmailDelivery:
     def __init__(
@@ -69,6 +71,15 @@ class SmtpEmailDelivery:
                 f"{url}\n\nThis link expires in one hour."
             ),
         )
+
+    def send_password_reset_code(self, email: str, code: str) -> None:
+        self._send(recipient=email, subject='Mã đặt lại mật khẩu Lead Finder', body=(
+            f'Mã đặt lại mật khẩu của bạn là: {code}\n\n'
+            'Nhập mã này trong Lead Finder để xác nhận và chọn mật khẩu mới. '
+            'Mã có hiệu lực trong 10 phút và chỉ dùng một lần.\n\n'
+            'Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này. '
+            'Không chia sẻ mã với bất kỳ ai.'
+        ))
 
     def _send(self, *, recipient: str, subject: str, body: str) -> None:
         message = EmailMessage()

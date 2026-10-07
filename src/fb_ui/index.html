@@ -1299,11 +1299,12 @@
           <div id="product-admin-workspace" hidden>
             <section class="panel maintenance-panel" aria-labelledby="maintenance-title">
               <div class="panel-header">
-                <div><h4 id="maintenance-title">Bảo trì hệ thống</h4><p class="admin-section-copy">Tạm dừng quét mới, tiếp tục quét và tra số. Khách hàng vẫn xem và xuất được dữ liệu đã thu thập.</p></div>
+                <div><h4 id="maintenance-title">Bảo trì hệ thống</h4><p class="admin-section-copy">Tạm dừng quét và tra số. Khách hàng vẫn xem và xuất được dữ liệu đã thu thập.</p></div>
                 <span class="pill info" id="maintenance-state">Đang tải…</span>
               </div>
               <form id="form-maintenance" class="maintenance-form">
-                <label class="maintenance-toggle"><input id="maintenance-enabled" type="checkbox"> Bật chế độ bảo trì</label>
+                <div class="maintenance-controls">
+                <label class="maintenance-toggle"><input id="maintenance-enabled" type="checkbox" role="switch"><span class="maintenance-switch" aria-hidden="true"></span><span><strong>Bật chế độ bảo trì</strong><small>Dừng các thao tác quét và tra số mới</small></span></label>
                 <div class="form-group">
                   <label for="maintenance-preset">Thông báo mẫu</label>
                   <select id="maintenance-preset" class="form-control">
@@ -1315,12 +1316,20 @@
                   </select>
                 </div>
                 <div class="form-group">
-                  <label for="maintenance-message">Nội dung hiển thị cho khách hàng</label>
-                  <textarea id="maintenance-message" class="form-control" rows="3" maxlength="1000" required></textarea>
+                  <div class="maintenance-field-label"><label for="maintenance-message">Nội dung hiển thị cho khách hàng</label><span id="maintenance-character-count">0/1000</span></div>
+                  <textarea id="maintenance-message" class="form-control" rows="4" maxlength="1000" required></textarea>
                 </div>
-                <div class="maintenance-preview" role="status"><strong>Xem trước thông báo</strong><p id="maintenance-preview-message"></p></div>
+                </div>
+                <div class="maintenance-preview" id="maintenance-preview" data-enabled="false" role="status">
+                  <div class="maintenance-preview-heading"><span>Xem trước thông báo</span><small>Khách hàng sẽ thấy</small></div>
+                  <div class="maintenance-preview-banner"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 4.9 2.6 18.2A2 2 0 0 0 4.3 21h15.4a2 2 0 0 0 1.7-2.8L13.7 4.9a2 2 0 0 0-3.4 0Z"/></svg><div><strong>Hệ thống đang bảo trì</strong><p id="maintenance-preview-message"></p></div></div>
+                  <p id="maintenance-preview-hint">Chế độ bảo trì chưa bật. Thông báo sẽ hiển thị sau khi bật và lưu.</p>
+                </div>
+                <div class="maintenance-footer">
                 <p id="maintenance-error" role="alert" hidden></p>
                 <button id="btn-save-maintenance" class="btn btn-primary" type="submit" disabled>Lưu chế độ bảo trì</button>
+                <span>Thay đổi chỉ áp dụng sau khi lưu.</span>
+                </div>
               </form>
             </section>
             <div class="admin-grid">

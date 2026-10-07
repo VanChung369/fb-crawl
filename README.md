@@ -63,6 +63,14 @@ Artifacts are written below `LEAD_FINDER_EXPORT_DIR` (default
 
 Removing revoked devices from the extension list requires migration `020_removed_devices`
 and an API restart. Run `fb-crawl pipeline migrate` before deploying the updated API.
+
+Password recovery now emails a six-digit code instead of a reset link. Apply migration
+`021_password_reset_codes` with `.\.venv\Scripts\python.exe -m fb_crawl pipeline migrate`
+and restart the API before using the updated extension. Codes expire after ten minutes,
+allow five incorrect attempts, and can be exchanged once at `/api/v1/auth/verify-reset-code`
+for a ten-minute reset token. The extension keeps this token in memory and sends it to
+`/api/v1/auth/reset-password` only when saving the new password. Existing reset links remain
+valid until their original expiration.
 Removed entries remain revoked so cleaning the list does not allow that installation to sign in again.
 
 Signed-in extension users can change their password from the account menu.

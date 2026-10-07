@@ -23,10 +23,12 @@ def test_reset_link_has_a_public_private_landing_page():
     assert 'synthetic-reset-secret' not in response.text
     assert '/api/v1/auth/reset-password' in response.text
     assert '/api/v1/auth/forgot-password' in response.text
+    assert '/api/v1/auth/verify-reset-code' in response.text
+    assert 'autocomplete="one-time-code"' in response.text
     assert 'autocomplete="new-password"' in response.text
 
 
-def test_generated_reset_link_changes_password_once_and_revokes_sessions(service_parts):
+def test_verified_code_grant_changes_password_once_and_revokes_sessions(service_parts):
     service, repository, email, _limiter, tokens = service_parts
     service.register(EMAIL, PASSWORD, NOW, ip_address='127.0.0.1')
     app = create_app(
@@ -37,9 +39,9 @@ def test_generated_reset_link_changes_password_once_and_revokes_sessions(service
     )
     client = TestClient(app)
     assert client.post('/api/v1/auth/forgot-password', json={'email': EMAIL}).status_code == 200
-    link = urlsplit(email.resets[-1][1])
-    token = parse_qs(link.query)['token'][0]
-    assert client.get(f'{link.path}?{link.query}').status_code == 200
+    verified=client.post('/api/v1/auth/verify-reset-code',json={'email':EMAIL,'code':email.resets[-1][1]})
+    assert verified.status_code==200
+    token=verified.json()['reset_token']
     payload = {'token': token, 'new_password': 'replacement-password-123'}
     assert client.post('/api/v1/auth/reset-password', json=payload).status_code == 200
     assert repository.hasher.verify(repository.account.password_hash, payload['new_password'])
@@ -53,8 +55,8 @@ def test_generated_reset_link_changes_password_once_and_revokes_sessions(service
 def test_expired_reset_link_does_not_change_password(service_parts):
     service, repository, email, _limiter, tokens = service_parts
     repository.add_account(verified=True)
-    service.forgot_password(EMAIL, NOW, ip_address='127.0.0.1')
-    token = parse_qs(urlsplit(email.resets[-1][1]).query)['token'][0]
+    token='legacy-reset-token'
+    repository.create_account_token(repository.account.id,'password_reset',tokens.digest_opaque(token),NOW+timedelta(hours=1),NOW)
     app = create_app(
         ApiSettings(api_key='k' * 32),
         job_service=object(), job_repository=object(), user_repository=object(),

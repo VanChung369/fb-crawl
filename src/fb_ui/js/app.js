@@ -52,7 +52,7 @@ class DashboardApp {
       document.getElementById("maintenance-preset").value = "custom";
       this.previewMaintenance();
     });
-    document.getElementById("maintenance-enabled")?.addEventListener("change", () => {this.maintenanceDirty = true;});
+    document.getElementById("maintenance-enabled")?.addEventListener("change", () => {this.maintenanceDirty = true;this.previewMaintenance();});
     // Topbar
     this.statusIndicator = document.getElementById("status-indicator");
     this.statusText = document.getElementById("status-text");
@@ -2702,7 +2702,14 @@ class DashboardApp {
   }
 
   previewMaintenance() {
-    document.getElementById("maintenance-preview-message").textContent = document.getElementById("maintenance-message").value;
+    const message = document.getElementById("maintenance-message").value;
+    const enabled = document.getElementById("maintenance-enabled").checked;
+    document.getElementById("maintenance-preview-message").textContent = message;
+    document.getElementById("maintenance-preview").setAttribute("data-enabled", String(enabled));
+    document.getElementById("maintenance-character-count").textContent = `${message.length}/1000`;
+    document.getElementById("maintenance-preview-hint").textContent = enabled
+      ? "Thông báo sẽ hiển thị ở đầu ứng dụng. Khách hàng vẫn xem và xuất được dữ liệu đã thu thập."
+      : "Chế độ bảo trì chưa bật. Thông báo sẽ hiển thị sau khi bật và lưu.";
   }
 
   renderMaintenance(value, preserveDraft = false) {

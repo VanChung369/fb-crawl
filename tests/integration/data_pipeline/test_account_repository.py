@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from fb_crawl.accounts.repository import SessionReuseDetected
+from fb_crawl.accounts.repository import InvalidAccountToken
 from fb_crawl.accounts.models import DeviceStatus
 from fb_crawl.accounts.postgres import PostgresAccountRepository
 from fb_data_pipeline.repositories.migrations import MigrationRunner
@@ -55,6 +56,21 @@ def test_removed_revoked_device_stays_revoked_and_disappears_from_device_list() 
     assert recreated.id == device.id
     assert recreated.status is DeviceStatus.REVOKED
     assert repository.list_devices(account.id) == ()
+
+
+def test_password_reset_code_attempt_limit_replacement_and_grant_are_persistent():
+    repository=PostgresAccountRepository(TEST_DATABASE_URL)
+    account=repository.create_account('reset@example.com','reset@example.com','$argon2id$test-hash')
+    repository.create_password_reset_code(account.id,'code',NOW+timedelta(minutes=10),NOW)
+    for _ in range(5):
+        assert not repository.exchange_password_reset_code(account.id,'wrong','grant',NOW+timedelta(minutes=10),NOW)
+    assert not repository.exchange_password_reset_code(account.id,'code','grant',NOW+timedelta(minutes=10),NOW)
+    repository.create_password_reset_code(account.id,'new-code',NOW+timedelta(minutes=11),NOW+timedelta(minutes=1))
+    assert repository.exchange_password_reset_code(account.id,'new-code','grant',NOW+timedelta(minutes=11),NOW+timedelta(minutes=1))
+    assert not repository.exchange_password_reset_code(account.id,'new-code','second',NOW+timedelta(minutes=11),NOW+timedelta(minutes=1))
+    assert repository.consume_password_reset_token('grant',NOW+timedelta(minutes=2)).id==account.id
+    with pytest.raises(InvalidAccountToken):
+        repository.consume_password_reset_token('grant',NOW+timedelta(minutes=2))
 
 
 TEST_DATABASE_NAME = _safe_test_database_name(TEST_DATABASE_URL)

@@ -284,6 +284,11 @@ class ProductAuthServiceFake:
         self.calls.append(("reset_password", token))
         return GenericRequestResult()
 
+    def verify_password_reset_code(self, email, code, now, *, ip_address):
+        from fb_crawl.auth.service import PasswordResetVerification
+        self.calls.append(('verify_password_reset_code', email, code))
+        return PasswordResetVerification('temporary-reset-token')
+
     def logout(self, session_id, now):
         self.calls.append(("logout", session_id))
 

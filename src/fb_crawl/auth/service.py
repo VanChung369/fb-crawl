@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import secrets
+import re
 from urllib.parse import quote
 from uuid import UUID
 
@@ -20,6 +21,8 @@ from fb_crawl.core.exceptions import ValidationError
 
 EMAIL_VERIFICATION_TTL = timedelta(hours=24)
 PASSWORD_RESET_TTL = timedelta(hours=1)
+PASSWORD_RESET_CODE_TTL = timedelta(minutes=10)
+PASSWORD_RESET_GRANT_TTL = timedelta(minutes=10)
 REFRESH_SESSION_TTL = timedelta(days=30)
 
 
@@ -57,6 +60,12 @@ class RegistrationResult:
 @dataclass(frozen=True, slots=True)
 class GenericRequestResult:
     accepted: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class PasswordResetVerification:
+    reset_token: str
+    expires_in: int = 600
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,17 +303,35 @@ class AccountAuthService:
             AccountStatus.DELETED,
             AccountStatus.SUSPENDED,
         }:
-            raw_token = self._token_service.new_opaque_token()
-            self._repository.create_account_token(
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            self._repository.create_password_reset_code(
                 account.id,
-                "password_reset",
-                self._token_service.digest_opaque(raw_token),
-                now + PASSWORD_RESET_TTL,
+                self._token_service.digest_opaque(f"password_reset_code:{account.id}:{code}"),
+                now + PASSWORD_RESET_CODE_TTL,
                 now,
             )
-            url = f"{self._public_base_url}/reset-password?token={quote(raw_token)}"
-            self._email_delivery.send_password_reset(account.display_email, url)
+            self._email_delivery.send_password_reset_code(account.display_email, code)
         return GenericRequestResult()
+
+    def verify_password_reset_code(
+        self, email: str, code: str, now: datetime, *, ip_address: str
+    ) -> PasswordResetVerification:
+        normalized, _ = _normalized_email(email)
+        self._rate_limiter.check('verify_password_reset_code', normalized, None, ip_address, now)
+        account = self._repository.find_account_by_email(normalized)
+        code = code.strip()
+        if not re.fullmatch(r'[0-9]{6}', code) or account is None or account.status not in {AccountStatus.ACTIVE, AccountStatus.PENDING}:
+            raise InvalidAccountToken('Reset code is invalid or expired.')
+        raw_token = self._token_service.new_opaque_token()
+        accepted = self._repository.exchange_password_reset_code(
+            account.id,
+            self._token_service.digest_opaque(f'password_reset_code:{account.id}:{code}'),
+            self._token_service.digest_opaque(raw_token),
+            now + PASSWORD_RESET_GRANT_TTL, now,
+        )
+        if not accepted:
+            raise InvalidAccountToken('Reset code is invalid or expired.')
+        return PasswordResetVerification(raw_token)
 
     def reset_password(
         self,

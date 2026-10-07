@@ -80,3 +80,13 @@ def test_smtp_failure_is_sanitized() -> None:
     assert captured.value.code == "email_delivery_failed"
     assert "private-password" not in str(captured.value)
     assert "smtp.internal" not in str(captured.value)
+
+
+def test_reset_email_contains_a_code_and_never_a_reset_link():
+    smtp=RecordingSmtp('smtp.example.com',587,10.0)
+    delivery=SmtpEmailDelivery(host='smtp.example.com',port=587,username='',password='',sender='noreply@example.com',smtp_factory=lambda *_a,**_k:smtp)
+    delivery.send_password_reset_code('person@example.com','123456')
+    message=next(call[1] for call in smtp.calls if call[0]=='send')
+    body=message.get_content()
+    assert '123456' in body and '10 phút' in body
+    assert 'reset-password' not in body and 'token=' not in body and 'https://' not in body

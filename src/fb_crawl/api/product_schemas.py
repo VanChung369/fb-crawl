@@ -43,6 +43,15 @@ class ResetPasswordRequest(TokenRequest):
     new_password: str = Field(min_length=12, max_length=128)
 
 
+class VerifyPasswordResetCodeRequest(EmailRequest):
+    code: str = Field(pattern=r'^[0-9]{6}$')
+
+
+class PasswordResetVerificationResponse(BaseModel):
+    reset_token: str
+    expires_in: int
+
+
 class ChangePasswordRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 

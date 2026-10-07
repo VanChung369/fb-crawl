@@ -16,6 +16,9 @@ function setup() {
     'maintenance-message': {value:'Initial message'},
     'maintenance-preset': {value:'custom'},
     'maintenance-preview-message': {},
+    'maintenance-preview': {setAttribute(name,value){this[name]=value;}},
+    'maintenance-preview-hint': {},
+    'maintenance-character-count': {},
     'maintenance-state': {},
     'maintenance-error': {hidden:true},
     'btn-save-maintenance': {disabled:false},
@@ -64,4 +67,17 @@ test('a stale refresh error cannot replace a successful maintenance save', async
   refresh.reject(new Error('Old failed refresh'));
   await loaded;
   assert.equal(controls['maintenance-error'].hidden,true);
+});
+
+test('previews the draft switch state and message length without changing saved status',()=>{
+  const {app,controls}=setup();
+  controls['maintenance-state'].textContent='Hoạt động bình thường';
+  app.previewMaintenance();
+  assert.equal(controls['maintenance-preview']['data-enabled'],'true');
+  assert.equal(controls['maintenance-character-count'].textContent,'15/1000');
+  assert.equal(controls['maintenance-state'].textContent,'Hoạt động bình thường');
+  controls['maintenance-enabled'].checked=false;
+  app.previewMaintenance();
+  assert.equal(controls['maintenance-preview']['data-enabled'],'false');
+  assert.match(controls['maintenance-preview-hint'].textContent,/chưa bật/);
 });

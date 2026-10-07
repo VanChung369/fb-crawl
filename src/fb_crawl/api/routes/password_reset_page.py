@@ -25,13 +25,20 @@ button:disabled{opacity:.6;cursor:wait}.error{color:#b42318;margin-top:12px}.suc
   <button id="reset-button" type="submit">Reset password</button>
 </form>
 <section id="recovery" hidden>
-  <hr><h2>Request a new reset link</h2>
+  <hr><h2>Verify your email</h2>
   <form id="recovery-form">
     <label for="account-email">Account email</label>
     <input id="account-email" name="email" type="email" autocomplete="email" maxlength="320" required>
     <p id="recovery-status" role="status" hidden></p>
     <p id="recovery-error" class="error" role="alert" hidden></p>
-    <button id="recovery-button" type="submit">Send reset link</button>
+    <button id="recovery-button" type="submit">Send verification code</button>
+  </form>
+  <form id="code-form" hidden>
+    <label for="reset-code">Verification code</label>
+    <input id="reset-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+    <p>The code expires in 10 minutes.</p>
+    <p id="code-error" class="error" role="alert" hidden></p>
+    <button id="code-button" type="submit">Verify code</button>
   </form>
 </section>
 <noscript><p>Enable JavaScript to reset your password.</p></noscript>
@@ -52,7 +59,7 @@ button:disabled{opacity:.6;cursor:wait}.error{color:#b42318;margin-top:12px}.suc
   const invalidLink = () => {
     token = '';
     form.hidden = true;
-    message.textContent = 'This reset link is invalid or expired. Request a new link below.';
+    message.textContent = 'Request an email code below to choose a new password.';
     recovery.hidden = false;
   };
   if (!token || token.length > 4096) invalidLink();
@@ -88,16 +95,45 @@ button:disabled{opacity:.6;cursor:wait}.error{color:#b42318;margin-top:12px}.suc
   const recoveryError = document.getElementById('recovery-error');
   const recoveryStatus = document.getElementById('recovery-status');
   let sending = false;
+  let recoveryEmail = '';
+  let resendAt = 0;
+  const emailInput = document.getElementById('account-email');
+  const codeForm = document.getElementById('code-form');
+  const codeInput = document.getElementById('reset-code');
+  const codeButton = document.getElementById('code-button');
+  const codeError = document.getElementById('code-error');
+  codeForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (sending || busy) return;
+    sending = true; codeButton.disabled = true; recoveryButton.disabled = true; codeError.hidden = true;
+    codeButton.textContent = 'Verifying…';
+    try {
+      const response = await post('/api/v1/auth/verify-reset-code', {email:recoveryEmail,code:codeInput.value});
+      if (!response.ok) throw new Error(response.status === 429 ? 'Too many attempts. Please wait before trying again.' : 'Reset code is invalid or expired.');
+      const result = await response.json();
+      if (typeof result.reset_token !== 'string' || !result.reset_token) throw new Error('Could not verify reset code.');
+      token = result.reset_token; recovery.hidden = true; form.hidden = false;
+      codeInput.value = '';
+      message.textContent = 'Choose a new password with at least 12 characters.';
+      password.focus();
+    } catch (reason) {
+      codeError.textContent = reason.message || 'Could not verify reset code.'; codeError.hidden = false;
+    } finally {sending = false; codeButton.disabled = false; codeButton.textContent = 'Verify code'; recoveryButton.disabled = Date.now()<resendAt;}
+  });
   recoveryForm.addEventListener('submit', async event => {
     event.preventDefault();
-    if (sending) return;
+    if (sending || Date.now()<resendAt) return;
     sending = true; recoveryButton.disabled = true; recoveryButton.textContent = 'Sending…';
     recoveryError.hidden = true; recoveryStatus.hidden = true;
     try {
-      const response = await post('/api/v1/auth/forgot-password', {email:document.getElementById('account-email').value.trim()});
+      const requestedEmail = emailInput.value.trim();
+      const response = await post('/api/v1/auth/forgot-password', {email:requestedEmail});
       if (response.ok) {
-        recoveryStatus.textContent = 'If an account exists for this email, a reset link has been sent. Check your inbox and spam folder.';
-        recoveryStatus.hidden = false; recoveryButton.hidden = true;
+        recoveryEmail = requestedEmail; emailInput.disabled = true;
+        recoveryStatus.textContent = 'If an account exists for this email, a verification code has been sent. Check your inbox and spam folder.';
+        recoveryStatus.hidden = false; codeForm.hidden = false; codeError.hidden = true;
+        codeInput.value = ''; codeInput.focus(); resendAt = Date.now()+60000;
+        setTimeout(() => {if (!sending) recoveryButton.disabled = false;},60000);
       } else {
         recoveryError.textContent = response.status === 429 ? 'Too many attempts. Please wait before trying again.' : 'Could not send reset email. Please try again.';
         recoveryError.hidden = false;
@@ -106,7 +142,8 @@ button:disabled{opacity:.6;cursor:wait}.error{color:#b42318;margin-top:12px}.suc
       recoveryError.textContent = 'Could not connect to the server. Check your connection and try again.';
       recoveryError.hidden = false;
     } finally {
-      sending = false; recoveryButton.disabled = false; recoveryButton.textContent = 'Send reset link';
+      sending = false; recoveryButton.disabled = Date.now()<resendAt;
+      recoveryButton.textContent = recoveryEmail ? 'Resend code' : 'Send verification code';
     }
   });
 })();

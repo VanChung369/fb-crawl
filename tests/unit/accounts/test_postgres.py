@@ -19,6 +19,23 @@ from fb_crawl.core.exceptions import ValidationError
 
 
 NOW = datetime(2026, 8, 30, 8, tzinfo=UTC)
+
+@pytest.mark.parametrize('stored,expected', [
+    (('match', NOW+timedelta(minutes=10),0,None), True),
+    (('wrong', NOW+timedelta(minutes=10),0,None), False),
+    (('match', NOW,0,None), False),
+    (('match', NOW+timedelta(minutes=10),5,None), False),
+    (('match', NOW+timedelta(minutes=10),0,NOW), False),
+])
+def test_reset_code_exchange_commits_attempts_and_creates_grant_only_once(stored,expected):
+    cursor=ScriptedCursor([(7,), stored])
+    connection=RecordingConnection(cursor)
+    repository=PostgresAccountRepository('postgresql://test',connect_factory=lambda *_a,**_k:connection)
+    assert repository.exchange_password_reset_code(7,'match','grant-hash',NOW+timedelta(minutes=10),NOW) is expected
+    assert bool([sql for sql,_ in cursor.commands if 'INSERT INTO account_tokens' in sql]) is expected
+    assert connection.exit_errors == [None]
+    if stored[0]=='wrong':
+        assert any('attempts = attempts + 1' in sql for sql,_ in cursor.commands)
 SESSION_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 NEXT_SESSION_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 INSTALLATION_ID = UUID("12345678-1234-5678-1234-567812345678")
