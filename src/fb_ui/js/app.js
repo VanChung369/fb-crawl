@@ -2750,10 +2750,11 @@ class DashboardApp {
       const detail=document.createElement('small');detail.textContent=`${(release.size_bytes/1024/1024).toFixed(2)} MB · ${new Date(release.created_at).toLocaleDateString('vi-VN')}`;
       info.append(title,detail);
       const active = release.id === this.releasePolicy?.active_release_id;
-      const action=document.createElement('button');action.type='button';action.className=active ? 'btn btn-secondary' : 'btn btn-danger-outline';
-      action.textContent=active ? 'Đang phát hành' : 'Xóa';
-      action.disabled=active || this.releaseBusy;
-      action.setAttribute('aria-label', active ? `Bản ${release.version} đang phát hành` : `Xóa bản ${release.version}`);
+      if (active) {const status=document.createElement('small');status.textContent='Đang phát hành';status.className='release-active-status';info.append(status);}
+      const action=document.createElement('button');action.type='button';action.className='btn btn-danger-outline';
+      action.textContent=active ? 'Bỏ phát hành và xóa' : 'Xóa';
+      action.disabled=this.releaseBusy;
+      action.setAttribute('aria-label', active ? `Bỏ phát hành và xóa bản ${release.version}` : `Xóa bản ${release.version}`);
       action.addEventListener('click',()=>void this.deleteRelease(release));
       row.append(info,action);list.append(row);
     }
@@ -2824,15 +2825,25 @@ class DashboardApp {
   }
 
   async deleteRelease(release) {
-    if (this.releaseBusy || release.id === this.releasePolicy?.active_release_id) return;
-    if (!window.confirm(`Xóa v${release.version} và file ZIP? Thao tác này không xóa dữ liệu khách hàng.`)) return;
+    if (this.releaseBusy) return;
+    const active = release.id === this.releasePolicy?.active_release_id;
+    const confirmation = active
+      ? `Bỏ phát hành và xóa v${release.version} cùng file ZIP? Thông báo cập nhật và yêu cầu phiên bản tối thiểu đang áp dụng sẽ được tắt. Dữ liệu khách hàng không bị xóa.`
+      : `Xóa v${release.version} và file ZIP? Thao tác này không xóa dữ liệu khách hàng.`;
+    if (!window.confirm(confirmation)) return;
     this.releaseRevision++;
     this.setReleaseBusy(true);
     document.getElementById('release-error').hidden=true;
     let success=false;
     try {
-      await this.fetchProductApi(`/api/v1/admin/releases/${release.id}`,{method:'DELETE'});
-      success=true;this.showToast('Đã xóa bản phát hành.','success');
+      await this.fetchProductApi(`/api/v1/admin/releases/${release.id}${active ? '?unpublish=true' : ''}`,{method:'DELETE'});
+      if (document.getElementById('release-active').value === release.id) {
+        document.getElementById('release-active').value='';
+        document.getElementById('release-announce').checked=false;
+        document.getElementById('release-enforce').checked=false;
+        document.getElementById('release-minimum').value='0.0.0';
+      }
+      success=true;this.showToast(active ? 'Đã bỏ phát hành và xóa bản cập nhật.' : 'Đã xóa bản phát hành.','success');
     } catch(error) {this.showReleaseError(error);}
     finally {this.setReleaseBusy(false);}
     if (success) await this.loadReleases();

@@ -52,8 +52,8 @@ def create_release_admin_router(current_account_dependency):
         return request.app.state.release_service.save_policy(payload)
 
     @router.delete("/{release_id}", status_code=204)
-    def delete_release(release_id: UUID, request: Request, _=Depends(admin)):
-        request.app.state.release_service.delete(release_id)
+    def delete_release(release_id: UUID, request: Request, unpublish: bool = False, _=Depends(admin)):
+        request.app.state.release_service.delete(release_id, unpublish=unpublish)
         return Response(status_code=204)
 
     return router

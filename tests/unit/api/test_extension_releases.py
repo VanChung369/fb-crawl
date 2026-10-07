@@ -96,6 +96,35 @@ def test_non_admin_cannot_list_change_or_delete_releases(setup):
     assert client.delete('/api/v1/admin/releases/00000000-0000-0000-0000-000000000001',headers=headers).status_code == 403
 
 
+@pytest.mark.parametrize('enabled',[False,True])
+def test_admin_can_explicitly_unpublish_and_delete_active_release(setup,enabled):
+    client, repo, headers = setup
+    repo.account = replace(repo.account,role=AccountRole.ADMIN)
+    release=upload(client,headers).json()
+    policy={'active_release_id':release['id'],'announcement_enabled':enabled,'enforcement_enabled':enabled,'min_supported_version':'0.2.5','message':'Update'}
+    assert client.put('/api/v1/admin/releases/policy',headers=headers,json=policy).status_code==200
+    deleted=client.delete(f"/api/v1/admin/releases/{release['id']}?unpublish=true",headers=headers)
+    assert deleted.status_code==204
+    value=client.get('/api/v1/admin/releases',headers=headers).json()
+    assert value['releases']==[]
+    assert value['policy']['active_release_id'] is None
+    assert value['policy']['announcement_enabled'] is False
+    assert value['policy']['enforcement_enabled'] is False
+    assert value['policy']['min_supported_version']=='0.0.0'
+    assert client.get(f"/api/v1/app/releases/{release['id']}/download").status_code==404
+
+
+def test_deleting_draft_with_unpublish_does_not_clear_another_active_release(setup):
+    client, repo, headers = setup
+    repo.account = replace(repo.account,role=AccountRole.ADMIN)
+    first=upload(client,headers).json()
+    draft=upload(client,headers,'0.4.0').json()
+    policy={'active_release_id':first['id'],'announcement_enabled':True,'enforcement_enabled':True,'min_supported_version':'0.2.5','message':'Update'}
+    assert client.put('/api/v1/admin/releases/policy',headers=headers,json=policy).status_code==200
+    assert client.delete(f"/api/v1/admin/releases/{draft['id']}?unpublish=true",headers=headers).status_code==204
+    assert client.get('/api/v1/admin/releases',headers=headers).json()['policy']==policy
+
+
 def test_old_version_cannot_resume_but_can_stop_session(tmp_path):
     from tests.unit.api.test_interaction_session_routes import setup as session_setup
     from fb_crawl.releases import ReleaseService, MemoryReleaseRepository

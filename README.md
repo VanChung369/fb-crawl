@@ -65,7 +65,8 @@ Extension update management requires migration `022_extension_releases` and an A
 Run `.\.venv\Scripts\python.exe -m fb_crawl pipeline migrate` before deploying the updated API.
 The admin page accepts a Manifest V3 ZIP up to 25 MB with `manifest.json` at the archive root.
 Upload a version, select the release, and save the announcement and/or minimum-version policy.
-An upload stays a draft until selected. Unpublish a release before deleting its ZIP.
+An upload stays a draft until selected. The admin can unpublish and delete an active release
+in one confirmed action; this atomically turns off its announcement and minimum-version policy.
 Metadata and policy live in PostgreSQL; retain `runtime/downloads/releases` across deployments
 and mount the same directory on all API instances. New product releases are managed from admin
 rather than the old `LATEST_EXTENSION_VERSION` environment variables. Existing pre-feature

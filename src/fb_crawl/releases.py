@@ -114,8 +114,8 @@ class ReleaseService:
         policy.message = policy.message.strip() or DEFAULT_UPDATE_MESSAGE
         return self.repository.save_policy(policy)
 
-    def delete(self, release_id: UUID):
-        self.repository.delete(release_id)
+    def delete(self, release_id: UUID, *, unpublish: bool = False):
+        self.repository.delete(release_id, unpublish=unpublish)
         self.path(release_id).unlink(missing_ok=True)
 
     def public(self):
@@ -167,10 +167,12 @@ class MemoryReleaseRepository:
             self.policy = policy.model_copy(deep=True)
             return self.policy
 
-    def delete(self, release_id):
+    def delete(self, release_id, *, unpublish=False):
         with self.lock:
             if self.policy.active_release_id == release_id:
-                raise ReleaseError("Đổi hoặc bỏ bản đang phát hành trước khi xóa.", 409)
+                if not unpublish:
+                    raise ReleaseError("Đổi hoặc bỏ bản đang phát hành trước khi xóa.", 409)
+                self.policy = self.policy.model_copy(update={"active_release_id":None,"announcement_enabled":False,"enforcement_enabled":False,"min_supported_version":"0.0.0"})
             if not any(r.id == release_id for r in self.releases):
                 raise ReleaseError("Bản phát hành không tồn tại.", 404)
             self.releases = [r for r in self.releases if r.id != release_id]
@@ -222,11 +224,13 @@ class PostgresReleaseRepository:
                            (policy.active_release_id, policy.announcement_enabled, policy.enforcement_enabled, policy.min_supported_version, policy.message))
         return policy
 
-    def delete(self, release_id):
+    def delete(self, release_id, *, unpublish=False):
         with self.connect(mutation=True) as cursor:
             releases, policy = self.read(cursor)
             if policy.active_release_id == release_id:
-                raise ReleaseError("Đổi hoặc bỏ bản đang phát hành trước khi xóa.", 409)
+                if not unpublish:
+                    raise ReleaseError("Đổi hoặc bỏ bản đang phát hành trước khi xóa.", 409)
+                cursor.execute("UPDATE extension_update_policy SET active_release_id=NULL, announcement_enabled=false, enforcement_enabled=false, min_supported_version='0.0.0', updated_at=now() WHERE singleton")
             if not any(r.id == release_id for r in releases):
                 raise ReleaseError("Bản phát hành không tồn tại.", 404)
             cursor.execute("DELETE FROM extension_releases WHERE id=%s", (release_id,))
