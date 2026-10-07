@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -15,6 +15,8 @@ class AppVersionResponse(BaseModel):
     download_url: str
     release_notes: str
     release_date: str
+    announcement_enabled: bool = False
+    enforcement_enabled: bool = False
 
 
 def _find_dist_zip() -> Path | None:
@@ -39,7 +41,10 @@ def create_app_version_router() -> APIRouter:
     router = APIRouter(prefix="/api/v1/app", tags=["version"])
 
     @router.get("/version", response_model=AppVersionResponse)
-    def get_app_version() -> AppVersionResponse:
+    def get_app_version(request: Request, response: Response) -> AppVersionResponse:
+        response.headers["Cache-Control"] = "no-store"
+        if request.app.state.product_services is not None:
+            return AppVersionResponse(**request.app.state.release_service.public())
         latest = os.environ.get("LATEST_EXTENSION_VERSION", "0.1.0").strip()
         min_supported = os.environ.get("MIN_SUPPORTED_EXTENSION_VERSION", "0.1.0").strip()
         download_url = os.environ.get(
@@ -58,10 +63,18 @@ def create_app_version_router() -> APIRouter:
             download_url=download_url,
             release_notes=release_notes,
             release_date=release_date,
+            announcement_enabled=True,
         )
 
     @router.get("/download")
-    def download_latest_extension():
+    def download_latest_extension(request: Request):
+        if request.app.state.product_services is not None:
+            service = request.app.state.release_service
+            releases, policy = service.list()
+            active = next((r for r in releases if r.id == policy.active_release_id), None)
+            if active is None or not service.path(active.id).is_file():
+                raise HTTPException(status_code=404, detail="Chưa có bản phát hành được kích hoạt.")
+            return FileResponse(service.path(active.id), media_type="application/zip", filename=f"lead-finder-{active.version}-chrome.zip", headers={"Cache-Control": "no-store"})
         zip_path = _find_dist_zip()
         if zip_path is None or not zip_path.is_file():
             raise HTTPException(

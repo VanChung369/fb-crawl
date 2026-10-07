@@ -28,6 +28,7 @@ class DashboardApp {
   }
 
   initElements() {
+    this.initReleaseControls();
     this.maintenanceDirty = false;
     this.maintenanceRevision = 0;
     this.maintenanceSaving = false;
@@ -2685,6 +2686,158 @@ class DashboardApp {
     }
   }
 
+  initReleaseControls() {
+    this.releaseBusy = false;
+    this.releaseDirty = false;
+    this.releaseRevision = 0;
+    this.releases = [];
+    this.releasePolicy = null;
+    this.releasePresets = {
+      general: 'Đã có phiên bản {version}. Vui lòng cập nhật để sử dụng ổn định.',
+      fixes: 'Phiên bản {version} sửa lỗi quét và cải thiện độ ổn định. Hãy tải bản cập nhật mới.',
+      required: 'Bạn cần cập nhật tiện ích lên phiên bản {version} để tiếp tục quét và tra số. Dữ liệu đã thu thập vẫn được giữ nguyên.',
+    };
+    document.getElementById('form-upload-release')?.addEventListener('submit', event => {event.preventDefault();void this.uploadRelease();});
+    document.getElementById('form-release-policy')?.addEventListener('submit', event => {event.preventDefault();void this.saveReleasePolicy();});
+    for (const id of ['release-active','release-announce','release-enforce','release-minimum','release-message','release-preset']) {
+      document.getElementById(id)?.addEventListener(id === 'release-message' || id === 'release-minimum' ? 'input' : 'change', event => {
+        this.releaseDirty = true;
+        if (id === 'release-preset' && this.releasePresets[event.target.value]) document.getElementById('release-message').value = this.releasePresets[event.target.value];
+        if (id === 'release-message') document.getElementById('release-preset').value = 'custom';
+        this.previewReleasePolicy();
+      });
+    }
+  }
+
+  releaseDraft() {
+    return {active_release_id:document.getElementById('release-active').value || null,
+      announcement_enabled:document.getElementById('release-announce').checked,
+      enforcement_enabled:document.getElementById('release-enforce').checked,
+      min_supported_version:document.getElementById('release-minimum').value.trim(),
+      message:document.getElementById('release-message').value};
+  }
+
+  previewReleasePolicy() {
+    const selected = this.releases.find(release => release.id === document.getElementById('release-active').value);
+    document.getElementById('release-preview').textContent = document.getElementById('release-message').value.replaceAll('{version}', selected?.version || '…');
+  }
+
+  renderReleasePolicy(policy, preserveDraft = false) {
+    this.releasePolicy = policy;
+    if (!preserveDraft) {
+      document.getElementById('release-active').value = policy.active_release_id || '';
+      document.getElementById('release-announce').checked = policy.announcement_enabled;
+      document.getElementById('release-enforce').checked = policy.enforcement_enabled;
+      document.getElementById('release-minimum').value = policy.min_supported_version;
+      document.getElementById('release-message').value = policy.message;
+      document.getElementById('release-preset').value = Object.keys(this.releasePresets).find(key => this.releasePresets[key] === policy.message) || 'custom';
+    }
+    const status = document.getElementById('release-state');
+    status.textContent = policy.enforcement_enabled ? 'Bắt buộc cập nhật' : policy.announcement_enabled ? 'Đang thông báo' : 'Chưa kích hoạt';
+    status.className = `pill ${policy.enforcement_enabled ? 'warning' : policy.announcement_enabled ? 'success' : 'info'}`;
+    this.previewReleasePolicy();
+    this.renderReleaseList();
+  }
+
+  renderReleaseList() {
+    const list = document.getElementById('release-list');
+    list.replaceChildren();
+    if (!this.releases.length) {const empty=document.createElement('p');empty.className='admin-section-copy';empty.textContent='Chưa có bản phát hành. Upload ZIP để bắt đầu.';list.append(empty);return;}
+    for (const release of this.releases) {
+      const row=document.createElement('div');row.className='release-row';
+      const info=document.createElement('div');
+      const title=document.createElement('strong');title.textContent=`v${release.version}`;
+      const detail=document.createElement('small');detail.textContent=`${(release.size_bytes/1024/1024).toFixed(2)} MB · ${new Date(release.created_at).toLocaleDateString('vi-VN')}`;
+      info.append(title,detail);
+      const active = release.id === this.releasePolicy?.active_release_id;
+      const action=document.createElement('button');action.type='button';action.className=active ? 'btn btn-secondary' : 'btn btn-danger-outline';
+      action.textContent=active ? 'Đang phát hành' : 'Xóa';
+      action.disabled=active || this.releaseBusy;
+      action.setAttribute('aria-label', active ? `Bản ${release.version} đang phát hành` : `Xóa bản ${release.version}`);
+      action.addEventListener('click',()=>void this.deleteRelease(release));
+      row.append(info,action);list.append(row);
+    }
+  }
+
+  setReleaseBusy(busy, label = '') {
+    this.releaseBusy=busy;
+    for (const id of ['btn-save-release-policy','btn-upload-release']) document.getElementById(id).disabled=busy;
+    document.getElementById('btn-upload-release').textContent=busy && label === 'upload' ? 'Đang upload…' : 'Upload bản phát hành';
+    document.getElementById('btn-save-release-policy').textContent=busy && label === 'save' ? 'Đang lưu…' : 'Lưu cấu hình cập nhật';
+    this.renderReleaseList();
+  }
+
+  showReleaseError(error) {
+    const node=document.getElementById('release-error');node.textContent=error.message;node.hidden=false;
+  }
+
+  async loadReleases() {
+    if (this.releaseBusy) return;
+    const revision=this.releaseRevision;
+    try {
+      const value=await this.fetchProductApi('/api/v1/admin/releases');
+      if (revision !== this.releaseRevision || this.releaseBusy) return;
+      this.releases=value.releases;
+      const select=document.getElementById('release-active');
+      const draft=select.value;
+      select.replaceChildren(new Option('Chưa chọn bản phát hành',''));
+      for (const release of this.releases) select.add(new Option(`v${release.version}`,release.id));
+      if (this.releaseDirty) select.value=draft;
+      this.renderReleasePolicy(value.policy,this.releaseDirty);
+      document.getElementById('release-error').hidden=true;
+    } catch(error) {if (revision === this.releaseRevision && !this.releaseBusy) this.showReleaseError(error);}
+  }
+
+  async saveReleasePolicy() {
+    if (this.releaseBusy) return;
+    const draft=this.releaseDraft();
+    this.releaseRevision++;
+    this.setReleaseBusy(true,'save');
+    document.getElementById('release-error').hidden=true;
+    try {
+      const value=await this.fetchProductApi('/api/v1/admin/releases/policy',{method:'PUT',body:JSON.stringify(draft)});
+      const edited=JSON.stringify(draft) !== JSON.stringify(this.releaseDraft());
+      this.releaseDirty=edited;
+      this.renderReleasePolicy(value,edited);
+      this.showToast('Đã lưu cấu hình cập nhật.','success');
+    } catch(error) {this.showReleaseError(error);}
+    finally {this.setReleaseBusy(false);}
+  }
+
+  async uploadRelease() {
+    if (this.releaseBusy) return;
+    const file=document.getElementById('release-file').files[0];
+    const version=document.getElementById('release-version').value.trim();
+    if (!file || !/\.zip$/i.test(file.name) || file.size > 25*1024*1024 || file.size === 0) {this.showReleaseError(new Error('Chọn file ZIP hợp lệ, tối đa 25 MB.'));return;}
+    this.releaseRevision++;
+    this.setReleaseBusy(true,'upload');
+    document.getElementById('release-error').hidden=true;
+    let success=false;
+    try {
+      await this.fetchProductApi('/api/v1/admin/releases',{method:'POST',headers:{'Content-Type':'application/zip','X-Release-Version':version},body:file});
+      if (document.getElementById('release-file').files[0] === file) document.getElementById('release-file').value='';
+      if (document.getElementById('release-version').value.trim() === version) document.getElementById('release-version').value='';
+      success=true;this.showToast('Đã upload. Chọn bản phát hành và lưu để kích hoạt.','success');
+    } catch(error) {this.showReleaseError(error);}
+    finally {this.setReleaseBusy(false);}
+    if (success) await this.loadReleases();
+  }
+
+  async deleteRelease(release) {
+    if (this.releaseBusy || release.id === this.releasePolicy?.active_release_id) return;
+    if (!window.confirm(`Xóa v${release.version} và file ZIP? Thao tác này không xóa dữ liệu khách hàng.`)) return;
+    this.releaseRevision++;
+    this.setReleaseBusy(true);
+    document.getElementById('release-error').hidden=true;
+    let success=false;
+    try {
+      await this.fetchProductApi(`/api/v1/admin/releases/${release.id}`,{method:'DELETE'});
+      success=true;this.showToast('Đã xóa bản phát hành.','success');
+    } catch(error) {this.showReleaseError(error);}
+    finally {this.setReleaseBusy(false);}
+    if (success) await this.loadReleases();
+  }
+
   async loadProductAdminData() {
     try {
       this.productAccount = await this.fetchProductApi("/api/v1/account/me");
@@ -2695,6 +2848,7 @@ class DashboardApp {
     if (this.productAccount?.role !== "admin") return;
     await Promise.all([
       this.loadMaintenance(),
+      this.loadReleases(),
       this.loadAdminLicenses(true),
       this.loadAdminAccounts(true),
       this.loadAdminAuditEvents(true),

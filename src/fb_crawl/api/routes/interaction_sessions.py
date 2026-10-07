@@ -106,6 +106,9 @@ def create_interaction_sessions_router(service, current_account_dependency, *, l
     @router.patch("/{session_id}")
     def transition(session_id: UUID, payload: TransitionPayload, request: Request, current=Depends(account)):
         if payload.status == "running":
+            blocked = request.app.state.release_service.blocked(request.headers.get('x-extension-version'))
+            if blocked:
+                return JSONResponse(status_code=426, content={"code":"extension_update_required", "message":blocked['release_notes']})
             maintenance = request.app.state.maintenance_store.read()
             if maintenance.enabled:
                 return JSONResponse(status_code=503, content={"code": "maintenance", "message": maintenance.message})

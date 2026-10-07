@@ -1297,6 +1297,33 @@
           </div>
 
           <div id="product-admin-workspace" hidden>
+            <section class="panel release-panel" aria-labelledby="release-title">
+              <div class="panel-header"><div><h4 id="release-title">Cập nhật tiện ích</h4><p class="admin-section-copy">Quản lý file ZIP, thông báo cập nhật và phiên bản được phép quét.</p></div><span class="pill info" id="release-state">Đang tải…</span></div>
+              <div class="release-grid">
+                <div class="release-upload">
+                  <h5>Thêm bản phát hành</h5>
+                  <form id="form-upload-release">
+                    <div class="form-group"><label for="release-version">Version</label><input class="form-control" id="release-version" required placeholder="0.3.0" maxlength="24" autocomplete="off"></div>
+                    <div class="form-group"><label for="release-file">File tiện ích (.zip)</label><input class="form-control" id="release-file" type="file" accept=".zip,application/zip" required><small class="admin-section-copy">Tối đa 25 MB. Version phải khớp manifest.json trong ZIP.</small></div>
+                    <button class="btn btn-primary" id="btn-upload-release" type="submit">Upload bản phát hành</button>
+                  </form>
+                  <h5 class="release-list-title">Các bản đã upload</h5>
+                  <div id="release-list" class="release-list" aria-live="polite"></div>
+                </div>
+                <form id="form-release-policy" class="release-policy">
+                  <div class="form-group"><label for="release-active">Bản đang phát hành</label><select id="release-active" class="form-control"><option value="">Chưa chọn bản phát hành</option></select></div>
+                  <label class="maintenance-toggle"><input id="release-announce" type="checkbox" role="switch"><span class="maintenance-switch" aria-hidden="true"></span><span><strong>Bật thông báo cập nhật</strong><small>Hiện thông báo cho người dùng đang dùng bản cũ</small></span></label>
+                  <label class="maintenance-toggle"><input id="release-enforce" type="checkbox" role="switch"><span class="maintenance-switch" aria-hidden="true"></span><span><strong>Bắt buộc phiên bản tối thiểu</strong><small>Khóa quét và tra số trên các phiên bản không được hỗ trợ</small></span></label>
+                  <div class="form-group"><label for="release-minimum">Phiên bản tối thiểu được phép quét</label><input class="form-control" id="release-minimum" value="0.0.0" required maxlength="24" placeholder="0.2.5"></div>
+                  <div class="form-group"><label for="release-preset">Thông báo mẫu</label><select id="release-preset" class="form-control"><option value="general">Đã có phiên bản mới</option><option value="fixes">Sửa lỗi và cải thiện độ ổn định</option><option value="required">Cập nhật để tiếp tục quét</option><option value="custom">Nội dung tùy chỉnh</option></select></div>
+                  <div class="form-group"><label for="release-message">Nội dung thông báo</label><textarea id="release-message" class="form-control" rows="3" maxlength="1000"></textarea><small class="admin-section-copy">Dùng {version} để chèn version đang phát hành.</small></div>
+                  <div class="release-preview"><strong>Xem trước thông báo</strong><p id="release-preview"></p></div>
+                  <p class="admin-section-copy">Bản bị khóa vẫn xem và xuất được dữ liệu đã thu thập.</p>
+                  <button id="btn-save-release-policy" class="btn btn-primary" type="submit">Lưu cấu hình cập nhật</button>
+                </form>
+              </div>
+              <p id="release-error" class="release-error" role="alert" hidden></p>
+            </section>
             <section class="panel maintenance-panel" aria-labelledby="maintenance-title">
               <div class="panel-header">
                 <div><h4 id="maintenance-title">Bảo trì hệ thống</h4><p class="admin-section-copy">Tạm dừng quét và tra số. Khách hàng vẫn xem và xuất được dữ liệu đã thu thập.</p></div>

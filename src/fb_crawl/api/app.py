@@ -36,6 +36,8 @@ from fb_crawl.api.safe_logging import log_unexpected_api_error
 from fb_crawl.api.correlation import correlate_request
 from fb_crawl.maintenance import MaintenanceError, MaintenanceStore, blocks_new_work
 from fb_crawl.api.routes.maintenance import create_maintenance_router
+from fb_crawl.releases import ReleaseError, ReleaseService, MemoryReleaseRepository, PostgresReleaseRepository
+from fb_crawl.api.routes.releases import create_release_admin_router, create_release_download_router
 from starlette.concurrency import run_in_threadpool
 from fb_crawl.core.jobs import IdempotencyConflict, JobConflict, JobNotFound
 from pathlib import Path
@@ -88,6 +90,26 @@ def create_app(
     app.state.session_pool = resolved_session_pool
     app.state.product_services = product_services
     app.state.maintenance_store = MaintenanceStore()
+    account_repository = product_services.account_repository if product_services else None
+    database_url = getattr(account_repository, "database_url", None)
+    app.state.release_service = ReleaseService(
+        PostgresReleaseRepository(database_url) if isinstance(database_url, str) else MemoryReleaseRepository(),
+        Path("runtime/downloads/releases"),
+    )
+
+    @app.exception_handler(ReleaseError)
+    async def release_error(_request: Request, error: ReleaseError):
+        return JSONResponse(status_code=error.status, content={"code": "release_error", "message": str(error)})
+
+    @app.middleware("http")
+    async def enforce_extension_version(request: Request, call_next):
+        if blocks_new_work(request.method, request.url.path):
+            blocked = await run_in_threadpool(app.state.release_service.blocked, request.headers.get("x-extension-version"))
+            if blocked:
+                return JSONResponse(status_code=426, content={"code": "extension_update_required", "message": blocked["release_notes"],
+                                    "min_supported_version": blocked["min_supported_version"], "download_url": blocked["download_url"]},
+                                    headers={"Cache-Control": "no-store"})
+        return await call_next(request)
 
     @app.middleware("http")
     async def enforce_maintenance(request: Request, call_next):
@@ -108,6 +130,7 @@ def create_app(
 
     app.include_router(create_auth_page_router())
     app.include_router(create_app_version_router())
+    app.include_router(create_release_download_router())
     from fb_crawl.interaction_sessions.models import SessionError
 
     @app.exception_handler(SessionError)
@@ -151,6 +174,7 @@ def create_app(
             clock=clock,
         )
         app.include_router(create_maintenance_router(product_auth))
+        app.include_router(create_release_admin_router(product_auth))
         if product_services.interaction_session_service is not None:
             from fb_crawl.api.routes.interaction_sessions import create_interaction_sessions_router
             app.include_router(create_interaction_sessions_router(
@@ -308,7 +332,7 @@ def create_app(
             CORSMiddleware,
             allow_origins=list(settings.cors_origins),
             allow_credentials=True,
-            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=[
                 "Authorization",
                 "X-Installation-ID",
@@ -317,6 +341,8 @@ def create_app(
                 "Idempotency-Key",
                 "Content-Type",
                 "X-Request-ID",
+                "X-Extension-Version",
+                "X-Release-Version",
             ],
             expose_headers=["X-Request-ID", "Content-Disposition"],
         )
