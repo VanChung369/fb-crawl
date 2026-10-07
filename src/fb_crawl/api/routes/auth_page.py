@@ -1,7 +1,8 @@
-"""Public, self-contained account email verification page."""
+"""Public, self-contained account verification and password recovery pages."""
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
+from fb_crawl.api.routes.password_reset_page import PASSWORD_RESET_PAGE
 
 
 def create_auth_page_router() -> APIRouter:
@@ -14,6 +15,15 @@ def create_auth_page_router() -> APIRouter:
             "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        })
+
+    @router.get('/reset-password', response_class=HTMLResponse, include_in_schema=False)
+    def reset_password_page() -> HTMLResponse:
+        return HTMLResponse(PASSWORD_RESET_PAGE, headers={
+            'Cache-Control': 'no-store',
+            'Referrer-Policy': 'no-referrer',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         })
 
     return router

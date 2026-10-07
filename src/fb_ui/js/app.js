@@ -30,6 +30,7 @@ class DashboardApp {
   initElements() {
     this.maintenanceDirty = false;
     this.maintenanceRevision = 0;
+    this.maintenanceSaving = false;
     this.maintenancePresets = {
       general: "Hệ thống đang bảo trì. Vui lòng thử lại sau. Bạn vẫn có thể xem và xuất dữ liệu đã thu thập.",
       upgrade: "Hệ thống đang được nâng cấp để hoạt động ổn định hơn. Tính năng quét và tra số sẽ sớm trở lại.",
@@ -2717,16 +2718,18 @@ class DashboardApp {
   }
 
   async loadMaintenance() {
+    if (this.maintenanceSaving) return;
     const revision = this.maintenanceRevision;
     const error = document.getElementById("maintenance-error");
     const button = document.getElementById("btn-save-maintenance");
     try {
       const value = await this.fetchProductApi("/api/v1/app/maintenance");
-      if (revision !== this.maintenanceRevision) return;
+      if (revision !== this.maintenanceRevision || this.maintenanceSaving) return;
       this.renderMaintenance(value, this.maintenanceDirty);
       error.hidden = true;
       button.disabled = false;
     } catch (reason) {
+      if (revision !== this.maintenanceRevision || this.maintenanceSaving) return;
       error.textContent = reason.message || "Không thể tải trạng thái bảo trì.";
       error.hidden = false;
     }
@@ -2734,8 +2737,14 @@ class DashboardApp {
 
   async saveMaintenance() {
     const button = document.getElementById("btn-save-maintenance");
-    if (button.disabled) return;
+    if (button.disabled || this.maintenanceSaving) return;
     this.maintenanceRevision++;
+    this.maintenanceSaving = true;
+    const draft = {
+      enabled: document.getElementById("maintenance-enabled").checked,
+      message: document.getElementById("maintenance-message").value,
+      preset: document.getElementById("maintenance-preset").value,
+    };
     const error = document.getElementById("maintenance-error");
     button.disabled = true;
     button.textContent = "Đang lưu…";
@@ -2743,17 +2752,21 @@ class DashboardApp {
     try {
       const value = await this.fetchProductApi("/api/v1/admin/maintenance", {
         method: "POST", body: JSON.stringify({
-          enabled: document.getElementById("maintenance-enabled").checked,
-          message: document.getElementById("maintenance-message").value.trim(),
+          enabled: draft.enabled,
+          message: draft.message.trim(),
         }),
       });
-      this.renderMaintenance(value);
-      this.maintenanceDirty = false;
+      const edited = draft.enabled !== document.getElementById("maintenance-enabled").checked ||
+        draft.message !== document.getElementById("maintenance-message").value ||
+        draft.preset !== document.getElementById("maintenance-preset").value;
+      this.renderMaintenance(value, edited);
+      this.maintenanceDirty = edited;
       this.showToast(value.enabled ? "Đã bật chế độ bảo trì." : "Đã tắt chế độ bảo trì.", "success");
     } catch (reason) {
       error.textContent = reason.message || "Không thể lưu chế độ bảo trì.";
       error.hidden = false;
     } finally {
+      this.maintenanceSaving = false;
       button.disabled = false;
       button.textContent = "Lưu chế độ bảo trì";
     }
