@@ -202,7 +202,7 @@ class PostgresReleaseRepository:
         releases = [Release(id=r[0], version=r[1], size_bytes=r[2], sha256=r[3], created_at=r[4].isoformat()) for r in cursor.fetchall()]
         cursor.execute("SELECT active_release_id, announcement_enabled, enforcement_enabled, min_supported_version, message FROM extension_update_policy WHERE singleton")
         row = cursor.fetchone()
-        policy = UpdatePolicy(active_release_id=row[0], announcement_enabled=row[1], enforcement_enabled=row[2], min_supported_version=row[3], message=row[4]) if row else UpdatePolicy()
+        policy = UpdatePolicy(active_release_id=row[0], announcement_enabled=row[1], enforcement_enabled=row[2], min_supported_version=row[3], message=row[4] or DEFAULT_UPDATE_MESSAGE) if row else UpdatePolicy()
         return releases, policy
 
     def snapshot(self):

@@ -1967,6 +1967,10 @@ body {
   gap: 10px;
 }
 
+.release-error[hidden] {
+  display: none;
+}
+
 .release-error::before {
   content: '⚠️';
   font-size: 14px;
