@@ -13,6 +13,7 @@ from fb_crawl.api.product_schemas import (
     DeviceListResponse,
     DeviceResponse,
     DeviceRevokedResponse,
+    DeviceDeletedResponse,
 )
 
 
@@ -73,5 +74,13 @@ def create_product_account_router(
     ) -> DeviceRevokedResponse:
         repository.revoke_device(current.account.id, device_id, clock())
         return DeviceRevokedResponse(device_id=device_id)
+
+    @router.delete('/api/v1/devices/{device_id}/record', response_model=DeviceDeletedResponse)
+    def delete_revoked_device(
+        device_id: int = Path(gt=0, le=9223372036854775807),
+        current: CurrentAccount = Depends(current_auth),
+    ) -> DeviceDeletedResponse:
+        repository.delete_revoked_device(current.account.id, device_id, clock())
+        return DeviceDeletedResponse(device_id=device_id)
 
     return router

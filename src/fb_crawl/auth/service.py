@@ -325,6 +325,28 @@ class AccountAuthService:
         self._repository.revoke_account_sessions(account.id, now)
         return GenericRequestResult()
 
+    def change_password(
+        self,
+        account_id: int,
+        current_password: str,
+        new_password: str,
+        now: datetime,
+        *,
+        ip_address: str,
+    ) -> GenericRequestResult:
+        self._rate_limiter.check('change_password', str(account_id), None, ip_address, now)
+        _validate_password(new_password)
+        account = self._repository.get_account(account_id)
+        if account is None or account.status is not AccountStatus.ACTIVE:
+            raise ValidationError('Account is not available.')
+        if not self._password_hasher.verify(account.password_hash, current_password):
+            raise ValidationError('Current password is incorrect.')
+        if not self._repository.change_password(
+            account.id, account.password_hash, self._password_hasher.hash(new_password), now
+        ):
+            raise ValidationError('Password changed in another session. Sign in again and retry.')
+        return GenericRequestResult()
+
     def logout(self, session_id: UUID, now: datetime) -> None:
         self._repository.revoke_session(session_id, now)
 

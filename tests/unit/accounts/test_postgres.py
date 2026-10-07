@@ -10,10 +10,12 @@ from fb_crawl.accounts.models import AccountRole, AccountStatus, DeviceStatus
 from fb_crawl.accounts.repository import (
     AdminAccountProtected,
     AdminAlreadyExists,
+    DeviceNotFound,
     SessionReuseDetected,
 )
 from fb_crawl.accounts.postgres import PostgresAccountRepository
 from fb_data_pipeline.repositories.errors import DatabaseError
+from fb_crawl.core.exceptions import ValidationError
 
 
 NOW = datetime(2026, 8, 30, 8, tzinfo=UTC)
@@ -45,6 +47,46 @@ def replace_account_status(row: tuple[object, ...], status: str) -> tuple[object
 
 def device_row() -> tuple[object, ...]:
     return (9, 7, INSTALLATION_ID, "Chrome", "active", NOW, NOW)
+
+
+@pytest.mark.parametrize('matched', [False, True])
+def test_password_change_is_conditional_and_invalidates_sessions_and_reset_links(matched):
+    cursor = ScriptedCursor([(7,) if matched else None])
+    connection = RecordingConnection(cursor)
+    repository = PostgresAccountRepository('postgresql://test', connect_factory=lambda *_a, **_k: connection)
+    assert repository.change_password(7, 'old-hash', 'new-hash', NOW) is matched
+    updates = [(sql, params) for sql, params in cursor.commands if 'UPDATE accounts' in sql]
+    assert len(updates) == 1
+    assert updates[0][1] == ('new-hash', NOW, 7, 'old-hash')
+    assert "status = 'active'" in updates[0][0]
+    sessions = [(sql, params) for sql, params in cursor.commands if 'UPDATE auth_sessions' in sql]
+    tokens = [(sql, params) for sql, params in cursor.commands if 'UPDATE account_tokens' in sql]
+    assert bool(sessions) is matched
+    assert bool(tokens) is matched
+    if matched:
+        assert sessions[0][1] == (NOW, 7)
+        assert tokens[0][1] == (NOW, 7)
+        assert "purpose = 'password_reset'" in tokens[0][0]
+    assert connection.exit_errors == [None]
+
+
+@pytest.mark.parametrize('status', ['revoked','active',None])
+def test_delete_device_keeps_revocation_and_only_removes_owned_revoked_records(status):
+    cursor=ScriptedCursor([None if status is None else (status,)])
+    repository=PostgresAccountRepository('postgresql://test',connect_factory=lambda *_args,**_kwargs: RecordingConnection(cursor))
+    if status=='revoked':
+        repository.delete_revoked_device(7,9,NOW)
+        updates=[(sql,params) for sql,params in cursor.commands if 'UPDATE devices' in sql]
+        assert len(updates)==1
+        assert 'deleted_at' in updates[0][0]
+        assert "status = 'revoked'" in updates[0][0]
+        assert updates[0][1]==(NOW,7,9)
+        assert not any('DELETE FROM' in sql for sql,_ in cursor.commands)
+    else:
+        with pytest.raises(DeviceNotFound if status is None else ValidationError):
+            repository.delete_revoked_device(7,9,NOW)
+        assert not any('UPDATE devices' in sql for sql,_ in cursor.commands)
+    assert next(params for sql,params in cursor.commands if 'SELECT status FROM devices' in sql)==(7,9)
 
 
 def session_row(

@@ -55,6 +55,10 @@ class AccountRepository(Protocol):
 
     def get_account(self, account_id: int) -> Account | None: ...
 
+    def change_password(
+        self, account_id: int, expected_hash: str, password_hash: str, now: datetime
+    ) -> bool: ...
+
     def list_accounts(
         self, *, limit: int = 100, cursor: int | None = None
     ) -> tuple[Account, ...]: ...
@@ -93,6 +97,8 @@ class AccountRepository(Protocol):
     def revoke_device(
         self, account_id: int, device_id: int, now: datetime
     ) -> Device: ...
+
+    def delete_revoked_device(self, account_id: int, device_id: int, now: datetime) -> None: ...
 
     def revoke_device_as_admin(
         self, account_id: int, device_id: int, actor_account_id: int, now: datetime

@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from fb_crawl.accounts.repository import SessionReuseDetected
+from fb_crawl.accounts.models import DeviceStatus
 from fb_crawl.accounts.postgres import PostgresAccountRepository
 from fb_data_pipeline.repositories.migrations import MigrationRunner
 
@@ -39,6 +40,21 @@ def _safe_test_database_name(value: str) -> str | None:
     ):
         return None
     return name
+
+
+def test_removed_revoked_device_stays_revoked_and_disappears_from_device_list() -> None:
+    repository = PostgresAccountRepository(TEST_DATABASE_URL)
+    account = repository.create_account('cleanup@example.com', 'cleanup@example.com', '$argon2id$test-hash')
+    device = repository.create_device(account.id, INSTALLATION_ID, 'Old laptop', NOW)
+    repository.revoke_device(account.id, device.id, NOW)
+    repository.delete_revoked_device(account.id, device.id, NOW)
+    repository.delete_revoked_device(account.id, device.id, NOW)
+    assert repository.list_devices(account.id) == ()
+    assert repository.get_device(account.id, device.id).status is DeviceStatus.REVOKED
+    recreated = repository.create_device(account.id, INSTALLATION_ID, 'Old laptop', NOW)
+    assert recreated.id == device.id
+    assert recreated.status is DeviceStatus.REVOKED
+    assert repository.list_devices(account.id) == ()
 
 
 TEST_DATABASE_NAME = _safe_test_database_name(TEST_DATABASE_URL)

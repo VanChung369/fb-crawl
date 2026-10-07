@@ -27,6 +27,7 @@ DEFAULT_AUTH_POLICIES = {
     "refresh": RateLimitPolicy(30, 5 * 60),
     "forgot_password": RateLimitPolicy(5, 60 * 60),
     "reset_password": RateLimitPolicy(5, 60 * 60),
+    "change_password": RateLimitPolicy(5, 15 * 60),
     "reauthenticate": RateLimitPolicy(5, 15 * 60),
     "license_redeem": RateLimitPolicy(10, 15 * 60),
     "contact_lookup": RateLimitPolicy(1200, 60),

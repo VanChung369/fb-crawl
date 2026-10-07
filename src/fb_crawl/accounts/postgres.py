@@ -28,6 +28,7 @@ from fb_crawl.accounts.repository import (
     TokenPurpose,
 )
 from fb_data_pipeline.repositories.errors import DatabaseError
+from fb_crawl.core.exceptions import ValidationError
 
 
 _ACCOUNT_COLUMNS = """
@@ -334,6 +335,38 @@ class PostgresAccountRepository:
             row = cursor.fetchone()
         return self._required_account(row)
 
+    def change_password(
+        self, account_id: int, expected_hash: str, password_hash: str, now: datetime
+    ) -> bool:
+        # The hash comparison prevents a concurrent password change being overwritten.
+        # Credential update and session invalidation must commit together.
+        with self._connect() as cursor:
+            cursor.execute(
+                """
+                UPDATE accounts SET password_hash = %s, updated_at = %s
+                WHERE id = %s AND password_hash = %s AND status = 'active'
+                RETURNING id
+                """,
+                (password_hash, now, account_id, expected_hash),
+            )
+            if cursor.fetchone() is None:
+                return False
+            cursor.execute(
+                """
+                UPDATE auth_sessions SET revoked_at = %s
+                WHERE account_id = %s AND revoked_at IS NULL
+                """,
+                (now, account_id),
+            )
+            cursor.execute(
+                """
+                UPDATE account_tokens SET consumed_at = %s
+                WHERE account_id = %s AND purpose = 'password_reset' AND consumed_at IS NULL
+                """,
+                (now, account_id),
+            )
+        return True
+
     def create_device(
         self,
         account_id: int,
@@ -375,13 +408,30 @@ class PostgresAccountRepository:
                 f"""
                 SELECT {_DEVICE_COLUMNS}
                 FROM devices
-                WHERE account_id = %s
+                WHERE account_id = %s AND deleted_at IS NULL
                 ORDER BY first_seen_at, id
                 """,
                 (account_id,),
             )
             rows = cursor.fetchall()
         return tuple(self._device(row) for row in rows)
+
+    def delete_revoked_device(self, account_id: int, device_id: int, now: datetime) -> None:
+        with self._connect() as cursor:
+            cursor.execute(
+                'SELECT status FROM devices WHERE account_id = %s AND id = %s FOR UPDATE',
+                (account_id, device_id),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise DeviceNotFound('Device was not found.')
+            if row[0] != DeviceStatus.REVOKED:
+                raise ValidationError('Only revoked devices can be removed.')
+            cursor.execute(
+                """UPDATE devices SET deleted_at = COALESCE(deleted_at, %s)
+                   WHERE account_id = %s AND id = %s AND status = 'revoked'""",
+                (now, account_id, device_id),
+            )
 
     def revoke_device(
         self, account_id: int, device_id: int, now: datetime

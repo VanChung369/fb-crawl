@@ -43,6 +43,13 @@ class ResetPasswordRequest(TokenRequest):
     new_password: str = Field(min_length=12, max_length=128)
 
 
+class ChangePasswordRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
+
+
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -139,6 +146,13 @@ class DeviceRevokedResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["revoked"] = "revoked"
+    device_id: int
+
+
+class DeviceDeletedResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    status: Literal['deleted'] = 'deleted'
     device_id: int
 
 

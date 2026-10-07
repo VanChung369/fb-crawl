@@ -116,6 +116,16 @@ class FakeRepository:
         self.account = replace(self.account, password_hash=password_hash, updated_at=now)
         return self.account
 
+    def change_password(self, account_id, expected_hash, password_hash, now):
+        if not self.account or self.account.id != account_id or self.account.password_hash != expected_hash:
+            return False
+        self.update_password(account_id, password_hash, now)
+        self.revoke_account_sessions(account_id, now)
+        for digest, (purpose, owner, expiry, consumed) in tuple(self.tokens.items()):
+            if purpose == 'password_reset' and owner == account_id:
+                self.tokens[digest] = (purpose, owner, expiry, True)
+        return True
+
     def create_device(self, account_id, installation_id, display_name, now) -> Device:
         existing = next(
             (item for item in self.devices.values() if item.installation_id == installation_id),

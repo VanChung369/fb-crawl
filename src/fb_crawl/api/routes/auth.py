@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from fb_crawl.api.dependencies import CurrentAccount, ProductAccountAuth, validate_cookie_csrf
 from fb_crawl.api.product_schemas import (
     AuthTokenResponse,
+    ChangePasswordRequest,
     EmailRequest,
     GenericAcceptedResponse,
     GoogleLoginRequest,
@@ -163,6 +164,22 @@ def create_product_auth_router(
             clock(),
             ip_address=_client_ip(request),
         )
+        return GenericAcceptedResponse()
+
+    @router.post('/change-password', response_model=GenericAcceptedResponse)
+    def change_password(
+        payload: ChangePasswordRequest,
+        request: Request,
+        response: Response,
+        current: CurrentAccount = Depends(current_auth),
+    ) -> GenericAcceptedResponse:
+        auth_service.change_password(
+            current.account.id, payload.current_password, payload.new_password,
+            clock(), ip_address=_client_ip(request),
+        )
+        response.delete_cookie('lead_finder_access', path='/')
+        response.delete_cookie('lead_finder_refresh', path='/api/v1/auth')
+        response.delete_cookie('lead_finder_csrf', path='/')
         return GenericAcceptedResponse()
 
     @router.post("/logout", response_model=GenericAcceptedResponse)

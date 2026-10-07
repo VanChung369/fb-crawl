@@ -61,6 +61,15 @@ Artifacts are written below `LEAD_FINDER_EXPORT_DIR` (default
 
 ### Lead Finder account setup
 
+Removing revoked devices from the extension list requires migration `020_removed_devices`
+and an API restart. Run `fb-crawl pipeline migrate` before deploying the updated API.
+Removed entries remain revoked so cleaning the list does not allow that installation to sign in again.
+
+Signed-in extension users can change their password from the account menu.
+`POST /api/v1/auth/change-password` requires the current password and a new password
+of 12–128 characters. A successful change revokes all account sessions and any
+unused password reset links, and the extension asks the user to sign in again.
+
 Scan history auto-save requires migration `019_session_observed_phone` and an API restart.
 Apply packaged migrations with `.\.venv\Scripts\python.exe -m fb_crawl pipeline migrate`.
 Saving attaches existing owned phone lookup events and preserves phone numbers observed in comments; it never starts a phone lookup.
