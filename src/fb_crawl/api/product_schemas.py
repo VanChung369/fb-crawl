@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 import re
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
@@ -200,6 +200,7 @@ class EntitlementsResponse(BaseModel):
 
     monthly_contact_limit: int
     monthly_contact_used: int = Field(ge=0)
+    quota_period_start: date | None = None
     max_devices: int
     allow_group_crawl: bool
     allow_comment_crawl: bool

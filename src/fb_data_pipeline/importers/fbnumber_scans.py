@@ -18,7 +18,7 @@ from fb_data_pipeline.core.models import (
     canonical_profile_url,
 )
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
-from fb_data_pipeline.detectors.vietnamese import infer_profile_attributes
+from fb_data_pipeline.detectors.vietnamese import first_complete_address, infer_profile_attributes
 from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
 from fb_data_pipeline.services.pipeline import EnrichedUser
 
@@ -85,7 +85,9 @@ def import_scan_item(
     """Parse a single FBNumber scan item into an EnrichedUser."""
     link_fb = str(item.get("linkFb") or item.get("link") or "").strip()
     name = str(item.get("name") or "").strip()
-    location = str(item.get("location") or item.get("address") or "").strip()
+    location = first_complete_address(
+        item.get("location"), item.get("address"), item.get("city"), item.get("current_city"),
+    )
     gender = str(item.get("gender") or "").strip()
     birthday = str(item.get("birthday") or "").strip()
     scan_at_str = item.get("scanAt")

@@ -27,6 +27,7 @@ def test_schema_migrations_are_packaged_with_stable_checksums() -> None:
         "020_removed_devices",
         "021_password_reset_codes",
         "022_extension_releases",
+        "024_subscription_quota_scopes",
     ]
     assert all(len(item.checksum) == 64 for item in migrations)
     assert "CREATE TABLE facebook_users" in migrations[0].sql

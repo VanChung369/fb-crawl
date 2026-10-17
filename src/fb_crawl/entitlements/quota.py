@@ -31,7 +31,9 @@ class RevealDecision:
 
 
 class ContactQuotaRepository(Protocol):
-    def current_usage(self, account_id: int, period_start: date) -> int: ...
+    def current_usage(
+        self, account_id: int, period_start: date, now: datetime
+    ) -> int: ...
 
     def precheck(
         self,
@@ -59,9 +61,12 @@ class ContactQuotaService:
         self.repository = repository
         self.timezone = timezone
 
+    def period_start(self, now: datetime) -> date:
+        return quota_period(now, self.timezone)
+
     def current_usage(self, account_id: int, now: datetime) -> int:
         return self.repository.current_usage(
-            account_id, quota_period(now, self.timezone)
+            account_id, quota_period(now, self.timezone), now
         )
 
     def precheck(
@@ -126,9 +131,9 @@ class PostgresContactQuotaRepository:
         now: datetime,
     ) -> QuotaPrecheck:
         with self._connect() as cursor:
-            limit, used = self._lock_usage(cursor, account_id, period_start, now)
+            scope, limit, used = self._lock_usage(cursor, account_id, period_start, now)
             reveal_id = self._find_reveal(
-                cursor, account_id, facebook_user_id, period_start
+                cursor, account_id, facebook_user_id, period_start, scope
             )
         already_revealed = reveal_id is not None
         return QuotaPrecheck(
@@ -138,15 +143,16 @@ class PostgresContactQuotaRepository:
             limit=limit,
         )
 
-    def current_usage(self, account_id: int, period_start: date) -> int:
+    def current_usage(self, account_id: int, period_start: date, now: datetime) -> int:
         with self._connect() as cursor:
+            scope, _limit = self._effective_scope(cursor, account_id, now)
             cursor.execute(
                 """
                 SELECT used_contact_count
                 FROM usage_monthly
-                WHERE account_id = %s AND period_start = %s
+                WHERE account_id = %s AND period_start = %s AND quota_scope = %s
                 """,
-                (account_id, period_start),
+                (account_id, period_start, scope),
             )
             row = cursor.fetchone()
         return 0 if row is None else int(row[0])
@@ -161,9 +167,9 @@ class PostgresContactQuotaRepository:
         now: datetime,
     ) -> RevealDecision:
         with self._connect() as cursor:
-            limit, used = self._lock_usage(cursor, account_id, period_start, now)
+            scope, limit, used = self._lock_usage(cursor, account_id, period_start, now)
             reveal_id = self._find_reveal(
-                cursor, account_id, facebook_user_id, period_start
+                cursor, account_id, facebook_user_id, period_start, scope
             )
             if reveal_id is not None:
                 return RevealDecision(True, False, reveal_id, used, limit)
@@ -174,9 +180,9 @@ class PostgresContactQuotaRepository:
                 """
                 INSERT INTO account_contact_reveals (
                     account_id, facebook_user_id, phone_number_id,
-                    lookup_event_id, period_start, revealed_at
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (account_id, facebook_user_id, period_start)
+                    lookup_event_id, period_start, revealed_at, quota_scope
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (account_id, facebook_user_id, period_start, quota_scope)
                     DO NOTHING
                 RETURNING id
                 """,
@@ -187,12 +193,13 @@ class PostgresContactQuotaRepository:
                     lookup_event_id,
                     period_start,
                     now,
+                    scope,
                 ),
             )
             inserted = cursor.fetchone()
             if inserted is None:
                 reveal_id = self._find_reveal(
-                    cursor, account_id, facebook_user_id, period_start
+                    cursor, account_id, facebook_user_id, period_start, scope
                 )
                 if reveal_id is None:
                     raise DatabaseError("Database contact reveal write failed.")
@@ -203,10 +210,10 @@ class PostgresContactQuotaRepository:
                 UPDATE usage_monthly
                 SET used_contact_count = used_contact_count + 1,
                     updated_at = %s
-                WHERE account_id = %s AND period_start = %s
+                WHERE account_id = %s AND period_start = %s AND quota_scope = %s
                 RETURNING used_contact_count
                 """,
-                (now, account_id, period_start),
+                (now, account_id, period_start, scope),
             )
             updated = cursor.fetchone()
             if updated is None:
@@ -214,31 +221,29 @@ class PostgresContactQuotaRepository:
             return RevealDecision(True, True, inserted[0], updated[0], limit)
 
     @staticmethod
-    def _effective_limit(cursor: Any, account_id: int, now: datetime) -> int:
+    def _effective_scope(cursor: Any, account_id: int, now: datetime) -> tuple[int, int]:
+        # Scope 0 is the default plan; each redeemed subscription owns its usage.
         cursor.execute(
             """
-            SELECT COALESCE(
-                (
-                    SELECT monthly_contact_limit
-                    FROM account_subscriptions
-                    WHERE account_id = %s AND status = 'valid'
-                      AND starts_at <= %s AND %s < ends_at
-                    ORDER BY starts_at DESC, id DESC
-                    LIMIT 1
-                ),
-                (
-                    SELECT monthly_contact_limit
-                    FROM plans
-                    WHERE code = 'default' AND is_system = true
-                )
-            )
+            SELECT COALESCE(active.id, 0),
+                   COALESCE(active.monthly_contact_limit, defaults.monthly_contact_limit)
+            FROM plans AS defaults
+            LEFT JOIN LATERAL (
+                SELECT id, monthly_contact_limit
+                FROM account_subscriptions
+                WHERE account_id = %s AND status = 'valid'
+                  AND starts_at <= %s AND %s < ends_at
+                ORDER BY starts_at DESC, id DESC
+                LIMIT 1
+            ) AS active ON true
+            WHERE defaults.code = 'default' AND defaults.is_system = true
             """,
             (account_id, now, now),
         )
         row = cursor.fetchone()
-        if row is None or row[0] is None:
+        if row is None or row[1] is None:
             raise DatabaseError("Default entitlement plan is unavailable.")
-        return row[0]
+        return int(row[0]), int(row[1])
 
     def _lock_usage(
         self,
@@ -246,30 +251,31 @@ class PostgresContactQuotaRepository:
         account_id: int,
         period_start: date,
         now: datetime,
-    ) -> tuple[int, int]:
-        limit = self._effective_limit(cursor, account_id, now)
+    ) -> tuple[int, int, int]:
+        scope, limit = self._effective_scope(cursor, account_id, now)
         cursor.execute(
             """
             INSERT INTO usage_monthly (
-                account_id, period_start, used_contact_count, created_at, updated_at
-            ) VALUES (%s, %s, 0, %s, %s)
-            ON CONFLICT (account_id, period_start) DO NOTHING
+                account_id, period_start, used_contact_count, created_at, updated_at,
+                quota_scope
+            ) VALUES (%s, %s, 0, %s, %s, %s)
+            ON CONFLICT (account_id, period_start, quota_scope) DO NOTHING
             """,
-            (account_id, period_start, now, now),
+            (account_id, period_start, now, now, scope),
         )
         cursor.execute(
             """
             SELECT used_contact_count
             FROM usage_monthly
-            WHERE account_id = %s AND period_start = %s
+            WHERE account_id = %s AND period_start = %s AND quota_scope = %s
             FOR UPDATE
             """,
-            (account_id, period_start),
+            (account_id, period_start, scope),
         )
         row = cursor.fetchone()
         if row is None:
             raise DatabaseError("Database monthly quota row is unavailable.")
-        return limit, row[0]
+        return scope, limit, row[0]
 
     @staticmethod
     def _find_reveal(
@@ -277,15 +283,16 @@ class PostgresContactQuotaRepository:
         account_id: int,
         facebook_user_id: int,
         period_start: date,
+        scope: int,
     ) -> int | None:
         cursor.execute(
             """
             SELECT id
             FROM account_contact_reveals
             WHERE account_id = %s AND facebook_user_id = %s
-              AND period_start = %s
+              AND period_start = %s AND quota_scope = %s
             """,
-            (account_id, facebook_user_id, period_start),
+            (account_id, facebook_user_id, period_start, scope),
         )
         row = cursor.fetchone()
         return None if row is None else row[0]
