@@ -11,10 +11,18 @@ import psycopg
 from fb_crawl.core.exceptions import ValidationError
 from fb_crawl.core.jobs import KeysetCursor, Page, decode_cursor, encode_cursor
 from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
+from fb_data_pipeline.detectors.vietnamese import first_complete_address
 from fb_data_pipeline.repositories.errors import DatabaseError
 
 
 PhoneOrigin = Literal["fbnumber", "fb_crawl"]
+
+
+def _complete_phone(value: object) -> str | None:
+    try:
+        return normalize_phone(str(value or ""))
+    except InvalidPhoneNumber:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -589,9 +597,9 @@ class UserQueryRepository:
                 username=_optional_text(row[2]),
                 name=_optional_text(row[3]),
                 profile_url=_optional_text(row[4]),
-                phone_1=_optional_text(row[5]),
-                phone_2=_optional_text(row[6]),
-                address=_optional_text(row[7]),
+                phone_1=_complete_phone(row[5]),
+                phone_2=_complete_phone(row[6]),
+                address=first_complete_address(row[7]) or None,
                 birth_date=_optional_text(row[8]),
                 gender=_optional_text(row[9]),
                 created_at=_timestamp(row[10]),

@@ -76,6 +76,22 @@ def user_row(user_id: int = 7) -> tuple[object, ...]:
     )
 
 
+@pytest.mark.parametrize("masked_address", ["Thà****************", "Thá********"])
+def test_user_listing_does_not_expose_legacy_masked_addresses_as_complete(masked_address: str) -> None:
+    row = list(user_row())
+    row[7] = masked_address
+    row[5] = "+84966777"
+    row[6] = "+84963005272"
+    cursor = RecordingCursor([tuple(row)])
+    repository = UserQueryRepository(
+        "postgresql://test", connect_factory=connection_factory(RecordingConnection(cursor)),
+    )
+    page = repository.list_users(UserQuery())
+    assert page.items[0].address is None
+    assert page.items[0].phone_1 is None
+    assert page.items[0].phone_2 == "+84963005272"
+
+
 def evidence_row(evidence_id: int = 4) -> tuple[object, ...]:
     now = datetime(2026, 8, 21, tzinfo=UTC)
     return (

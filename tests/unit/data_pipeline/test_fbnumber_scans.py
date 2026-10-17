@@ -2,11 +2,28 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from fb_data_pipeline.importers.fbnumber_scans import (
     import_scan_item,
     parse_facebook_link,
     sync_scans_data_to_repository,
 )
+
+
+@pytest.mark.parametrize(("extra", "address"), [
+    ({}, ""),
+    ({"address": "Ho Chi Minh City, Vietnam"}, "Ho Chi Minh City, Vietnam"),
+])
+def test_scan_import_uses_complete_second_phone_and_unmasked_address(extra, address) -> None:
+    enriched = import_scan_item({
+        "linkFb": "https://fb.com/100123", "number": "0966777*",
+        "number2": "0963005272", "location": "Thà****************", **extra,
+    })
+    assert enriched is not None
+    assert enriched.bundle.phone_1 == "+84963005272"
+    assert len(enriched.bundle.evidence) == 1
+    assert enriched.bundle.profile.address == address
 
 
 def test_parse_facebook_link_formats() -> None:

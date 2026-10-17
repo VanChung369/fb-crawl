@@ -318,6 +318,17 @@ def infer_vietnamese_address(raw_address: str) -> str:
     return close_candidates[0].name
 
 
+def first_complete_address(*values: object) -> str:
+    """Choose an actual address field without inferring redacted characters."""
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if text and not re.search(r"[*＊∗•●×…_]|\.{2,}", text):
+            return text
+    return ""
+
+
 def infer_profile_attributes(
     name: str,
     raw_address: str,

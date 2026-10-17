@@ -47,7 +47,7 @@ class MemoryQuotaRepository:
         return RevealDecision(True, True, reveal_id, self.used, self.limit)
 
     def current_usage(
-        self, account_id: int, period_start: date
+        self, account_id: int, period_start: date, now: datetime
     ) -> int:
         return self.used
 
@@ -99,7 +99,7 @@ def test_same_user_in_same_month_is_not_charged_twice() -> None:
     assert second.used == first.used == 1
 
 
-def test_upgrade_keeps_usage_and_raises_limit() -> None:
+def test_limit_change_within_same_scope_keeps_usage() -> None:
     repository = MemoryQuotaRepository(limit=100)
     repository.used = 100
     quota = ContactQuotaService(repository, ZoneInfo("Asia/Ho_Chi_Minh"))
@@ -121,7 +121,7 @@ def test_current_usage_uses_the_product_month() -> None:
 
 
 def test_postgres_reservation_locks_usage_and_increments_once() -> None:
-    cursor = ScriptedCursor([(100,), (99,), None, (55,), (100,)])
+    cursor = ScriptedCursor([(0, 100), (99,), None, (55,), (100,)])
     repository = PostgresContactQuotaRepository(
         "postgresql://hidden", connect_factory=connect(cursor)
     )
@@ -134,12 +134,12 @@ def test_postgres_reservation_locks_usage_and_increments_once() -> None:
 
 
 def test_postgres_current_usage_reads_without_creating_or_incrementing() -> None:
-    cursor = ScriptedCursor([(2,)])
+    cursor = ScriptedCursor([(0, 100), (2,)])
     repository = PostgresContactQuotaRepository(
         "postgresql://hidden", connect_factory=connect(cursor)
     )
 
-    assert repository.current_usage(7, PERIOD) == 2
+    assert repository.current_usage(7, PERIOD, NOW) == 2
     sql = "\n".join(command for command, _params in cursor.commands)
     assert "SELECT used_contact_count" in sql
     assert "INSERT INTO usage_monthly" not in sql
@@ -147,7 +147,7 @@ def test_postgres_current_usage_reads_without_creating_or_incrementing() -> None
 
 
 def test_existing_reveal_is_allowed_even_when_usage_is_at_limit() -> None:
-    cursor = ScriptedCursor([(100,), (100,), (55,)])
+    cursor = ScriptedCursor([(0, 100), (100,), (55,)])
     repository = PostgresContactQuotaRepository(
         "postgresql://hidden", connect_factory=connect(cursor)
     )
@@ -159,7 +159,7 @@ def test_existing_reveal_is_allowed_even_when_usage_is_at_limit() -> None:
 
 
 def test_new_reveal_is_denied_without_insert_when_usage_is_at_limit() -> None:
-    cursor = ScriptedCursor([(100,), (100,), None])
+    cursor = ScriptedCursor([(0, 100), (100,), None])
     repository = PostgresContactQuotaRepository(
         "postgresql://hidden", connect_factory=connect(cursor)
     )

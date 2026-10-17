@@ -12,6 +12,38 @@ from fb_data_pipeline.core.models import (
 from fb_data_pipeline.providers.fbnumber import FBNumberProvider
 
 
+@pytest.mark.parametrize("fields", [
+    {"number": "0966777*", "number2": "0963005272"},
+    {"phones": ["0966777*", "0963005272"]},
+    {"number": "096300527*", "number2": "0963005272"},
+])
+def test_fbnumber_ignores_masked_first_phone_and_keeps_complete_second_phone(fields) -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search", api_token="test-token",
+        client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(
+            200, json={"data": {"uid": "100123", **fields}},
+        ))),
+    )
+    result = provider.search(FacebookIdentity(uid="100123"))
+    assert [e.normalized_phone for e in result.evidence] == ["+84963005272"]
+    assert result.evidence[0].phone_number == "0963005272"
+
+
+@pytest.mark.parametrize(("extra", "expected"), [
+    ({}, ""),
+    ({"address": "Ho Chi Minh City, Vietnam"}, "Ho Chi Minh City, Vietnam"),
+])
+def test_fbnumber_does_not_guess_masked_address_or_discard_complete_fallback(extra, expected) -> None:
+    provider = FBNumberProvider(
+        api_url="https://api.example.test/v1/phone/search", api_token="test-token",
+        client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(
+            200, json={"data": {"uid": "100123", "number": "0963005272", "location": "Thà****************", **extra}},
+        ))),
+    )
+    result = provider.search(FacebookIdentity(uid="100123"))
+    assert result.profile.address == expected
+
+
 @pytest.mark.parametrize("status", ["error", False, " ERROR "])
 @pytest.mark.parametrize("data", [None, {}, {"uid": "1372263648", "number": "0912345678"}])
 def test_fbnumber_http_201_business_failure_is_not_negative_result(status, data) -> None:
@@ -382,7 +414,7 @@ def test_fbnumber_does_not_retry_rate_limit_with_retry_after() -> None:
     assert sleeps == []
 
 
-def test_fbnumber_infers_masked_address_and_gender() -> None:
+def test_fbnumber_infers_gender_without_guessing_a_masked_address() -> None:
     provider = FBNumberProvider(
         api_url="https://api.example.test/v1/phone/search",
         api_token="secret",
@@ -401,5 +433,5 @@ def test_fbnumber_infers_masked_address_and_gender() -> None:
     )
     result = provider.search(FacebookIdentity(uid="100099999"))
     assert result.status is ProviderStatus.FOUND
-    assert result.profile.address == "Thái Bình"
+    assert result.profile.address == ""
     assert result.profile.gender == "Nam"
