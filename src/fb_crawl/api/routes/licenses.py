@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Callable
 
 from fastapi import APIRouter, Depends, Request
@@ -65,6 +65,7 @@ def create_license_router(
                 if quota is not None
                 else 0
             ),
+            quota_period_start=quota.period_start(now) if quota is not None else None,
         )
 
     return router
@@ -75,11 +76,13 @@ def _client_ip(request: Request) -> str:
 
 
 def _entitlements_response(
-    value: Entitlements, *, monthly_contact_used: int
+    value: Entitlements, *, monthly_contact_used: int,
+    quota_period_start: date | None = None,
 ) -> EntitlementsResponse:
     return EntitlementsResponse(
         monthly_contact_limit=value.monthly_contact_limit,
         monthly_contact_used=monthly_contact_used,
+        quota_period_start=quota_period_start,
         max_devices=value.max_devices,
         allow_group_crawl=value.allow_group_crawl,
         allow_comment_crawl=value.allow_comment_crawl,

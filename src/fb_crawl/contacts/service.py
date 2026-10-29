@@ -26,6 +26,7 @@ from fb_data_pipeline.core.models import (
     UserBundle,
 )
 from fb_data_pipeline.repositories.errors import DatabaseIdentityConflict
+from fb_data_pipeline.core.phone import InvalidPhoneNumber, normalize_phone
 from fb_crawl.maintenance import MaintenanceError, MaintenanceStore
 
 
@@ -94,6 +95,14 @@ class QuotaPort(Protocol):
     ): ...
 
 
+def _has_complete_phone(value: str) -> bool:
+    try:
+        normalize_phone(value)
+    except InvalidPhoneNumber:
+        return False
+    return True
+
+
 class ContactLookupService:
     SAFE_ERROR_CODES = frozenset(
         {
@@ -145,6 +154,8 @@ class ContactLookupService:
             raise PermissionError("contact lookup access denied")
 
     def _is_fresh_found(self, cached: CachedContact, now: datetime) -> bool:
+        if not _has_complete_phone(cached.phone):
+            return False
         return bool(
             cached.found
             and cached.observed_at is not None
@@ -663,7 +674,7 @@ class ContactLookupService:
             if event.outcome is LookupOutcome.FOUND:
                 if (
                     event.revealed_phone_number_id is None
-                    or not event.revealed_phone
+                    or not _has_complete_phone(event.revealed_phone)
                 ):
                     return self._result(
                         event,

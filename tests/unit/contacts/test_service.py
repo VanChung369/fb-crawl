@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
+import pytest
 
 from fb_crawl.accounts.models import (
     Account,
@@ -275,6 +276,34 @@ def service(cached: CachedContact):
         quota,
         pipeline,
     )
+
+
+@pytest.mark.parametrize("invalid_phone", ["+84966777", "+84243825678"])
+def test_truncated_phone_in_legacy_cache_is_not_revealed_or_charged(invalid_phone: str) -> None:
+    cached = CachedContact(
+        CONTACT.id, 9, invalid_phone, NOW - timedelta(minutes=1),
+        state(ProviderStatus.FOUND, NOW + timedelta(days=30)),
+    )
+    lookup, _contacts, quota, pipeline = service(cached)
+    result = lookup.lookup(ACCOUNT, DEVICE, REQUEST, NOW)
+    assert len(pipeline.calls) == 1
+    assert result.phone == ""
+    assert quota.reserve_calls == []
+
+
+@pytest.mark.parametrize("invalid_phone", ["+84966777", "+84243825678"])
+def test_polling_a_legacy_truncated_phone_never_reveals_or_charges_it(invalid_phone: str) -> None:
+    cached = CachedContact(CONTACT.id, 9, invalid_phone, NOW, None)
+    lookup, contacts, quota, _pipeline = service(cached)
+    contacts.created = replace(
+        event(), outcome=LookupOutcome.FOUND, result_source=LookupSource.CACHE,
+        revealed_phone_number_id=9, revealed_phone=invalid_phone, revealed_observed_at=NOW,
+    )
+    result = lookup.get_event(ACCOUNT.id, contacts.created.id)
+    assert result is not None
+    assert result.state is LookupOutcome.FAILED
+    assert result.phone == ""
+    assert quota.reserve_calls == []
 
 
 def test_fresh_cache_never_calls_provider() -> None:

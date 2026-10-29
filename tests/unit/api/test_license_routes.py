@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo
+
+from fb_crawl.entitlements.time import quota_period
 
 from fb_crawl.entitlements.models import Entitlements
 from fb_crawl.licenses.models import (
@@ -27,6 +30,9 @@ class QuotaServiceFake:
     def __init__(self, used: int) -> None:
         self.used = used
         self.calls: list[tuple[int, object]] = []
+
+    def period_start(self, now) -> date:
+        return quota_period(now, ZoneInfo("Asia/Ho_Chi_Minh"))
 
     def current_usage(self, account_id: int, now) -> int:
         self.calls.append((account_id, now))
@@ -99,6 +105,7 @@ def test_user_redeems_license_and_reads_effective_entitlements() -> None:
     assert redeemed.json()["subscription_id"] == 21
     assert effective.json()["monthly_contact_limit"] == 500
     assert effective.json()["monthly_contact_used"] == 2
+    assert effective.json()["quota_period_start"] == "2026-08-01"
     assert effective.json()["allow_group_crawl"] is True
     assert effective.json()["allow_auto_group_crawl"] is True
     assert effective.json()["allow_auto_comment_crawl"] is False
