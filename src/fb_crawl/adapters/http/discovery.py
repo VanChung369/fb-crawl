@@ -11,7 +11,7 @@ from urllib.parse import (
     urlparse,
 )
 
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser
 
 from fb_crawl.adapters.http.client import HttpClient
 from fb_crawl.core.models import TargetKind
@@ -98,7 +98,7 @@ def extract_facebook_urls(
 
     candidates = [
         node.attributes["href"]
-        for node in HTMLParser(decoded).css("a[href]")
+        for node in LexborHTMLParser(decoded).css("a[href]")
         if node.attributes.get("href")
     ]
 
@@ -131,7 +131,7 @@ def extract_duckduckgo_urls(
 ) -> list[str]:
     candidates: list[str] = []
 
-    for node in HTMLParser(text).css("a[href]"):
+    for node in LexborHTMLParser(text).css("a[href]"):
         href = node.attributes.get("href", "")
 
         parsed = urlparse(f"https:{href}" if href.startswith("//") else href)

@@ -8,7 +8,7 @@ from dataclasses import replace
 from urllib.parse import parse_qs, urlparse
 
 
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser
 
 
 from fb_crawl.adapters.http.client import HttpClient
@@ -234,7 +234,7 @@ def extract_uid(
 
 
 def visible_text(html: str) -> str:
-    parser = HTMLParser(html)
+    parser = LexborHTMLParser(html)
 
     for selector in (
         "script",
@@ -251,7 +251,7 @@ def visible_text(html: str) -> str:
 
 
 def tel_link_text(html: str) -> str:
-    parser = HTMLParser(html)
+    parser = LexborHTMLParser(html)
     values: list[str] = []
 
     for node in parser.css("a[href]"):

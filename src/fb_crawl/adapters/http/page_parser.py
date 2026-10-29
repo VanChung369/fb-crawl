@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterator, Mapping
 from typing import Any
 
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser
 
 from fb_crawl.core.exceptions import ParseError
 from fb_crawl.core.models import (
@@ -39,7 +39,7 @@ def _walk_mappings(
 
 
 def _documents(
-    parser: HTMLParser,
+    parser: LexborHTMLParser,
 ) -> list[Mapping[str, Any]]:
     documents: list[Mapping[str, Any]] = []
 
@@ -75,7 +75,7 @@ class PublicPageParser:
         html: str,
         canonical_url: str,
     ) -> PageRecord:
-        parser = HTMLParser(html)
+        parser = LexborHTMLParser(html)
 
         mappings = [
             mapping

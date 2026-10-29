@@ -13,7 +13,7 @@ dependencies = [
     "curl-cffi",
     "httpx>=0.28,<1",
     "psycopg[binary]>=3.2,<4",
-    "selectolax",
+    "selectolax>=0.3.21",
 ]
 
 [project.optional-dependencies]
